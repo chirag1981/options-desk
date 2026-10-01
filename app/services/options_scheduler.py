@@ -25,10 +25,42 @@ def _refresh_worker():
                     break
                 try:
                     raw = fetch_option_chain_data(symbol=sym, force_refresh=True)
-                    analyze_option_desk(raw)
+                    analysis = analyze_option_desk(raw)
+                    
+                    # Auto-record high-conviction signal if generated
+                    opt_buying = analysis.get("option_buying", {})
+                    decision = opt_buying.get("decision", "WAIT")
+                    score = opt_buying.get("setup_score", 0)
+                    trade_plan = opt_buying.get("trade_plan", {})
+                    
+                    if decision in ("CE", "PE") and score >= 75 and trade_plan.get("entry_price", 0) > 0:
+                        from app.services.options_signal_service import record_signal
+                        sig_payload = {
+                            "symbol": sym,
+                            "type": decision,
+                            "contract_name": trade_plan.get("contract_name"),
+                            "strike": trade_plan.get("strike"),
+                            "expiry": trade_plan.get("expiry"),
+                            "spot_price": analysis.get("market_bias", {}).get("spot_price", 0.0),
+                            "entry_price": trade_plan.get("entry_price"),
+                            "stop_loss": trade_plan.get("stop_loss"),
+                            "target_1": trade_plan.get("target_1"),
+                            "target_2": trade_plan.get("target_2"),
+                            "risk_reward": trade_plan.get("risk_reward", "1:2.0"),
+                            "setup_score": score,
+                            "reason": opt_buying.get("reason", "")
+                        }
+                        record_signal(sig_payload, is_paper_trade=False)
                 except Exception as e:
                     log.warning(f"Background refresh for {sym} failed: {e}")
                 time.sleep(2) # Slight stagger between symbols
+
+            # Update live P&L and target/SL hits across all active signals
+            try:
+                from app.services.options_signal_service import update_active_signals
+                update_active_signals()
+            except Exception as e:
+                log.warning(f"Error updating active signals P&L: {e}")
         except Exception as e:
             log.error(f"Error in options background worker: {e}")
 

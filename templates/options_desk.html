@@ -45,7 +45,13 @@
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">PRIMARY MARKET VIEW</span>
-                    <h2 class="card-title">MARKET BIAS</h2>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                        </svg>
+                        MARKET BIAS
+                    </h2>
                 </div>
                 <div class="bias-time-badge" id="bias-time-badge" title="Timestamp when bias last formed">
                     <span>Changed: </span><strong id="bias-last-changed">--:--</strong>
@@ -66,7 +72,7 @@
             <!-- Explainability: Why this bias? -->
             <div class="why-bias-box">
                 <div class="why-header">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="10"></circle>
                         <line x1="12" y1="16" x2="12" y2="12"></line>
                         <line x1="12" y1="8" x2="12.01" y2="8"></line>
@@ -84,7 +90,14 @@
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">OI WEIGHTED TARGETS</span>
-                    <h2 class="card-title">KEY LEVELS</h2>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                            <polyline points="2 17 12 22 22 17"></polyline>
+                            <polyline points="2 12 12 17 22 12"></polyline>
+                        </svg>
+                        KEY LEVELS
+                    </h2>
                 </div>
                 <span class="badge-levels-info">Weighted OI + Writing</span>
             </div>
@@ -134,7 +147,16 @@
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">SELECTIVE DISCIPLINE</span>
-                    <h2 class="card-title">OPTION BUYING</h2>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="22" y1="12" x2="18" y2="12"></line>
+                            <line x1="6" y1="12" x2="2" y2="12"></line>
+                            <line x1="12" y1="6" x2="12" y2="2"></line>
+                            <line x1="12" y1="22" x2="12" y2="18"></line>
+                        </svg>
+                        OPTION BUYING
+                    </h2>
                 </div>
                 <div class="setup-score-badge" id="setup-score-badge" title="Multi-factor setup quality score (Threshold >= 75)">
                     <span>Score: </span><strong class="font-mono" id="setup-score-val">0</strong><span>/100</span>
@@ -190,9 +212,161 @@
                         <div class="check-item"><span class="chk-icon">⏳</span><span>IV & Time</span></div>
                     </div>
                 </div>
+
+                <!-- Paper Trade Quick Action Bar -->
+                <div class="paper-trade-action-bar">
+                    <div class="lots-selector-group">
+                        <label for="paper-lots-input" class="paper-lots-label">LOTS:</label>
+                        <input type="number" id="paper-lots-input" min="1" max="50" value="1" class="desk-input-small" aria-label="Trade Lot Quantity">
+                    </div>
+                    <button type="button" class="btn-paper-trade" id="btn-log-paper-trade" title="Log this setup as a paper trade in the journal">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        <span>Track / Paper Trade</span>
+                    </button>
+                    <span class="paper-trade-msg font-mono" id="paper-trade-msg"></span>
+                </div>
             </div>
         </article>
 
+    </section>
+
+    <!-- SECTION: AUTOMATED SIGNAL TRACKER & PAPER TRADING JOURNAL -->
+    <section class="desk-section signal-journal-section" id="signal-journal-section" aria-label="Signal Performance Tracker and Journal">
+        <div class="section-header-strip">
+            <div class="strip-left">
+                <div class="section-title-wrap">
+                    <span class="pulse-dot green"></span>
+                    <h3 class="section-title">SIGNAL TRACKER & JOURNAL</h3>
+                </div>
+                <span class="section-subtitle">Realtime signal monitoring, profit/loss evaluation, target hits, and paper trade performance analytics</span>
+            </div>
+            
+            <div class="strip-controls">
+                <div class="tab-pill-group">
+                    <button type="button" class="tab-pill active" id="tab-btn-active-signals" data-tab="active">
+                        <span>Active Trades</span>
+                        <span class="tab-badge" id="active-signals-count-badge">0</span>
+                    </button>
+                    <button type="button" class="tab-pill" id="tab-btn-history-signals" data-tab="history">
+                        <span>Trade Journal</span>
+                        <span class="tab-badge" id="history-signals-count-badge">0</span>
+                    </button>
+                </div>
+
+                <button type="button" class="btn-action" id="btn-export-journal-csv" aria-label="Export Trade Journal to CSV" title="Export Journal to CSV">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Export Journal</span>
+                </button>
+
+                <button type="button" class="btn-action btn-danger-soft" id="btn-clear-journal" aria-label="Clear Trade History" title="Clear Completed History">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    <span>Clear Closed</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Metric KPI Cards Bar -->
+        <div class="journal-metrics-grid">
+            <div class="metric-card">
+                <span class="metric-lbl">WIN RATE</span>
+                <div class="metric-val-wrap">
+                    <span class="metric-val font-mono" id="metric-win-rate">0.0%</span>
+                    <span class="metric-sub" id="metric-win-ratio">(0W / 0L)</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <span class="metric-lbl">TOTAL P&L (POINTS)</span>
+                <div class="metric-val-wrap">
+                    <span class="metric-val font-mono" id="metric-total-pts">+0.0 pts</span>
+                    <span class="metric-sub" id="metric-pts-sub">Gross: +0 / -0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <span class="metric-lbl">EST. NET P&L (₹)</span>
+                <div class="metric-val-wrap">
+                    <span class="metric-val font-mono" id="metric-net-inr">₹0.00</span>
+                    <span class="metric-sub">Based on lot size</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <span class="metric-lbl">PROFIT FACTOR</span>
+                <div class="metric-val-wrap">
+                    <span class="metric-val font-mono" id="metric-profit-factor">1.00</span>
+                    <span class="metric-sub" id="metric-rr-sub">Avg Win/Loss Pts</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <span class="metric-lbl">ACTIVE SIGNALS</span>
+                <div class="metric-val-wrap">
+                    <span class="metric-val font-mono" id="metric-active-count">0</span>
+                    <span class="metric-sub">Live monitoring</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 1: Active Signals View -->
+        <div class="journal-tab-pane active" id="pane-active-signals">
+            <div class="table-responsive">
+                <table class="desk-table journal-table" id="active-signals-table">
+                    <thead>
+                        <tr>
+                            <th class="text-left">SIGNAL / TIME</th>
+                            <th class="text-left">CONTRACT</th>
+                            <th class="text-right">ENTRY</th>
+                            <th class="text-right">CURRENT LTP</th>
+                            <th class="text-right">RANGE (L - H)</th>
+                            <th class="text-center">TARGETS & SL</th>
+                            <th class="text-right">LIVE P&L (PTS / %)</th>
+                            <th class="text-right">EST. NET (₹)</th>
+                            <th class="text-center">STATUS</th>
+                            <th class="text-center">ACTION</th>
+                        </tr>
+                    </thead>
+                    <tbody id="active-signals-tbody">
+                        <tr><td colspan="10" class="text-center">No active signals currently open.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 2: Trade History View -->
+        <div class="journal-tab-pane" id="pane-history-signals">
+            <div class="table-responsive">
+                <table class="desk-table journal-table" id="history-signals-table">
+                    <thead>
+                        <tr>
+                            <th class="text-left">TIMESTAMP</th>
+                            <th class="text-left">SYMBOL & CONTRACT</th>
+                            <th class="text-right">ENTRY</th>
+                            <th class="text-right">EXIT</th>
+                            <th class="text-right">P&L (POINTS)</th>
+                            <th class="text-right">P&L (%)</th>
+                            <th class="text-right">NET (₹)</th>
+                            <th class="text-center">OUTCOME</th>
+                            <th class="text-left">TRIGGER REASON</th>
+                            <th class="text-center">ACTION</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-signals-tbody">
+                        <tr><td colspan="10" class="text-center">No completed trades in journal.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </section>
 
     <!-- SECTION 2: OI ACTIVITY & BIG MOVEMENTS (2-COLUMN GRID) -->
@@ -203,7 +377,12 @@
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">WRITING & UNWINDING CLUSTERS</span>
-                    <h2 class="card-title">OI ACTIVITY</h2>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                        </svg>
+                        OI ACTIVITY
+                    </h2>
                 </div>
             </div>
 
@@ -249,7 +428,12 @@
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">LARGE TRADER POSITIONING</span>
-                    <h2 class="card-title">BIG OI MOVEMENT</h2>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        BIG OI MOVEMENT
+                    </h2>
                 </div>
                 <span class="badge-threshold">Sorted by |&Delta;OI|</span>
             </div>

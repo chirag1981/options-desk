@@ -79,3 +79,67 @@ def get_desk_status():
         "engine_status": "OPERATIONAL",
         "auto_refresh_interval_sec": 180,
     })
+
+
+@options_desk_bp.route("/api/options-desk/signals", methods=["GET"])
+def get_signals():
+    """Returns active signals, trade history, and performance metrics."""
+    try:
+        from app.services.options_signal_service import get_signals_summary, update_active_signals
+        # Trigger quick live price refresh on open signals
+        update_active_signals()
+        summary = get_signals_summary()
+        return jsonify({"success": True, "data": summary})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/signals/record", methods=["POST"])
+def record_paper_trade():
+    """Records a manual paper trade or custom signal into the journal."""
+    try:
+        from app.services.options_signal_service import record_signal
+        data = request.get_json() or {}
+        lots = int(data.get("lots", 1))
+        sig = record_signal(data, is_paper_trade=True, lots=lots)
+        if not sig:
+            return jsonify({"success": False, "error": "Invalid trade details or price missing"}), 400
+        return jsonify({"success": True, "signal": sig})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/signals/<int:signal_id>/close", methods=["POST"])
+def close_trade(signal_id):
+    """Manually closes/squares off an active trade."""
+    try:
+        from app.services.options_signal_service import close_signal_manually
+        sig = close_signal_manually(signal_id)
+        if not sig:
+            return jsonify({"success": False, "error": "Signal not found"}), 404
+        return jsonify({"success": True, "signal": sig})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/signals/<int:signal_id>", methods=["DELETE"])
+def remove_signal(signal_id):
+    """Deletes a signal record."""
+    try:
+        from app.services.options_signal_service import delete_signal
+        delete_signal(signal_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/signals/clear-history", methods=["POST"])
+def clear_trade_history():
+    """Clears closed signal history."""
+    try:
+        from app.services.options_signal_service import clear_history
+        clear_history()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+

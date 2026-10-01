@@ -8,15 +8,18 @@
         content="Fyers Options Desk — Real-time options chain analysis, market bias, key levels, and option buying focus">
     <title>{% block title %}Options Desk | Fyers Realtime Analysis{% endblock %}</title>
 
-    <!-- Modern Typography -->
+    <!-- Modern Typography (Inter & Fira Code) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
 
+    <!-- CSRF Token -->
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/options_desk.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/options_desk.css') }}?v=20261001_v4">
     {% block extra_css %}{% endblock %}
 </head>
 
@@ -109,7 +112,7 @@
     </footer>
 
     <!-- Scripts -->
-    <script src="{{ url_for('static', filename='js/options_desk.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/options_desk.js') }}?v=20261001_v3"></script>
     {% block extra_js %}{% endblock %}
 </body>
 

@@ -135,6 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (result.success && result.data) {
                 state.lastData = result.data;
                 renderDashboard(result.data);
+                loadSignalsData();
                 if (liveStatusText) liveStatusText.textContent = result.data.meta.data_status || "LIVE";
             } else {
                 if (liveStatusText) liveStatusText.textContent = "ERROR";
@@ -546,11 +547,520 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ==========================================================================
+    // Signal Tracker & Paper Trading Journal Controller
+    // ==========================================================================
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+
+    // Journal DOM Elements
+    const tabBtnActive = document.getElementById("tab-btn-active-signals");
+    const tabBtnHistory = document.getElementById("tab-btn-history-signals");
+    const paneActive = document.getElementById("pane-active-signals");
+    const paneHistory = document.getElementById("pane-history-signals");
+    const activeCountBadge = document.getElementById("active-signals-count-badge");
+    const historyCountBadge = document.getElementById("history-signals-count-badge");
+
+    const metricWinRate = document.getElementById("metric-win-rate");
+    const metricWinRatio = document.getElementById("metric-win-ratio");
+    const metricTotalPts = document.getElementById("metric-total-pts");
+    const metricPtsSub = document.getElementById("metric-pts-sub");
+    const metricNetInr = document.getElementById("metric-net-inr");
+    const metricProfitFactor = document.getElementById("metric-profit-factor");
+    const metricActiveCount = document.getElementById("metric-active-count");
+
+    const activeSignalsTbody = document.getElementById("active-signals-tbody");
+    const historySignalsTbody = document.getElementById("history-signals-tbody");
+    const btnLogPaperTrade = document.getElementById("btn-log-paper-trade");
+    const paperLotsInput = document.getElementById("paper-lots-input");
+    const paperTradeMsg = document.getElementById("paper-trade-msg");
+    const btnExportJournalCsv = document.getElementById("btn-export-journal-csv");
+    const btnClearJournal = document.getElementById("btn-clear-journal");
+
+    let lastSignalsSummary = null;
+
+    /**
+     * Tab Switcher (Active Trades vs Trade Journal)
+     */
+    if (tabBtnActive && tabBtnHistory && paneActive && paneHistory) {
+        tabBtnActive.addEventListener("click", () => {
+            tabBtnActive.classList.add("active");
+            tabBtnHistory.classList.remove("active");
+            paneActive.classList.add("active");
+            paneHistory.classList.remove("active");
+        });
+
+        tabBtnHistory.addEventListener("click", () => {
+            tabBtnHistory.classList.add("active");
+            tabBtnActive.classList.remove("active");
+            paneHistory.classList.add("active");
+            paneActive.classList.remove("active");
+        });
+    }
+
+    /**
+     * Fetches Signal Summary and Trade History from API
+     */
+    async function loadSignalsData() {
+        try {
+            const resp = await fetch("/api/options-desk/signals");
+            const result = await resp.json();
+            if (result.success && result.data) {
+                lastSignalsSummary = result.data;
+                renderSignalsDashboard(result.data);
+            }
+        } catch (e) {
+            console.error("Error loading signals data:", e);
+        }
+    }
+
+    /**
+     * Renders KPI cards and tables
+     */
+    function renderSignalsDashboard(data) {
+        const active = data.active_signals || [];
+        const history = data.history_signals || [];
+
+        // 1. Badges
+        if (activeCountBadge) activeCountBadge.textContent = active.length;
+        if (historyCountBadge) historyCountBadge.textContent = history.length;
+
+        // Compute Live & Realized P&L directly from signals
+        let openPts = 0;
+        let openInr = 0;
+        active.forEach((s) => {
+            openPts += parseFloat(s.points_pnl || 0);
+            openInr += parseFloat(s.net_pnl_inr || 0);
+        });
+
+        let closedPts = 0;
+        let closedInr = 0;
+        let winCount = 0;
+        let lossCount = 0;
+        let grossWinPts = 0;
+        let grossLossPts = 0;
+
+        history.forEach((s) => {
+            const pts = parseFloat(s.points_pnl || 0);
+            const inr = parseFloat(s.net_pnl_inr || 0);
+            closedPts += pts;
+            closedInr += inr;
+            if (pts > 0) {
+                winCount++;
+                grossWinPts += pts;
+            } else if (pts < 0) {
+                lossCount++;
+                grossLossPts += Math.abs(pts);
+            }
+        });
+
+        const totalCombinedPts = closedPts + openPts;
+        const totalCombinedInr = closedInr + openInr;
+        const closedCount = history.length;
+        const winRate = closedCount > 0 ? ((winCount / closedCount) * 100).toFixed(1) : null;
+        
+        let profitFactor = null;
+        if (grossLossPts > 0) {
+            profitFactor = (grossWinPts / grossLossPts).toFixed(2);
+        } else if (grossWinPts > 0) {
+            profitFactor = grossWinPts.toFixed(2);
+        } else if (closedCount > 0) {
+            profitFactor = "1.00";
+        }
+
+        // 2. Metrics Cards
+        if (metricWinRate) {
+            if (winRate !== null) {
+                metricWinRate.textContent = `${winRate}%`;
+                metricWinRate.className = `metric-val font-mono ${parseFloat(winRate) >= 50 ? "val-win" : "val-loss"}`;
+            } else {
+                metricWinRate.textContent = "--";
+                metricWinRate.className = "metric-val font-mono";
+            }
+        }
+        if (metricWinRatio) {
+            if (closedCount > 0) {
+                metricWinRatio.textContent = `(${winCount}W / ${lossCount}L)`;
+            } else {
+                metricWinRatio.textContent = `(${active.length} Open / 0 Closed)`;
+            }
+        }
+
+        if (metricTotalPts) {
+            const sign = totalCombinedPts >= 0 ? "+" : "";
+            metricTotalPts.textContent = `${sign}${totalCombinedPts.toFixed(1)} pts`;
+            metricTotalPts.className = `metric-val font-mono ${totalCombinedPts > 0 ? "val-win" : (totalCombinedPts < 0 ? "val-loss" : "")}`;
+        }
+        if (metricPtsSub) {
+            const openSign = openPts >= 0 ? "+" : "";
+            const closedSign = closedPts >= 0 ? "+" : "";
+            if (active.length > 0 && closedCount > 0) {
+                metricPtsSub.textContent = `Open: ${openSign}${openPts.toFixed(1)} | Closed: ${closedSign}${closedPts.toFixed(1)} pts`;
+            } else if (active.length > 0) {
+                metricPtsSub.textContent = `Open: ${openSign}${openPts.toFixed(1)} pts (Live)`;
+            } else {
+                metricPtsSub.textContent = `Realized: ${closedSign}${closedPts.toFixed(1)} pts`;
+            }
+        }
+
+        if (metricNetInr) {
+            const sign = totalCombinedInr >= 0 ? "+₹" : "-₹";
+            metricNetInr.textContent = `${sign}${formatIndianNumber(Math.abs(totalCombinedInr).toFixed(2))}`;
+            metricNetInr.className = `metric-val font-mono ${totalCombinedInr > 0 ? "val-win" : (totalCombinedInr < 0 ? "val-loss" : "")}`;
+        }
+
+        if (metricProfitFactor) {
+            if (profitFactor !== null) {
+                metricProfitFactor.textContent = profitFactor;
+            } else {
+                metricProfitFactor.textContent = "--";
+            }
+        }
+
+        if (metricActiveCount) {
+            metricActiveCount.textContent = active.length;
+        }
+
+        // 3. Render Active Signals Table
+        renderActiveSignalsTable(active);
+
+        // 4. Render History Signals Table
+        renderHistorySignalsTable(history);
+    }
+
+    /**
+     * Renders Active Signals Table
+     */
+    function renderActiveSignalsTable(activeList) {
+        if (!activeSignalsTbody) return;
+        if (activeList.length === 0) {
+            activeSignalsTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted);">No active signals currently open. Triggered setups will appear here in realtime.</td></tr>`;
+            return;
+        }
+
+        activeSignalsTbody.innerHTML = "";
+        activeList.forEach((sig) => {
+            const tr = document.createElement("tr");
+            const isProfit = (sig.points_pnl || 0) >= 0;
+            const pnlPtsClass = isProfit ? "val-pos" : "val-neg";
+            const ptsSign = isProfit ? "+" : "";
+            const inrSign = (sig.net_pnl_inr || 0) >= 0 ? "+₹" : "-₹";
+
+            let statusTagClass = "status-tag-active";
+            let statusLabel = "ACTIVE";
+            if (sig.status === "TARGET_1_HIT") {
+                statusTagClass = "status-tag-t1";
+                statusLabel = "TARGET 1 HIT";
+            }
+
+            tr.innerHTML = `
+                <td class="text-left font-mono">
+                    <strong>#${sig.id}</strong>
+                    <div style="font-size:0.7rem;color:var(--text-muted);">${sig.created_at.split(" ")[1] || sig.created_at}</div>
+                </td>
+                <td class="text-left">
+                    <span class="side-pill ${sig.signal_type}">${sig.symbol}</span>
+                    <strong class="font-mono" style="margin-left:0.35rem;">${sig.contract_name}</strong>
+                    ${sig.is_paper_trade ? '<small style="color:var(--cyan-accent);font-size:0.65rem;">(Paper)</small>' : ''}
+                </td>
+                <td class="text-right font-mono">₹${sig.entry_price.toFixed(2)}</td>
+                <td class="text-right font-mono" style="font-weight:700;">₹${sig.current_price.toFixed(2)}</td>
+                <td class="text-right font-mono" style="font-size:0.75rem;color:var(--text-muted);">
+                    L: ₹${sig.lowest_price.toFixed(1)} &bull; H: ₹${sig.highest_price.toFixed(1)}
+                </td>
+                <td class="text-center">
+                    <div class="targets-chip-wrap font-mono">
+                        <span class="chip-sl" title="Stop Loss">SL: ${sig.stop_loss}</span>
+                        <span class="chip-t1" title="Target 1">T1: ${sig.target_1}</span>
+                        <span class="chip-t2" title="Target 2">T2: ${sig.target_2}</span>
+                    </div>
+                </td>
+                <td class="text-right font-mono ${pnlPtsClass}" style="font-weight:700;">
+                    ${ptsSign}${sig.points_pnl.toFixed(2)} (${ptsSign}${sig.pnl_pct.toFixed(1)}%)
+                </td>
+                <td class="text-right font-mono ${pnlPtsClass}" style="font-weight:700;">
+                    ${inrSign}${formatIndianNumber(Math.abs(sig.net_pnl_inr).toFixed(2))}
+                    <div style="font-size:0.65rem;color:var(--text-muted);">${sig.lots} Lot (${sig.lot_size * sig.lots} Qty)</div>
+                </td>
+                <td class="text-center">
+                    <span class="status-tag ${statusTagClass}">${statusLabel}</span>
+                </td>
+                <td class="text-center">
+                    <button type="button" class="btn-square-off" data-id="${sig.id}" title="Square off at current LTP">
+                        Square Off
+                    </button>
+                </td>
+            `;
+            activeSignalsTbody.appendChild(tr);
+        });
+
+        // Attach square off events
+        activeSignalsTbody.querySelectorAll(".btn-square-off").forEach((btn) => {
+            btn.addEventListener("click", async (e) => {
+                const id = e.target.getAttribute("data-id");
+                if (confirm(`Square off Signal #${id} at current market price?`)) {
+                    await closeTrade(id);
+                }
+            });
+        });
+    }
+
+    /**
+     * Renders Trade History Table
+     */
+    function renderHistorySignalsTable(historyList) {
+        if (!historySignalsTbody) return;
+        if (historyList.length === 0) {
+            historySignalsTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted);">No completed trades in journal history.</td></tr>`;
+            return;
+        }
+
+        historySignalsTbody.innerHTML = "";
+        historyList.forEach((sig) => {
+            const tr = document.createElement("tr");
+            const isProfit = (sig.points_pnl || 0) >= 0;
+            const pnlPtsClass = isProfit ? "val-pos" : "val-neg";
+            const ptsSign = isProfit ? "+" : "";
+            const inrSign = (sig.net_pnl_inr || 0) >= 0 ? "+₹" : "-₹";
+
+            let outcomeClass = "status-tag-manual";
+            let outcomeText = sig.status.replace("_", " ");
+            if (sig.status === "TARGET_2_HIT") {
+                outcomeClass = "status-tag-t2";
+                outcomeText = "🎯 TARGET 2 HIT";
+            } else if (sig.status === "TARGET_1_HIT") {
+                outcomeClass = "status-tag-t1";
+                outcomeText = "🎯 TARGET 1 HIT";
+            } else if (sig.status === "SL_HIT") {
+                outcomeClass = "status-tag-sl";
+                outcomeText = "🛑 SL HIT";
+            } else if (sig.status === "EOD_CLOSED") {
+                outcomeClass = "status-tag-eod";
+                outcomeText = "⏱ EOD CLOSED";
+            } else if (sig.status === "MANUALLY_CLOSED") {
+                outcomeClass = "status-tag-manual";
+                outcomeText = "✋ SQUARED OFF";
+            }
+
+            tr.innerHTML = `
+                <td class="text-left font-mono" style="font-size:0.75rem;">
+                    <div>${sig.created_at.split(" ")[0]}</div>
+                    <div style="color:var(--text-muted);">${sig.created_at.split(" ")[1] || ""}</div>
+                </td>
+                <td class="text-left">
+                    <span class="side-pill ${sig.signal_type}">${sig.symbol}</span>
+                    <strong class="font-mono" style="margin-left:0.35rem;">${sig.contract_name}</strong>
+                </td>
+                <td class="text-right font-mono">₹${sig.entry_price.toFixed(2)}</td>
+                <td class="text-right font-mono" style="font-weight:600;">₹${sig.exit_price ? sig.exit_price.toFixed(2) : sig.current_price.toFixed(2)}</td>
+                <td class="text-right font-mono ${pnlPtsClass}" style="font-weight:700;">
+                    ${ptsSign}${sig.points_pnl.toFixed(2)} pts
+                </td>
+                <td class="text-right font-mono ${pnlPtsClass}" style="font-weight:700;">
+                    ${ptsSign}${sig.pnl_pct.toFixed(1)}%
+                </td>
+                <td class="text-right font-mono ${pnlPtsClass}" style="font-weight:700;">
+                    ${inrSign}${formatIndianNumber(Math.abs(sig.net_pnl_inr).toFixed(2))}
+                </td>
+                <td class="text-center">
+                    <span class="status-tag ${outcomeClass}">${outcomeText}</span>
+                </td>
+                <td class="text-left" style="font-size:0.75rem;color:var(--text-secondary);max-width:240px;">
+                    ${sig.trigger_reason || "Multi-factor option setup"}
+                </td>
+                <td class="text-center">
+                    <button type="button" class="btn-del-record" data-id="${sig.id}" title="Delete trade record">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </td>
+            `;
+            historySignalsTbody.appendChild(tr);
+        });
+
+        // Attach delete events
+        historySignalsTbody.querySelectorAll(".btn-del-record").forEach((btn) => {
+            btn.addEventListener("click", async (e) => {
+                const id = btn.getAttribute("data-id");
+                if (confirm(`Delete Signal #${id} from journal history?`)) {
+                    await deleteSignal(id);
+                }
+            });
+        });
+    }
+
+    /**
+     * Manually close trade
+     */
+    async function closeTrade(id) {
+        try {
+            const resp = await fetch(`/api/options-desk/signals/${id}/close`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken,
+                },
+            });
+            const res = await resp.json();
+            if (res.success) {
+                await loadSignalsData();
+            } else {
+                alert(`Error closing trade: ${res.error}`);
+            }
+        } catch (e) {
+            console.error("Failed to close trade:", e);
+        }
+    }
+
+    /**
+     * Delete trade record
+     */
+    async function deleteSignal(id) {
+        try {
+            const resp = await fetch(`/api/options-desk/signals/${id}`, {
+                method: "DELETE",
+                headers: {
+                    "X-CSRFToken": csrfToken,
+                },
+            });
+            const res = await resp.json();
+            if (res.success) {
+                await loadSignalsData();
+            }
+        } catch (e) {
+            console.error("Failed to delete signal:", e);
+        }
+    }
+
+    /**
+     * Log Paper Trade Button Action
+     */
+    if (btnLogPaperTrade) {
+        btnLogPaperTrade.addEventListener("click", async () => {
+            if (!state.lastData) {
+                alert("Please wait for market data to load.");
+                return;
+            }
+
+            const optBuying = state.lastData.option_buying || state.lastData.option_focus || {};
+            const tradePlan = optBuying.trade_plan || {};
+            const bias = state.lastData.market_bias || {};
+
+            if (!tradePlan.entry_price || tradePlan.entry_price <= 0) {
+                alert("No active option contract price available to trade.");
+                return;
+            }
+
+            const lots = parseInt(paperLotsInput ? paperLotsInput.value : "1", 10) || 1;
+            const payload = {
+                symbol: state.symbol,
+                type: tradePlan.type || optBuying.decision || "CE",
+                contract_name: tradePlan.contract_name,
+                strike: tradePlan.strike,
+                expiry: tradePlan.expiry,
+                spot_price: bias.spot_price,
+                entry_price: tradePlan.entry_price,
+                stop_loss: tradePlan.stop_loss,
+                target_1: tradePlan.target_1,
+                target_2: tradePlan.target_2,
+                risk_reward: tradePlan.risk_reward || "1:2.0",
+                setup_score: optBuying.setup_score || 0,
+                reason: optBuying.reason || "Manual Paper Trade Setup",
+                lots: lots,
+            };
+
+            try {
+                const resp = await fetch("/api/options-desk/signals/record", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfToken,
+                    },
+                    body: JSON.stringify(payload),
+                });
+                const res = await resp.json();
+                if (res.success) {
+                    if (paperTradeMsg) {
+                        paperTradeMsg.textContent = `✓ Logged ${tradePlan.contract_name} (${lots} Lot)!`;
+                        setTimeout(() => { paperTradeMsg.textContent = ""; }, 4000);
+                    }
+                    await loadSignalsData();
+                } else {
+                    alert(`Error logging trade: ${res.error}`);
+                }
+            } catch (err) {
+                console.error("Failed to log paper trade:", err);
+            }
+        });
+    }
+
+    /**
+     * Clear Closed Journal History Action
+     */
+    if (btnClearJournal) {
+        btnClearJournal.addEventListener("click", async () => {
+            if (confirm("Are you sure you want to clear all closed trade history from the journal?")) {
+                try {
+                    const resp = await fetch("/api/options-desk/signals/clear-history", {
+                        method: "POST",
+                        headers: { "X-CSRFToken": csrfToken },
+                    });
+                    const res = await resp.json();
+                    if (res.success) {
+                        await loadSignalsData();
+                    }
+                } catch (e) {
+                    console.error("Failed to clear journal history:", e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Export Trade Journal to CSV
+     */
+    if (btnExportJournalCsv) {
+        btnExportJournalCsv.addEventListener("click", () => {
+            if (!lastSignalsSummary || !lastSignalsSummary.history_signals) {
+                alert("No trade history available to export.");
+                return;
+            }
+            const history = lastSignalsSummary.history_signals;
+            const headers = [
+                "ID", "SYMBOL", "TYPE", "CONTRACT", "STRIKE", "EXPIRY",
+                "ENTRY_PRICE", "EXIT_PRICE", "STOP_LOSS", "TARGET_1", "TARGET_2",
+                "POINTS_PNL", "PNL_PCT", "LOTS", "LOT_SIZE", "NET_PNL_INR",
+                "STATUS", "TRIGGER_REASON", "CREATED_AT", "EXIT_TIME"
+            ];
+
+            const rows = history.map((s) => [
+                s.id, s.symbol, s.signal_type, `"${s.contract_name}"`, s.strike, s.expiry,
+                s.entry_price, s.exit_price || s.current_price, s.stop_loss, s.target_1, s.target_2,
+                s.points_pnl, s.pnl_pct, s.lots, s.lot_size, s.net_pnl_inr,
+                `"${s.status}"`, `"${(s.trigger_reason || "").replace(/"/g, '""')}"`,
+                `"${s.created_at}"`, `"${s.exit_time || ""}"`
+            ]);
+
+            let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `Option_Desk_Trade_Journal_${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
+
+    // Export Chain CSV Handler
     if (btnExportCsv) {
         btnExportCsv.addEventListener("click", exportChainToCsv);
     }
 
     // Initial Load & Start Timer
     loadOptionsDeskData(false);
+    loadSignalsData();
     startCountdown();
 });
+
