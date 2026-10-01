@@ -1013,11 +1013,40 @@ body.desk-body {
 .tile-call-unwind { border-left: 3px solid var(--bullish-green); }
 .tile-put-unwind { border-left: 3px solid var(--bearish-red); }
 
+.act-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.15rem;
+}
+
 .act-label {
     font-size: 0.58rem;
     font-weight: 800;
     color: var(--text-muted);
     letter-spacing: 0.05em;
+}
+
+.act-dir-pill {
+    font-size: 0.58rem;
+    font-weight: 700;
+    padding: 0.08rem 0.3rem;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.act-dir-pill.dir-bullish {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.act-dir-pill.dir-bearish {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
 }
 
 .act-strike {
@@ -1080,6 +1109,12 @@ body.desk-body {
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.big-oi-item:hover {
+    background: #ffffff;
+    border-color: var(--gold-primary);
 }
 
 .big-oi-strike-side {
@@ -1123,9 +1158,31 @@ body.desk-body {
 .big-oi-delta.neg { color: var(--bearish-red); }
 
 .big-oi-tag {
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.big-oi-tag.tag-bullish {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.big-oi-tag.tag-bearish {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
+}
+
+.big-oi-tag.tag-neutral {
+    background: var(--bg-surface-elevated);
     color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
 }
 
 /* ==========================================================================

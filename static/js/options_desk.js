@@ -356,18 +356,44 @@ document.addEventListener("DOMContentLoaded", () => {
             row.className = "big-oi-item";
 
             const sideClass = item.side === "CE" ? "CE" : "PE";
-            const deltaClass = item.change_oi >= 0 ? "pos" : "neg";
+            const isAddition = item.change_oi >= 0;
+            const deltaClass = isAddition ? "pos" : "neg";
+            const deltaSign = isAddition ? "▲ +" : "▼ ";
 
+            // Format directional impact tag
+            let tagClass = "tag-neutral";
+            let tagHtml = item.activity;
+            let rowTitle = "";
+
+            if (item.activity.includes("CALL WRITING") || (item.side === "CE" && item.change_oi > 0)) {
+                tagClass = "tag-bearish";
+                tagHtml = `<span class="dir-icon">🔻</span> Resistance Build`;
+                rowTitle = "Call Writing: Institutional resistance building (Bearish Ceiling)";
+            } else if (item.activity.includes("PUT WRITING") || (item.side === "PE" && item.change_oi > 0)) {
+                tagClass = "tag-bullish";
+                tagHtml = `<span class="dir-icon">🔺</span> Support Build`;
+                rowTitle = "Put Writing: Institutional support building (Bullish Floor)";
+            } else if (item.activity.includes("CALL UNWINDING") || (item.side === "CE" && item.change_oi < 0)) {
+                tagClass = "tag-bullish";
+                tagHtml = `<span class="dir-icon">↗️</span> Short Covering`;
+                rowTitle = "Call Unwinding: Call sellers exiting (Bulls pushing higher)";
+            } else if (item.activity.includes("PUT UNWINDING") || (item.side === "PE" && item.change_oi < 0)) {
+                tagClass = "tag-bearish";
+                tagHtml = `<span class="dir-icon">↘️</span> Support Cracking`;
+                rowTitle = "Put Unwinding: Put sellers exiting (Downside risk increasing)";
+            }
+
+            row.setAttribute("title", rowTitle);
             row.innerHTML = `
                 <div class="big-oi-strike-side">
                     <span class="side-pill ${sideClass}">${item.side}</span>
-                    <span class="big-oi-strike">${formatIndianNumber(item.strike)}</span>
+                    <span class="big-oi-strike font-mono">${formatIndianNumber(item.strike)}</span>
                 </div>
-                <div class="big-oi-delta ${deltaClass}">
-                    ${item.change_oi_formatted} OI
+                <div class="big-oi-delta ${deltaClass} font-mono">
+                    ${deltaSign}${item.change_oi_formatted.replace("+", "").replace("-", "")} OI
                 </div>
-                <div class="big-oi-tag">
-                    ${item.activity}
+                <div class="big-oi-tag ${tagClass}">
+                    ${tagHtml}
                 </div>
             `;
             bigOiList.appendChild(row);
