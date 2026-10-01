@@ -49,6 +49,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const levelAtmDist = document.getElementById("level-atm-dist");
     const levelS1 = document.getElementById("level-s1");
     const levelS2 = document.getElementById("level-s2");
+    const badgeExpectedRange = document.getElementById("badge-expected-range");
+    const ladderSLbl = document.getElementById("ladder-s-lbl");
+    const ladderSpotLbl = document.getElementById("ladder-spot-lbl");
+    const ladderRLbl = document.getElementById("ladder-r-lbl");
+    const ladderSpotPin = document.getElementById("ladder-spot-pin");
+    const levelsSummaryText = document.getElementById("levels-summary-text");
+
+    // Institutional Stance Dominance Elements
+    const instDomTitle = document.getElementById("inst-dom-title");
+    const instDomPct = document.getElementById("inst-dom-pct");
+    const domBarCe = document.getElementById("dom-bar-ce");
+    const domBarPe = document.getElementById("dom-bar-pe");
 
     // Option Buying & Setup Score Elements
     const cardOptionFocus = document.getElementById("card-option-focus");
@@ -250,16 +262,53 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // 3. Card 2: Key Levels
-        if (levelR2) levelR2.textContent = formatIndianNumber(levels.resistance_2);
-        if (levelR1) levelR1.textContent = formatIndianNumber(levels.resistance_1);
-        if (levelAtm) levelAtm.textContent = formatIndianNumber(levels.atm_strike);
-        if (levelS1) levelS1.textContent = formatIndianNumber(levels.support_1);
-        if (levelS2) levelS2.textContent = formatIndianNumber(levels.support_2);
+        const r1 = levels.resistance_1 || 0;
+        const r2 = levels.resistance_2 || 0;
+        const s1 = levels.support_1 || 0;
+        const s2 = levels.support_2 || 0;
+        const atm = levels.atm_strike || 0;
+        const spot = bias.spot_price || 0;
 
-        if (levelAtmDist && bias.spot_price && levels.atm_strike) {
-            const dist = (bias.spot_price - levels.atm_strike).toFixed(1);
+        if (levelR2) levelR2.textContent = formatIndianNumber(r2);
+        if (levelR1) levelR1.textContent = formatIndianNumber(r1);
+        if (levelAtm) levelAtm.textContent = formatIndianNumber(atm);
+        if (levelS1) levelS1.textContent = formatIndianNumber(s1);
+        if (levelS2) levelS2.textContent = formatIndianNumber(s2);
+
+        if (levelAtmDist && spot && atm) {
+            const dist = (spot - atm).toFixed(1);
             const distSign = dist >= 0 ? "+" : "";
             levelAtmDist.textContent = `Spot Distance: ${distSign}${dist} pts`;
+        }
+
+        // Visual Price Range Ladder & Expected Range
+        const rangePts = Math.abs(r1 - s1);
+        if (badgeExpectedRange) {
+            badgeExpectedRange.textContent = `Range: ${formatIndianNumber(s1)} - ${formatIndianNumber(r1)} (${rangePts} pts)`;
+        }
+        if (ladderSLbl) ladderSLbl.textContent = `S1: ${formatIndianNumber(s1)}`;
+        if (ladderRLbl) ladderRLbl.textContent = `R1: ${formatIndianNumber(r1)}`;
+        if (ladderSpotLbl) ladderSpotLbl.textContent = `📍 Spot: ${formatIndianNumber(spot)}`;
+
+        if (ladderSpotPin && r1 > s1 && spot > 0) {
+            let pinPct = ((spot - s1) / (r1 - s1)) * 100;
+            pinPct = Math.max(0, Math.min(100, pinPct));
+            ladderSpotPin.style.left = `${pinPct}%`;
+        }
+
+        // Plain English 1-Liner Takeaway
+        if (levelsSummaryText) {
+            if (spot >= r1 && r1 > 0) {
+                levelsSummaryText.innerHTML = `<strong>Breakout Alert:</strong> Spot (${formatIndianNumber(spot)}) is crossing R1 (${formatIndianNumber(r1)}). Upside target is R2 (${formatIndianNumber(r2)}).`;
+            } else if (spot <= s1 && s1 > 0) {
+                levelsSummaryText.innerHTML = `<strong>Breakdown Alert:</strong> Spot (${formatIndianNumber(spot)}) is breaching S1 (${formatIndianNumber(s1)}). Downside slide towards S2 (${formatIndianNumber(s2)}).`;
+            } else if (r1 > 0 && s1 > 0) {
+                const distR = (r1 - spot).toFixed(1);
+                const distS = (spot - s1).toFixed(1);
+                levelsSummaryText.innerHTML = `<strong>Channel:</strong> Spot is ${distS} pts above S1 Support (${formatIndianNumber(s1)}) and ${distR} pts below R1 Ceiling (${formatIndianNumber(r1)}).`;
+            } else {
+                levelsSummaryText.textContent = "Analyzing key level breakout & support zones...";
+            }
         }
 
         // 4. Card 3: Option Buying Focus & Execution Plan
@@ -347,8 +396,43 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!bigOiList) return;
         if (movements.length === 0) {
             bigOiList.innerHTML = `<div class="empty-state">No large OI movements meeting threshold.</div>`;
+            if (instDomPct) instDomPct.textContent = "No large movements";
             return;
         }
+
+        // Calculate Institutional Dominance (% CE vs % PE)
+        let ceOiSum = 0;
+        let peOiSum = 0;
+        movements.forEach((item) => {
+            const chg = Math.abs(item.change_oi || 0);
+            if (item.side === "CE" || (item.activity && item.activity.includes("CALL"))) {
+                ceOiSum += chg;
+            } else {
+                peOiSum += chg;
+            }
+        });
+
+        const totalMove = ceOiSum + peOiSum;
+        const cePct = totalMove > 0 ? Math.round((ceOiSum / totalMove) * 100) : 50;
+        const pePct = 100 - cePct;
+
+        if (domBarCe) domBarCe.style.width = `${cePct}%`;
+        if (domBarPe) domBarPe.style.width = `${pePct}%`;
+
+        if (instDomPct) {
+            if (cePct >= 65) {
+                instDomPct.textContent = `🔴 Bears Dominating (${cePct}% Call Resistance)`;
+                instDomPct.className = "inst-dom-pct val-loss";
+            } else if (pePct >= 65) {
+                instDomPct.textContent = `🟢 Bulls Dominating (${pePct}% Put Support)`;
+                instDomPct.className = "inst-dom-pct val-win";
+            } else {
+                instDomPct.textContent = `🟡 Balanced Stance (${cePct}% CE / ${pePct}% PE)`;
+                instDomPct.className = "inst-dom-pct";
+            }
+        }
+
+        const maxOi = Math.max(...movements.map((m) => Math.abs(m.change_oi || 1)), 1);
 
         bigOiList.innerHTML = "";
         movements.forEach((item) => {
@@ -359,6 +443,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const isAddition = item.change_oi >= 0;
             const deltaClass = isAddition ? "pos" : "neg";
             const deltaSign = isAddition ? "▲ +" : "▼ ";
+            const widthPct = Math.min(100, Math.max(10, Math.round((Math.abs(item.change_oi) / maxOi) * 100)));
+            row.style.setProperty("--bar-width", `${widthPct}%`);
 
             // Format directional impact tag
             let tagClass = "tag-neutral";

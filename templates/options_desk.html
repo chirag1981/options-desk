@@ -99,7 +99,7 @@
                         KEY LEVELS
                     </h2>
                 </div>
-                <span class="badge-levels-info">Weighted OI + Writing</span>
+                <span class="badge-expected-range font-mono" id="badge-expected-range">Range: S1 - R1</span>
             </div>
 
             <div class="levels-container">
@@ -139,6 +139,27 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Visual Price Range Ladder Bar -->
+            <div class="price-ladder-container">
+                <div class="ladder-labels">
+                    <span class="ladder-lbl-s font-mono" id="ladder-s-lbl">S1: --</span>
+                    <span class="ladder-lbl-spot font-mono" id="ladder-spot-lbl">📍 Spot: --</span>
+                    <span class="ladder-lbl-r font-mono" id="ladder-r-lbl">R1: --</span>
+                </div>
+                <div class="ladder-track">
+                    <div class="ladder-zone-sup" title="Support Base Zone"></div>
+                    <div class="ladder-zone-mid" title="Intraday Trading Channel"></div>
+                    <div class="ladder-zone-res" title="Resistance Ceiling Zone"></div>
+                    <div class="ladder-spot-pin" id="ladder-spot-pin" style="left: 50%;" title="Current Spot Price Relative to Channel"></div>
+                </div>
+            </div>
+
+            <!-- Plain English 1-Liner Takeaway -->
+            <div class="levels-summary-strip" id="levels-summary-strip">
+                <span class="summary-icon">💡</span>
+                <span id="levels-summary-text">Evaluating key level breakout & support zones...</span>
             </div>
         </article>
 
@@ -448,6 +469,18 @@
                     </h2>
                 </div>
                 <span class="badge-threshold">Sorted by |&Delta;OI|</span>
+            </div>
+
+            <!-- Institutional Stance Dominance Meter -->
+            <div class="inst-dominance-strip" id="inst-dominance-strip">
+                <div class="inst-dom-header">
+                    <span class="inst-dom-title" id="inst-dom-title">INSTITUTIONAL POSITIONING</span>
+                    <span class="inst-dom-pct font-mono" id="inst-dom-pct">Analyzing flow...</span>
+                </div>
+                <div class="inst-dom-bar-wrap">
+                    <div class="dom-bar-ce" id="dom-bar-ce" style="width: 50%;" title="Call Writing / Bearish Resistance Positioning"></div>
+                    <div class="dom-bar-pe" id="dom-bar-pe" style="width: 50%;" title="Put Writing / Bullish Support Positioning"></div>
+                </div>
             </div>
 
             <div class="big-oi-list" id="big-oi-list">

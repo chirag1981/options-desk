@@ -602,6 +602,95 @@ body.desk-body {
     color: var(--text-muted);
 }
 
+.badge-expected-range {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--gold-dark);
+    background: var(--gold-light);
+    border: 1px solid var(--gold-primary);
+    padding: 0.12rem 0.4rem;
+    border-radius: var(--radius-sm);
+}
+
+.price-ladder-container {
+    margin-top: 0.5rem;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.ladder-labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.ladder-lbl-s { color: var(--bullish-green); }
+.ladder-lbl-spot { color: var(--gold-dark); font-weight: 800; }
+.ladder-lbl-r { color: var(--bearish-red); }
+
+.ladder-track {
+    position: relative;
+    height: 8px;
+    background: var(--bg-surface-alt);
+    border-radius: 4px;
+    display: flex;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+}
+
+.ladder-zone-sup {
+    width: 25%;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.4), rgba(16, 185, 129, 0.1));
+}
+
+.ladder-zone-mid {
+    width: 50%;
+    background: rgba(217, 119, 6, 0.08);
+}
+
+.ladder-zone-res {
+    width: 25%;
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.4));
+}
+
+.ladder-spot-pin {
+    position: absolute;
+    top: -2px;
+    width: 12px;
+    height: 12px;
+    background: var(--gold-primary);
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    transition: left 0.3s ease;
+}
+
+.levels-summary-strip {
+    margin-top: 0.45rem;
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    background: var(--bg-surface-alt);
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.55rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    line-height: 1.35;
+}
+
+.levels-summary-strip strong {
+    color: var(--gold-dark);
+}
+
 /* CARD 3: Option Buying & Focus (Compact) */
 .setup-score-badge {
     background: var(--gold-light);
@@ -1095,6 +1184,54 @@ body.desk-body {
     font-weight: 600;
 }
 
+.inst-dominance-strip {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.45rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.inst-dom-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.inst-dom-title {
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.inst-dom-pct {
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.inst-dom-bar-wrap {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg-surface-alt);
+    overflow: hidden;
+    display: flex;
+    border: 1px solid var(--border-subtle);
+}
+
+.dom-bar-ce {
+    background: var(--bearish-red);
+    transition: width 0.4s ease;
+}
+
+.dom-bar-pe {
+    background: var(--bullish-green);
+    transition: width 0.4s ease;
+}
+
 .big-oi-list {
     display: flex;
     flex-direction: column;
@@ -1102,6 +1239,8 @@ body.desk-body {
 }
 
 .big-oi-item {
+    position: relative;
+    overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1110,6 +1249,19 @@ body.desk-body {
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     transition: background 0.15s ease, border-color 0.15s ease;
+    z-index: 1;
+}
+
+.big-oi-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--bar-width, 0%);
+    background: linear-gradient(90deg, rgba(217, 119, 6, 0.08), rgba(217, 119, 6, 0.02));
+    z-index: -1;
+    transition: width 0.4s ease;
 }
 
 .big-oi-item:hover {
