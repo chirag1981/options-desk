@@ -636,6 +636,7 @@ document.addEventListener("DOMContentLoaded", () => {
         let closedInr = 0;
         let winCount = 0;
         let lossCount = 0;
+        let beCount = 0;
         let grossWinPts = 0;
         let grossLossPts = 0;
 
@@ -650,6 +651,8 @@ document.addEventListener("DOMContentLoaded", () => {
             } else if (pts < 0) {
                 lossCount++;
                 grossLossPts += Math.abs(pts);
+            } else {
+                beCount++;
             }
         });
 
@@ -679,7 +682,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (metricWinRatio) {
             if (closedCount > 0) {
-                metricWinRatio.textContent = `(${winCount}W / ${lossCount}L)`;
+                metricWinRatio.textContent = beCount > 0 
+                    ? `(${winCount}W / ${lossCount}L / ${beCount}BE)`
+                    : `(${winCount}W / ${lossCount}L)`;
             } else {
                 metricWinRatio.textContent = `(${active.length} Open / 0 Closed)`;
             }
@@ -827,12 +832,18 @@ document.addEventListener("DOMContentLoaded", () => {
             if (sig.status === "TARGET_2_HIT") {
                 outcomeClass = "status-tag-t2";
                 outcomeText = "🎯 TARGET 2 HIT";
+            } else if (sig.status === "TSL_HIT") {
+                outcomeClass = "status-tag-tsl";
+                outcomeText = "🛡️ T1 BOOKED & TSL";
             } else if (sig.status === "TARGET_1_HIT") {
                 outcomeClass = "status-tag-t1";
                 outcomeText = "🎯 TARGET 1 HIT";
             } else if (sig.status === "SL_HIT") {
                 outcomeClass = "status-tag-sl";
                 outcomeText = "🛑 SL HIT";
+            } else if (sig.status === "TIME_STOP_EXIT") {
+                outcomeClass = "status-tag-timestop";
+                outcomeText = "⏱ TIME STOP";
             } else if (sig.status === "EOD_CLOSED") {
                 outcomeClass = "status-tag-eod";
                 outcomeText = "⏱ EOD CLOSED";

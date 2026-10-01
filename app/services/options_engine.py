@@ -64,19 +64,20 @@ def evaluate_iv_and_time_filter(atm_iv: float) -> dict:
     total_mins = hour * 60 + minute
 
     # Trading Session Windows (IST)
-    # 09:15 = 555 mins, 09:30 = 570 mins, 14:45 = 885 mins, 15:30 = 930 mins
+    # 09:15 = 555 mins, 09:30 = 570 mins, 14:00 = 840 mins, 15:30 = 930 mins
+    # Fresh option buying is strictly prohibited after 14:00 (2:00 PM) to avoid severe late-day Theta decay
     if total_mins < 570: # 09:15 - 09:30
         time_status = "OPENING CHOP (09:15-09:30)"
         time_favorable = False
-        time_note = "Opening volatility window. Allow market to settle."
-    elif total_mins > 885: # 14:45 - 15:30
-        time_status = "LATE SESSION DECAY"
+        time_note = "Opening volatility window. Allow market structure to settle."
+    elif total_mins >= 840: # 14:00 - 15:30 (Post 2:00 PM)
+        time_status = "LATE SESSION THETA DECAY (Post 14:00)"
         time_favorable = False
-        time_note = "Late afternoon session. Rapid theta decay risk."
+        time_note = "Late afternoon session. Exponential Theta decay and squaring-off chop. No fresh buying."
     else:
-        time_status = "PRIME TRADING WINDOW"
+        time_status = "PRIME TRADING WINDOW (09:30-14:00)"
         time_favorable = True
-        time_note = "Optimal liquidity and trend follow-through window."
+        time_note = "Optimal liquidity and trend follow-through window for option buyers."
 
     # IV Condition
     if atm_iv <= 0:
@@ -338,17 +339,19 @@ def analyze_option_desk(market_data: dict) -> dict:
 
     # 6. Strict Multi-Factor Confirmation Checklist
     # Factors evaluated for CE:
+    # Requires true proximity/breakout above R1/breakout level, not just minor ATM bounce
     ce_direction_ok = (final_bias == "BULLISH" and bullish_score >= 60.0)
-    ce_level_ok = (spot >= (s1 - 5.0) and (spot >= (r1 - step * 0.4) or spot_diff >= 0))
-    ce_momentum_ok = (spot_chg >= 0.05 or spot >= atm_strike)
+    ce_level_ok = (spot >= s1 and (spot >= (breakout_level - (step * 0.2)) or spot > atm_strike + (step * 0.3)))
+    ce_momentum_ok = (spot_chg >= 0.05 and spot >= atm_strike)
     ce_volume_ok = (total_ce_vol > total_pe_vol * 0.85 or near_pe_writing > 50000)
     ce_oi_ok = (near_pe_writing > near_ce_writing or near_ce_unwinding > 50000)
     ce_iv_time_ok = iv_time_info["time_favorable"] and iv_time_info["iv_favorable"]
 
     # Factors evaluated for PE:
+    # Requires true proximity/breakdown below S1/breakdown level, not just minor ATM rejection
     pe_direction_ok = (final_bias == "BEARISH" and bearish_score >= 60.0)
-    pe_level_ok = (spot <= (r1 + 5.0) and (spot <= (s1 + step * 0.4) or spot_diff <= 0))
-    pe_momentum_ok = (spot_chg <= -0.05 or spot <= atm_strike)
+    pe_level_ok = (spot <= r1 and (spot <= (breakdown_level + (step * 0.2)) or spot < atm_strike - (step * 0.3)))
+    pe_momentum_ok = (spot_chg <= -0.05 and spot <= atm_strike)
     pe_volume_ok = (total_pe_vol > total_ce_vol * 0.85 or near_ce_writing > 50000)
     pe_oi_ok = (near_ce_writing > near_pe_writing or near_pe_unwinding > 50000)
     pe_iv_time_ok = iv_time_info["time_favorable"] and iv_time_info["iv_favorable"]
@@ -419,13 +422,17 @@ def analyze_option_desk(market_data: dict) -> dict:
     pe_score, pe_checklist = compute_setup_score(is_ce=False)
 
     # 8. Preferred Option Contract Selection
-    # Select best strike among ATM, ATM+1, ATM-1 with high liquidity & optimal Delta (~0.45 - 0.55)
-    eligible_strikes = [r for r in enriched_chain if abs(r["strike"] - atm_strike) <= step]
-    if not eligible_strikes:
-        eligible_strikes = enriched_chain[:3]
+    # Select ATM or 1-step OTM strike with optimal buyer risk-reward (avoiding extreme bloated deep-ITM premiums)
+    ce_candidates = [r for r in enriched_chain if r["strike"] in (atm_strike, atm_strike + step)]
+    pe_candidates = [r for r in enriched_chain if r["strike"] in (atm_strike, atm_strike - step)]
 
-    best_ce = max(eligible_strikes, key=lambda x: x.get("ce_volume", 0) + (x.get("ce_oi", 0) * 0.1))
-    best_pe = max(eligible_strikes, key=lambda x: x.get("pe_volume", 0) + (x.get("pe_oi", 0) * 0.1))
+    if not ce_candidates:
+        ce_candidates = [r for r in enriched_chain if abs(r["strike"] - atm_strike) <= step] or enriched_chain[:3]
+    if not pe_candidates:
+        pe_candidates = [r for r in enriched_chain if abs(r["strike"] - atm_strike) <= step] or enriched_chain[:3]
+
+    best_ce = max(ce_candidates, key=lambda x: x.get("ce_volume", 0) + (x.get("ce_oi", 0) * 0.1))
+    best_pe = max(pe_candidates, key=lambda x: x.get("pe_volume", 0) + (x.get("pe_oi", 0) * 0.1))
 
     # 9. Trade Levels Calculation (Entry, Stop Loss, Target 1, Target 2, Risk:Reward)
     def calculate_trade_levels(opt_row: dict, is_ce: bool, spot_invalidation: float, spot_target: float) -> dict:

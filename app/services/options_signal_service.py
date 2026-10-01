@@ -101,17 +101,29 @@ def record_signal(signal_data: dict, is_paper_trade: bool = False, lots: int = 1
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Anti-duplicate check: if same symbol & contract is already ACTIVE or logged within 15 mins
+    # Anti-duplicate and Cooldown check:
+    # 1. Reject if same symbol & contract is currently ACTIVE / TARGET_1_HIT
+    # 2. Reject if same symbol & contract was closed within the last 15 minutes (cooldown window)
     with _get_db() as conn:
         recent = conn.execute("""
-            SELECT id FROM signals 
-            WHERE symbol = ? AND contract_name = ? AND status IN ('ACTIVE', 'TARGET_1_HIT')
+            SELECT id, created_at, status FROM signals 
+            WHERE symbol = ? AND contract_name = ?
             ORDER BY id DESC LIMIT 1
         """, (symbol, contract_name)).fetchone()
 
         if recent and not is_paper_trade:
-            # Already active, do not duplicate
-            return None
+            # Check if active
+            if recent["status"] in ('ACTIVE', 'TARGET_1_HIT'):
+                return None
+            
+            # Check 15-minute cooldown on closed trades
+            try:
+                prev_created = datetime.strptime(recent["created_at"], "%Y-%m-%d %H:%M:%S")
+                if (now - prev_created).total_seconds() < 900:  # 15 minutes
+                    log.info(f"Signal suppressed for {symbol} {contract_name}: 15-minute cooldown active.")
+                    return None
+            except Exception:
+                pass
 
         cursor = conn.execute("""
             INSERT INTO signals (
@@ -203,42 +215,87 @@ def update_active_signals(market_data_cache: dict | None = None) -> list[dict]:
 
         highest = max(float(sig["highest_price"]), current_ltp)
         lowest = min(float(sig["lowest_price"]), current_ltp)
-        points_pnl = round(current_ltp - entry, 2)
-        pnl_pct = round((points_pnl / entry) * 100, 2) if entry > 0 else 0.0
-        net_inr = round(points_pnl * lot_size * lots, 2)
 
         new_status = curr_status
         exit_price = sig["exit_price"]
         exit_time = sig["exit_time"]
+        trailed_sl = sl
 
-        # 2. Check Exits (Target 2, Target 1, Stop Loss, EOD)
+        # Calculate time elapsed for Stagnation Stop (P3)
+        try:
+            created_dt = datetime.strptime(sig["created_at"], "%Y-%m-%d %H:%M:%S")
+            elapsed_mins = (now - created_dt).total_seconds() / 60.0
+        except Exception:
+            elapsed_mins = 0.0
+
+        # P1 & P4: Handle Target 1 reached
+        if current_ltp >= t1 and curr_status == "ACTIVE":
+            new_status = "TARGET_1_HIT"
+            curr_status = "TARGET_1_HIT"
+            # P1: Trail Stop Loss to Entry + Buffer (Cost Protection)
+            trailed_sl = round(max(sl, entry + 1.0), 2)
+
+        # 2. Check Exits (Target 2, Trailing SL, Standard SL, Stagnation Time Stop, EOD)
         if current_ltp >= t2:
             new_status = "TARGET_2_HIT"
-            exit_price = current_ltp
+            raw_exit = round(max(t2, current_ltp), 2)
+            # P4: 50% booked at T1 + 50% booked at T2
+            points_pnl = round(0.5 * (t1 - entry) + 0.5 * (raw_exit - entry), 2)
+            exit_price = round((t1 + raw_exit) / 2.0, 2)
             exit_time = now_str
-        elif current_ltp <= sl:
+        elif curr_status == "TARGET_1_HIT" and current_ltp <= trailed_sl:
+            # Trailed Stop Loss hit after T1 -> Locks in guaranteed 50% profit from T1
+            new_status = "TSL_HIT"
+            points_pnl = round(0.5 * (t1 - entry), 2)
+            exit_price = round((t1 + entry) / 2.0, 2)
+            exit_time = now_str
+        elif curr_status == "ACTIVE" and current_ltp <= sl:
             new_status = "SL_HIT"
-            exit_price = current_ltp
+            slippage = round(sl * 0.02, 2)
+            exit_price = round(max(sl - slippage, min(sl, current_ltp)), 2)
+            points_pnl = round(exit_price - entry, 2)
             exit_time = now_str
-        elif current_ltp >= t1 and curr_status == "ACTIVE":
-            new_status = "TARGET_1_HIT"
-            # Keep active, can continue tracking towards T2
+        elif curr_status == "ACTIVE":
+            # P3: Dynamic Stagnation / Time Stop
+            # Morning (before 13:00): 25 mins max stagnation window
+            # Afternoon (post 13:00): 12 mins accelerated window to protect from afternoon theta crush
+            max_allowed_stagnation = 12.0 if time_now >= dtime(13, 0) else 25.0
+            if elapsed_mins >= max_allowed_stagnation and (current_ltp - entry) < ((t1 - entry) * 0.25):
+                new_status = "TIME_STOP_EXIT"
+                exit_price = current_ltp
+                points_pnl = round(current_ltp - entry, 2)
+                exit_time = now_str
         elif is_eod and curr_status in ("ACTIVE", "TARGET_1_HIT"):
             new_status = "EOD_CLOSED"
             exit_price = current_ltp
+            if curr_status == "TARGET_1_HIT":
+                points_pnl = round(0.5 * (t1 - entry) + 0.5 * (current_ltp - entry), 2)
+            else:
+                points_pnl = round(current_ltp - entry, 2)
             exit_time = now_str
+        else:
+            # Live open position P&L
+            if curr_status == "TARGET_1_HIT":
+                # P4: 50% realized from T1 + 50% live on current LTP
+                points_pnl = round(0.5 * (t1 - entry) + 0.5 * (current_ltp - entry), 2)
+                trailed_sl = round(max(sl, entry + 1.0), 2)
+            else:
+                points_pnl = round(current_ltp - entry, 2)
 
-        # 3. Persist update
+        pnl_pct = round((points_pnl / entry) * 100, 2) if entry > 0 else 0.0
+        net_inr = round(points_pnl * lot_size * lots, 2)
+
+        # 3. Persist update (including updated trailed stop_loss)
         with _get_db() as conn:
             conn.execute("""
                 UPDATE signals
                 SET current_price = ?, highest_price = ?, lowest_price = ?,
-                    points_pnl = ?, pnl_pct = ?, net_pnl_inr = ?,
+                    stop_loss = ?, points_pnl = ?, pnl_pct = ?, net_pnl_inr = ?,
                     status = ?, exit_price = ?, exit_time = ?, updated_at = ?
                 WHERE id = ?
             """, (
                 current_ltp, highest, lowest,
-                points_pnl, pnl_pct, net_inr,
+                trailed_sl, points_pnl, pnl_pct, net_inr,
                 new_status, exit_price, exit_time, now_str,
                 sig_id
             ))
@@ -248,6 +305,7 @@ def update_active_signals(market_data_cache: dict | None = None) -> list[dict]:
             "current_price": current_ltp,
             "highest_price": highest,
             "lowest_price": lowest,
+            "stop_loss": trailed_sl,
             "points_pnl": points_pnl,
             "pnl_pct": pnl_pct,
             "net_pnl_inr": net_inr,
@@ -268,9 +326,19 @@ def close_signal_manually(signal_id: int) -> dict | None:
         return sig
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    exit_price = sig["current_price"]
-    points_pnl = round(exit_price - sig["entry_price"], 2)
-    pnl_pct = round((points_pnl / sig["entry_price"]) * 100, 2) if sig["entry_price"] > 0 else 0.0
+    entry = float(sig["entry_price"])
+    t1 = float(sig["target_1"])
+    current_ltp = float(sig["current_price"])
+
+    if sig["status"] == "TARGET_1_HIT":
+        # 50% was booked at T1 + 50% manually squared off at current LTP
+        points_pnl = round(0.5 * (t1 - entry) + 0.5 * (current_ltp - entry), 2)
+        exit_price = round((t1 + current_ltp) / 2.0, 2)
+    else:
+        points_pnl = round(current_ltp - entry, 2)
+        exit_price = current_ltp
+
+    pnl_pct = round((points_pnl / entry) * 100, 2) if entry > 0 else 0.0
     net_inr = round(points_pnl * sig["lot_size"] * sig["lots"], 2)
 
     with _get_db() as conn:
@@ -314,6 +382,7 @@ def get_signals_summary() -> dict:
 
     win_count = 0
     loss_count = 0
+    be_count = 0
     total_points = 0.0
     total_inr = 0.0
     gross_profit_pts = 0.0
@@ -340,6 +409,8 @@ def get_signals_summary() -> dict:
             elif pts < 0:
                 loss_count += 1
                 gross_loss_pts += abs(pts)
+            else:
+                be_count += 1
 
     closed_count = len(closed_signals)
     win_rate = round((win_count / closed_count * 100), 1) if closed_count > 0 else None
@@ -363,6 +434,7 @@ def get_signals_summary() -> dict:
             "closed_count": closed_count,
             "win_count": win_count,
             "loss_count": loss_count,
+            "be_count": be_count,
             "win_rate_pct": win_rate,
             "profit_factor": profit_factor,
             "realized_pnl_points": round(total_points, 1),
