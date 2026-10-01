@@ -691,6 +691,119 @@ body.desk-body {
     color: var(--gold-dark);
 }
 
+/* Directional Radar Correlation Box */
+.directional-radar-box {
+    margin-top: 0.5rem;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--gold-primary);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    transition: all 0.25s ease;
+}
+
+.directional-radar-box.radar-mode-pe {
+    border-left-color: var(--bearish-red);
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.05), transparent);
+}
+
+.directional-radar-box.radar-mode-ce {
+    border-left-color: var(--bullish-green);
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.05), transparent);
+}
+
+.directional-radar-box.radar-mode-wait {
+    border-left-color: var(--neutral-amber);
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent);
+}
+
+.radar-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.radar-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.radar-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--gold-primary);
+    display: inline-block;
+    animation: pulseGlow 1.8s infinite ease-in-out;
+}
+
+.radar-mode-pe .radar-pulse-dot { background: var(--bearish-red); }
+.radar-mode-ce .radar-pulse-dot { background: var(--bullish-green); }
+.radar-mode-wait .radar-pulse-dot { background: var(--neutral-amber); }
+
+@keyframes pulseGlow {
+    0%, 100% { transform: scale(0.9); opacity: 0.7; }
+    50% { transform: scale(1.3); opacity: 1; }
+}
+
+.radar-head-text {
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    color: var(--text-primary);
+}
+
+.radar-conviction-pill {
+    font-size: 0.6rem;
+    font-weight: 800;
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.02em;
+}
+
+.radar-mode-pe .radar-conviction-pill {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
+}
+
+.radar-mode-ce .radar-conviction-pill {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.radar-mode-wait .radar-conviction-pill {
+    background: var(--neutral-surface);
+    color: var(--neutral-amber);
+    border: 1px solid var(--neutral-border);
+}
+
+.radar-thesis {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.radar-playbook {
+    font-size: 0.65rem;
+    color: var(--text-primary);
+    background: var(--bg-surface-alt);
+    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.45rem;
+    line-height: 1.35;
+}
+
+.playbook-tag {
+    font-weight: 800;
+    color: var(--gold-dark);
+    margin-right: 0.2rem;
+}
+
 /* CARD 3: Option Buying & Focus (Compact) */
 .setup-score-badge {
     background: var(--gold-light);

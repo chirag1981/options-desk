@@ -311,6 +311,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
+        // Directional Conviction Correlation Radar
+        updateDirectionalRadar(data);
+
         // 4. Card 3: Option Buying Focus & Execution Plan
         const optBuying = data.option_buying || data.option_focus || {};
         const tradePlan = optBuying.trade_plan || {};
@@ -387,6 +390,100 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 8. Section 4: Detailed Option Chain
         renderOptionChainTable(data.detailed_chain || [], levels.atm_strike, levels.resistance_1, levels.support_1, bias.spot_price);
+    }
+
+    /**
+     * Correlates ATM price, Key Levels (S1/R1), and Big OI Flow into pure Directional Vector
+     */
+    function updateDirectionalRadar(data) {
+        const radarBox = document.getElementById("directional-radar-box");
+        const radarHeadText = document.getElementById("radar-head-text");
+        const radarConvictionPill = document.getElementById("radar-conviction-pill");
+        const radarThesis = document.getElementById("radar-thesis");
+        const radarPlaybookText = document.getElementById("radar-playbook-text");
+
+        if (!radarBox) return;
+
+        const bias = data.market_bias || {};
+        const levels = data.key_levels || {};
+        const movements = data.big_oi_movements || [];
+        const spot = bias.spot_price || 0;
+        const atm = levels.atm_strike || 0;
+        const r1 = levels.resistance_1 || 0;
+        const r2 = levels.resistance_2 || 0;
+        const s1 = levels.support_1 || 0;
+        const s2 = levels.support_2 || 0;
+
+        let ceAdds = 0;
+        let peAdds = 0;
+        movements.forEach((m) => {
+            const chg = m.change_oi || 0;
+            if (m.side === "CE" || (m.activity && m.activity.includes("CALL"))) {
+                if (chg > 0) ceAdds += chg;
+            } else {
+                if (chg > 0) peAdds += chg;
+            }
+        });
+
+        const isCeHeavy = ceAdds > (peAdds * 1.25);
+        const isPeHeavy = peAdds > (ceAdds * 1.25);
+        const isBelowAtm = spot < atm;
+        const isAboveAtm = spot > atm;
+        const distToR1 = r1 > 0 ? (r1 - spot) : 999;
+        const distToS1 = s1 > 0 ? (spot - s1) : 999;
+
+        let mode = "WAIT";
+        let convictionPct = 50;
+        let head = "CHOP / TWO-WAY TRAP ZONE";
+        let thesis = "";
+        let playbook = "";
+
+        // BEARISH DIRECTIONAL CORRELATION (PE PLAY)
+        if ((isCeHeavy || bias.bias === "BEARISH") && isBelowAtm) {
+            mode = "PE";
+            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bearish_score || 78)));
+            head = `BEARISH VECTOR (${convictionPct}% Conviction)`;
+            
+            const ceRatio = peAdds > 0 ? (ceAdds / peAdds).toFixed(1) : "Heavy";
+            thesis = `Institutional Call Writing (${ceRatio}x vs Put Support) capping upside. Spot (${formatIndianNumber(spot)}) pinned below ATM (${formatIndianNumber(atm)}).`;
+            
+            if (distToS1 <= (atm * 0.003)) {
+                playbook = `Breakdown Zone: Spot testing S1 (${formatIndianNumber(s1)}). Clean break below ${formatIndianNumber(s1)} opens fast slide to S2 (${formatIndianNumber(s2)}). Invalidation: Reclaiming ATM (${formatIndianNumber(atm)}).`;
+            } else {
+                playbook = `Sell-on-Rise: Rallies towards ${formatIndianNumber(atm)} or ${formatIndianNumber(r1)} face heavy institutional supply. Downside target: ${formatIndianNumber(s1)}.`;
+            }
+        }
+        // BULLISH DIRECTIONAL CORRELATION (CE PLAY)
+        else if ((isPeHeavy || bias.bias === "BULLISH") && isAboveAtm) {
+            mode = "CE";
+            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bullish_score || 78)));
+            head = `BULLISH VECTOR (${convictionPct}% Conviction)`;
+            
+            const peRatio = ceAdds > 0 ? (peAdds / ceAdds).toFixed(1) : "Heavy";
+            thesis = `Institutional Put Writing (${peRatio}x vs Call Resistance) building strong floor. Spot (${formatIndianNumber(spot)}) holding above ATM (${formatIndianNumber(atm)}).`;
+            
+            if (distToR1 <= (atm * 0.003)) {
+                playbook = `Breakout Zone: Spot testing R1 (${formatIndianNumber(r1)}). Clean break above ${formatIndianNumber(r1)} opens squeeze to R2 (${formatIndianNumber(r2)}). Invalidation: Falling below ATM (${formatIndianNumber(atm)}).`;
+            } else {
+                playbook = `Buy-on-Dip: Pullbacks towards ${formatIndianNumber(atm)} or ${formatIndianNumber(s1)} offer support. Upside target: ${formatIndianNumber(r1)}.`;
+            }
+        }
+        // NEUTRAL / CONSOLIDATION CHOP
+        else {
+            mode = "WAIT";
+            convictionPct = 50;
+            head = `CHOP / TWO-WAY TRAP ZONE`;
+            thesis = `Both Call & Put writing active around ATM (${formatIndianNumber(atm)}). Range bounded between S1 (${formatIndianNumber(s1)}) and R1 (${formatIndianNumber(r1)}).`;
+            playbook = `Preserve Capital: Avoid fresh naked option buying in middle of channel. Wait for breakout above ${formatIndianNumber(r1)} (CE) or breakdown below ${formatIndianNumber(s1)} (PE).`;
+        }
+
+        radarBox.className = `directional-radar-box radar-mode-${mode.toLowerCase()}`;
+        if (radarHeadText) radarHeadText.textContent = head;
+        if (radarConvictionPill) {
+            radarConvictionPill.textContent = mode === "PE" ? "⚡ PURE PE PLAY" : (mode === "CE" ? "⚡ PURE CE PLAY" : "⏸ WAIT / TRAP");
+        }
+        if (radarThesis) radarThesis.textContent = thesis;
+        if (radarPlaybookText) radarPlaybookText.textContent = playbook;
     }
 
     /**
