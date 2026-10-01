@@ -9,7 +9,10 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
 ### 1. 🎯 Market Bias & Multi-Factor Scoring Engine
 * **Holistic Directional Bias:** Calculates net Bullish vs. Bearish conviction (0–100%) using real-time Open Interest (OI) distribution, Put-Call Ratio (PCR), and Volume expansion.
 * **Institutional Key Levels:** Identifies primary and secondary Support (`S1`, `S2`) and Resistance (`R1`, `R2`) levels from weighted OI clusters.
-* **Strict Breakout Validation:** Filters false breakouts by requiring spot price confirmation against key structural levels.
+* **📏 Visual Price Range Ladder:** Real-time visual price track showing spot position relative to Support base ($S_1$) and Resistance ceiling ($R_1$) with expected range points.
+* **🧭 Directional Conviction Radar (Under Key Levels):**
+  * Synthesizes 3 data points (**Spot vs ATM position**, **Big OI Writing ratio**, and **Channel proximity**) into a single, high-conviction directional vector.
+  * Dynamically outputs **`⚡ PURE PE PLAY`** (Bearish Ceiling breakdown), **`⚡ PURE CE PLAY`** (Bullish Floor breakout), or **`⏸ WAIT / TRAP`** (range chop) with actionable playbooks and invalidation levels.
 
 ---
 
@@ -30,7 +33,8 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
   * **Put Writing:** `🔺 Floor (Support)` — Institutional sellers building downside base.
   * **Call Unwinding:** `↗️ Clearing` — Short covering rally, unlocking upward room.
   * **Put Unwinding:** `↘️ Cracking` — Long unwinding, increasing downside risk.
-* **Big OI Movements:** Institutional flow sorted by `|ΔOI|` with `▲ +OI` / `▼ -OI` volume indicators and plain-English intent tags (`🔻 Resistance Build`, `🔺 Support Build`, `↗️ Short Covering`, `↘️ Support Cracking`).
+* **⚡ Institutional Dominance Meter:** Dual-color live progress bar indicating overall institutional stance (`🔴 Bears Dominating 83% Call Writing` vs `🟢 Bulls Dominating`).
+* **Big OI Movements:** Institutional flow sorted by `|ΔOI|` with proportional background magnitude bars, `▲ +OI` / `▼ -OI` volume indicators, and plain-English intent tags (`🔻 Resistance Build`, `🔺 Support Build`, `↗️ Short Covering`, `↘️ Support Cracking`).
 * **Interactive Tooltips:** Micro-tooltips explaining the trading implications of every tile on hover.
 
 ---
