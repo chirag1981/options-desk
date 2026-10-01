@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+
+{% block title %}Options Desk — {{ default_symbol }} Market Bias & Option Analysis{% endblock %}
+
+{% block content %}
+<div class="options-desk-app">
+
+    <!-- Top Ticker Sub-Header -->
+    <section class="ticker-bar" aria-label="Spot Overview">
+        <div class="ticker-col">
+            <span class="ticker-label" id="ticker-sym-name">NIFTY 50</span>
+            <div class="spot-val-group">
+                <span class="spot-price" id="spot-price-display">--</span>
+                <span class="spot-change" id="spot-change-display">--%</span>
+            </div>
+        </div>
+
+        <div class="ticker-divider"></div>
+
+        <div class="ticker-col">
+            <span class="ticker-label">CURRENT ATM</span>
+            <span class="ticker-data" id="atm-strike-display">--</span>
+        </div>
+
+        <div class="ticker-divider"></div>
+
+        <div class="ticker-col">
+            <span class="ticker-label">PUT-CALL RATIO (PCR)</span>
+            <span class="ticker-data font-mono" id="pcr-display">--</span>
+        </div>
+
+        <div class="ticker-divider"></div>
+
+        <div class="ticker-col">
+            <span class="ticker-label">LAST UPDATED</span>
+            <span class="ticker-data font-mono" id="last-updated-display">--:--:--</span>
+        </div>
+    </section>
+
+    <!-- SECTION 1: PRIMARY DECISION CARDS (3-COLUMN GRID) -->
+    <section class="decision-grid" aria-label="Core Market Decisions">
+        
+        <!-- CARD 1: MARKET VIEW / BIAS -->
+        <article class="desk-card card-bias" id="card-market-bias">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">PRIMARY MARKET VIEW</span>
+                    <h2 class="card-title">MARKET BIAS</h2>
+                </div>
+                <div class="bias-time-badge" id="bias-time-badge" title="Timestamp when bias last formed">
+                    <span>Changed: </span><strong id="bias-last-changed">--:--</strong>
+                </div>
+            </div>
+
+            <div class="bias-centerpiece">
+                <div class="bias-badge-large" id="bias-badge">
+                    <span class="bias-dot" id="bias-dot"></span>
+                    <span class="bias-text" id="bias-text">ANALYZING...</span>
+                </div>
+                <div class="bias-meta-row">
+                    <span class="confidence-pill" id="confidence-pill">Confidence: --</span>
+                    <span class="score-pill" id="score-pill">Bull: --% | Bear: --%</span>
+                </div>
+            </div>
+
+            <!-- Explainability: Why this bias? -->
+            <div class="why-bias-box">
+                <div class="why-header">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span>WHY THIS BIAS?</span>
+                </div>
+                <ul class="why-list" id="why-bias-list">
+                    <li>Evaluating option chain structure...</li>
+                </ul>
+            </div>
+        </article>
+
+        <!-- CARD 2: KEY LEVELS -->
+        <article class="desk-card card-levels" id="card-key-levels">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">OI WEIGHTED TARGETS</span>
+                    <h2 class="card-title">KEY LEVELS</h2>
+                </div>
+                <span class="badge-levels-info">Weighted OI + Writing</span>
+            </div>
+
+            <div class="levels-container">
+                <!-- Resistance -->
+                <div class="level-section res-section">
+                    <div class="level-badge res-badge">RESISTANCE</div>
+                    <div class="level-values">
+                        <div class="level-row">
+                            <span class="lvl-tag">R2</span>
+                            <span class="lvl-val font-mono" id="level-r2">--</span>
+                        </div>
+                        <div class="level-row">
+                            <span class="lvl-tag">R1</span>
+                            <span class="lvl-val font-mono strong" id="level-r1">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ATM Strike -->
+                <div class="level-section atm-section">
+                    <div class="level-badge atm-badge">ATM STRIKE</div>
+                    <div class="atm-center-val font-mono" id="level-atm">--</div>
+                    <span class="atm-sub" id="level-atm-dist">Spot Distance: 0 pts</span>
+                </div>
+
+                <!-- Support -->
+                <div class="level-section sup-section">
+                    <div class="level-badge sup-badge">SUPPORT</div>
+                    <div class="level-values">
+                        <div class="level-row">
+                            <span class="lvl-tag">S1</span>
+                            <span class="lvl-val font-mono strong" id="level-s1">--</span>
+                        </div>
+                        <div class="level-row">
+                            <span class="lvl-tag">S2</span>
+                            <span class="lvl-val font-mono" id="level-s2">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <!-- CARD 3: OPTION BUYING DECISION & EXECUTION PLAN -->
+        <article class="desk-card card-focus" id="card-option-focus">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">SELECTIVE DISCIPLINE</span>
+                    <h2 class="card-title">OPTION BUYING</h2>
+                </div>
+                <div class="setup-score-badge" id="setup-score-badge" title="Multi-factor setup quality score (Threshold >= 75)">
+                    <span>Score: </span><strong class="font-mono" id="setup-score-val">0</strong><span>/100</span>
+                </div>
+            </div>
+
+            <div class="focus-body">
+                <!-- Hero Action Banner -->
+                <div class="focus-hero-box" id="focus-hero-box">
+                    <div class="focus-top-row">
+                        <span class="focus-action-title" id="focus-title">WAIT / NO TRADE</span>
+                        <span class="preferred-contract-pill font-mono" id="preferred-contract-pill">--</span>
+                    </div>
+                    <p class="focus-reason" id="focus-reason">Analyzing market structure and level confirmation...</p>
+                </div>
+
+                <!-- Trade Execution Levels (Entry, SL, T1, T2, R:R) -->
+                <div class="trade-levels-strip" id="trade-levels-strip">
+                    <div class="lvl-box lvl-entry">
+                        <span class="tl-lbl">ENTRY</span>
+                        <span class="tl-val font-mono" id="trade-entry">₹--</span>
+                    </div>
+                    <div class="lvl-box lvl-sl">
+                        <span class="tl-lbl">STOP LOSS</span>
+                        <span class="tl-val font-mono" id="trade-sl">₹--</span>
+                    </div>
+                    <div class="lvl-box lvl-t1">
+                        <span class="tl-lbl">TARGET 1</span>
+                        <span class="tl-val font-mono" id="trade-t1">₹--</span>
+                    </div>
+                    <div class="lvl-box lvl-t2">
+                        <span class="tl-lbl">TARGET 2</span>
+                        <span class="tl-val font-mono" id="trade-t2">₹--</span>
+                    </div>
+                    <div class="lvl-box lvl-rr">
+                        <span class="tl-lbl">R : R</span>
+                        <span class="tl-val font-mono" id="trade-rr">1 : 2.0</span>
+                    </div>
+                </div>
+
+                <!-- Confirmation Checklist -->
+                <div class="confirmation-section">
+                    <div class="checklist-header">
+                        <span>CONFIRMATION CHECKLIST</span>
+                        <span class="checklist-summary" id="checklist-summary">0/6 Confirmed</span>
+                    </div>
+                    <div class="checklist-grid" id="checklist-grid">
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>Direction</span></div>
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>Level</span></div>
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>Momentum</span></div>
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>Volume</span></div>
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>OI Structure</span></div>
+                        <div class="check-item"><span class="chk-icon">⏳</span><span>IV & Time</span></div>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+    </section>
+
+    <!-- SECTION 2: OI ACTIVITY & BIG MOVEMENTS (2-COLUMN GRID) -->
+    <section class="secondary-grid" aria-label="OI Activity and Large Orders">
+        
+        <!-- CARD 4: OI ACTIVITY SUMMARY -->
+        <article class="desk-card card-activity">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">WRITING & UNWINDING CLUSTERS</span>
+                    <h2 class="card-title">OI ACTIVITY</h2>
+                </div>
+            </div>
+
+            <div class="activity-grid">
+                <div class="activity-tile tile-call-write">
+                    <span class="act-label">CALL WRITING</span>
+                    <span class="act-strike font-mono" id="act-call-writing">--</span>
+                    <span class="act-desc">Major Call Resistance</span>
+                </div>
+                <div class="activity-tile tile-put-write">
+                    <span class="act-label">PUT WRITING</span>
+                    <span class="act-strike font-mono" id="act-put-writing">--</span>
+                    <span class="act-desc">Major Put Support</span>
+                </div>
+                <div class="activity-tile tile-call-unwind">
+                    <span class="act-label">CALL UNWINDING</span>
+                    <span class="act-strike font-mono" id="act-call-unwinding">--</span>
+                    <span class="act-desc">Resistance Weakening</span>
+                </div>
+                <div class="activity-tile tile-put-unwind">
+                    <span class="act-label">PUT UNWINDING</span>
+                    <span class="act-strike font-mono" id="act-put-unwinding">--</span>
+                    <span class="act-desc">Support Weakening</span>
+                </div>
+            </div>
+
+            <div class="oi-totals-strip">
+                <div class="total-item">
+                    <span>Total CE OI:</span>
+                    <strong class="font-mono" id="total-ce-oi">--</strong>
+                    <small id="total-ce-chg" class="chg-val">(--)</small>
+                </div>
+                <div class="total-item">
+                    <span>Total PE OI:</span>
+                    <strong class="font-mono" id="total-pe-oi">--</strong>
+                    <small id="total-pe-chg" class="chg-val">(--)</small>
+                </div>
+            </div>
+        </article>
+
+        <!-- CARD 5: BIG OI MOVEMENT -->
+        <article class="desk-card card-big-oi">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">LARGE TRADER POSITIONING</span>
+                    <h2 class="card-title">BIG OI MOVEMENT</h2>
+                </div>
+                <span class="badge-threshold">Sorted by |&Delta;OI|</span>
+            </div>
+
+            <div class="big-oi-list" id="big-oi-list">
+                <div class="empty-state">Loading large OI movements...</div>
+            </div>
+        </article>
+
+    </section>
+
+    <!-- SECTION 3: OI TREND (ATM ± 5 STRIKES: 5 UP, 5 DOWN) -->
+    <section class="desk-section" aria-label="OI Trend Near Spot">
+        <div class="section-header-strip">
+            <div class="strip-left">
+                <h3 class="section-title">OI TREND</h3>
+                <span class="section-subtitle">Focused strike cluster around current spot (ATM &plusmn; 5 strikes: 5 Up, 5 Down)</span>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="desk-table trend-table" id="oi-trend-table">
+                <thead>
+                    <tr>
+                        <th class="text-right">CE OI</th>
+                        <th class="text-right">CE &Delta;OI</th>
+                        <th class="text-right">CE LTP</th>
+                        <th class="text-center highlight-col">STRIKE</th>
+                        <th class="text-left">PE LTP</th>
+                        <th class="text-left">PE &Delta;OI</th>
+                        <th class="text-left">PE OI</th>
+                        <th class="text-center">CLASSIFICATION</th>
+                    </tr>
+                </thead>
+                <tbody id="oi-trend-tbody">
+                    <tr><td colspan="8" class="text-center">Loading OI trend data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- SECTION 4: FOCUSED OPTION CHAIN (ATM ± 5 STRIKES) -->
+    <section class="desk-section" aria-label="Detailed Option Chain">
+        <div class="section-header-strip">
+            <div class="strip-left">
+                <h3 class="section-title">OPTION CHAIN</h3>
+                <span class="section-subtitle">Core strike data with volume, open interest, price change, and sentiment tags</span>
+            </div>
+            <div class="strip-controls">
+                <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
+                    <label for="strike-range-select" class="control-label" style="font-size:0.75rem;">STRIKES:</label>
+                    <select id="strike-range-select" class="desk-select" aria-label="Filter Strike Range">
+                        <option value="5" selected>ATM &plusmn; 5 (5 Up, 5 Down)</option>
+                        <option value="10">ATM &plusmn; 10</option>
+                        <option value="0">All Strikes</option>
+                    </select>
+                </div>
+
+                <button type="button" class="btn-action" id="btn-export-csv" aria-label="Export Option Chain to CSV">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Export CSV</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="desk-table chain-table" id="option-chain-table">
+                <thead>
+                    <tr class="table-group-header">
+                        <th colspan="4" class="group-call">CALLS (CE)</th>
+                        <th class="group-strike">STRIKE</th>
+                        <th colspan="4" class="group-put">PUTS (PE)</th>
+                    </tr>
+                    <tr class="table-col-header">
+                        <th class="text-right">OI</th>
+                        <th class="text-right">&Delta;OI</th>
+                        <th class="text-right">Volume</th>
+                        <th class="text-right">LTP (₹)</th>
+                        <th class="text-center highlight-col">STRIKE PRICE</th>
+                        <th class="text-left">LTP (₹)</th>
+                        <th class="text-left">Volume</th>
+                        <th class="text-left">&Delta;OI</th>
+                        <th class="text-left">OI</th>
+                    </tr>
+                </thead>
+                <tbody id="option-chain-tbody">
+                    <tr><td colspan="9" class="text-center">Loading full option chain...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+</div>
+{% endblock %}

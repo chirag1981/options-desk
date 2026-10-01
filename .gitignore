@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Environment and Secrets (CRITICAL)
+.env
+.env.local
+.env.*.local
+instance/
+*.json
+!app/
+!config/
+
+# Logs
+*.log
+fyersApi.log
+fyersRequests.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
