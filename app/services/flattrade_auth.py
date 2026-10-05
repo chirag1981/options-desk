@@ -193,3 +193,107 @@ def get_flattrade_token() -> str | None:
     else:
         log.error(f"Failed to auto-authenticate FlatTrade: {err}")
         return None
+
+
+FLATTRADE_INDEX_TOKENS = {
+    "NIFTY": ("NSE", "26000"),
+    "BANKNIFTY": ("NSE", "26009"),
+    "FINNIFTY": ("NSE", "26037"),
+    "MIDCPNIFTY": ("NSE", "26074"),
+    "SENSEX": ("BSE", "1"),
+}
+
+_SCRIP_TOKEN_CACHE = {}
+
+
+def get_flattrade_index_spot(symbol: str = "NIFTY") -> tuple[float, float, str] | None:
+    """
+    Fetches real-time spot price and day change % from FlatTrade PiConnect.
+    Returns (spot_price, change_pct, 'LIVE') or None.
+    """
+    sym = symbol.upper()
+    if sym not in FLATTRADE_INDEX_TOKENS:
+        return None
+    token = get_flattrade_token()
+    user_id = (os.getenv("FLATTRADE_USER_ID") or "").strip()
+    if not token or not user_id:
+        return None
+
+    exch, tk = FLATTRADE_INDEX_TOKENS[sym]
+    try:
+        url = "https://piconnect.flattrade.in/PiConnectAPI/GetQuotes"
+        payload = {"uid": user_id, "exch": exch, "token": tk}
+        resp = requests.post(
+            url,
+            data=f"jData={json.dumps(payload)}&jKey={token}",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("stat") == "Ok":
+                ltp = float(data.get("lp", 0.0) or 0.0)
+                prev_close = float(data.get("c", 0.0) or ltp)
+                chg_pct = round(((ltp - prev_close) / prev_close * 100), 2) if prev_close else 0.0
+                if ltp > 0:
+                    return ltp, chg_pct, "LIVE"
+    except Exception as e:
+        log.warning(f"FlatTrade spot price fetch error for {symbol}: {e}")
+    return None
+
+
+def get_flattrade_option_ltp(symbol: str, strike: float, signal_type: str, expiry: str | None = None) -> float | None:
+    """
+    Fetches live LTP for a specific options contract from FlatTrade PiConnect.
+    """
+    token = get_flattrade_token()
+    user_id = (os.getenv("FLATTRADE_USER_ID") or "").strip()
+    if not token or not user_id:
+        return None
+
+    sym = symbol.upper()
+    sig_type = signal_type.upper()
+    strike_int = int(round(strike))
+    exch = "BFO" if sym == "SENSEX" else "NFO"
+
+    cache_key = f"{sym}_{strike_int}_{sig_type}_{exch}"
+    scrip_token = _SCRIP_TOKEN_CACHE.get(cache_key)
+
+    try:
+        if not scrip_token:
+            stext = f"{sym} {strike_int} {sig_type}"
+            s_url = "https://piconnect.flattrade.in/PiConnectAPI/SearchScrip"
+            s_payload = {"uid": user_id, "stext": stext, "exch": exch}
+            s_resp = requests.post(
+                s_url,
+                data=f"jData={json.dumps(s_payload)}&jKey={token}",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=5
+            )
+            if s_resp.status_code == 200:
+                s_data = s_resp.json()
+                values = s_data.get("values", [])
+                if values:
+                    scrip_token = values[0].get("token")
+                    if scrip_token:
+                        _SCRIP_TOKEN_CACHE[cache_key] = scrip_token
+
+        if scrip_token:
+            q_url = "https://piconnect.flattrade.in/PiConnectAPI/GetQuotes"
+            q_payload = {"uid": user_id, "exch": exch, "token": scrip_token}
+            q_resp = requests.post(
+                q_url,
+                data=f"jData={json.dumps(q_payload)}&jKey={token}",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=5
+            )
+            if q_resp.status_code == 200:
+                q_data = q_resp.json()
+                if q_data.get("stat") == "Ok":
+                    ltp = float(q_data.get("lp", 0.0) or 0.0)
+                    if ltp > 0:
+                        return ltp
+    except Exception as e:
+        log.warning(f"FlatTrade option LTP fetch error for {sym} {strike_int} {sig_type}: {e}")
+
+    return None

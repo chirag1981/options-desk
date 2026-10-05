@@ -254,13 +254,24 @@ def update_active_signals(market_data_cache: dict | None = None) -> list[dict]:
 
         # 1. Fetch current LTP for this specific contract
         current_ltp = None
-        if market_data_cache and sym in market_data_cache:
-            chain = market_data_cache[sym].get("chain", [])
-            for item in chain:
-                if abs(item["strike"] - strike) < 1.0:
-                    current_ltp = item.get("ce_ltp" if sig_type == "CE" else "pe_ltp")
-                    break
+
+        # 1a. Try direct FlatTrade live contract LTP quote
+        try:
+            from app.services.flattrade_auth import get_flattrade_option_ltp
+            current_ltp = get_flattrade_option_ltp(sym, strike, sig_type, sig.get("expiry"))
+        except Exception as e:
+            log.warning(f"FlatTrade direct LTP lookup error for #{sig_id}: {e}")
+
+        # 1b. Try market data cache
+        if current_ltp is None or current_ltp <= 0:
+            if market_data_cache and sym in market_data_cache:
+                chain = market_data_cache[sym].get("chain", [])
+                for item in chain:
+                    if abs(item["strike"] - strike) < 1.0:
+                        current_ltp = item.get("ce_ltp" if sig_type == "CE" else "pe_ltp")
+                        break
         
+        # 1c. Try option chain lookup
         if current_ltp is None or current_ltp <= 0:
             try:
                 raw = fetch_option_chain_data(symbol=sym, expiry=sig.get("expiry"), force_refresh=False)

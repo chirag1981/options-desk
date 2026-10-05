@@ -82,13 +82,23 @@ def get_supported_indices() -> list[dict]:
 
 def get_live_spot_price(symbol: str = "NIFTY") -> tuple[float, float, str]:
     """
-    Fetches live spot price and day change for index from Fyers API.
+    Fetches live spot price and day change for index from FlatTrade or Fyers API.
     Returns (spot_price, change_pct, status).
     """
     cfg = INDEX_CONFIGS.get(symbol.upper(), INDEX_CONFIGS["NIFTY"])
     fyers_sym = cfg["fyers_symbol"]
     default_price = cfg["default_spot"]
 
+    # 1. Try FlatTrade Live Spot Quotes
+    try:
+        from app.services.flattrade_auth import get_flattrade_index_spot
+        ft_spot = get_flattrade_index_spot(symbol)
+        if ft_spot and ft_spot[0] > 0:
+            return ft_spot
+    except Exception as e:
+        log.warning(f"FlatTrade spot quote error for {symbol}: {e}")
+
+    # 2. Try Fyers API Quotes
     client = get_fyers_client()
     if client:
         try:
