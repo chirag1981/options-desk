@@ -143,3 +143,35 @@ def clear_trade_history():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+@options_desk_bp.route("/api/options-desk/signals/export-csv", methods=["GET"])
+def export_journal_csv():
+    """Exports full trade journal with rich telemetry to CSV."""
+    from flask import Response
+    from app.services.options_signal_service import export_signals_csv
+    try:
+        csv_data = export_signals_csv()
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={"Content-disposition": "attachment; filename=options_trade_journal.csv"}
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/trade-analysis", methods=["GET"])
+def get_trade_analysis():
+    """
+    Returns AI/Statistical Strategy Diagnostic & Parameter Optimization Report
+    evaluating paper trading history, profit leakages, moneyness, MFE/MAE, and tuning actions.
+    """
+    try:
+        from app.services.trade_analyzer_agent import analyze_paper_trading_logs
+        report = analyze_paper_trading_logs()
+        return jsonify({"success": True, "report": report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+

@@ -293,7 +293,27 @@
                         <span>Trade Journal</span>
                         <span class="tab-badge" id="history-signals-count-badge">0</span>
                     </button>
+                    <button type="button" class="tab-pill" id="tab-btn-analysis" data-tab="analysis">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.2rem;vertical-align:-1px;color:var(--gold-primary);">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                        </svg>
+                        <span>AI Diagnostics</span>
+                        <span class="tab-badge tab-badge-gold" id="strategy-score-badge">--</span>
+                    </button>
                 </div>
+
+                <a href="/api/options-desk/trade-analysis" target="_blank" class="btn-action" id="btn-view-analysis-api" aria-label="View Analysis JSON API" title="View Direct JSON Analysis">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <span>Analysis JSON</span>
+                </a>
 
                 <button type="button" class="btn-action" id="btn-export-journal-csv" aria-label="Export Trade Journal to CSV" title="Export Journal to CSV">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -404,6 +424,215 @@
                         <tr><td colspan="10" class="text-center">No completed trades in journal.</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Tab 3: AI Strategy Diagnostics & Parameter Optimization View -->
+        <div class="journal-tab-pane" id="pane-analysis">
+            <div class="analysis-agent-container">
+                
+                <!-- Advisory Banner -->
+                <div class="analysis-advisory-banner">
+                    <div class="advisory-icon">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                    </div>
+                    <div class="advisory-text">
+                        <strong>DIAGNOSTIC MODE (OBSERVE &rarr; ANALYZE &rarr; FIND PATTERNS &rarr; RECOMMEND):</strong>
+                        <span>This agent never modifies live trading rules automatically. All identified leaks and proposed adjustments require manual review.</span>
+                    </div>
+                    <button type="button" class="btn-action btn-gold btn-sm" id="btn-run-diagnostics" aria-label="Rerun Post-Mortem Diagnostics">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        <span>Rerun Audit</span>
+                    </button>
+                </div>
+
+                <!-- 1. OVERALL PERFORMANCE -->
+                <div class="analysis-card diag-overview-card">
+                    <div class="a-card-header">
+                        <div class="a-card-title-group">
+                            <span class="a-card-subtitle">DIAGNOSTIC TELEMETRY</span>
+                            <h4 class="a-card-title">1. OVERALL PERFORMANCE SUMMARY</h4>
+                        </div>
+                        <div class="diag-timestamp" id="diag-last-analyzed">Last Audited: --</div>
+                    </div>
+
+                    <div class="diag-metrics-strip">
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">WIN RATE</span>
+                            <span class="d-val font-mono" id="diag-ov-winrate">--%</span>
+                            <span class="d-sub" id="diag-ov-ratio">0W / 0L</span>
+                        </div>
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">PROFIT FACTOR</span>
+                            <span class="d-val font-mono" id="diag-ov-pf">--</span>
+                            <span class="d-sub">Gross Win / Loss</span>
+                        </div>
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">NET P&L (POINTS)</span>
+                            <span class="d-val font-mono" id="diag-ov-pts">+0.0 pts</span>
+                            <span class="d-sub" id="diag-ov-avg-winloss">Avg W: +0 | Avg L: -0</span>
+                        </div>
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">EST. NET P&L (₹)</span>
+                            <span class="d-val font-mono" id="diag-ov-inr">₹0.00</span>
+                            <span class="d-sub">Realized journal sum</span>
+                        </div>
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">MFE CAPTURE RATE</span>
+                            <span class="d-val font-mono" id="diag-mfe-eff">--%</span>
+                            <span class="d-sub">Peak excursion realized</span>
+                        </div>
+                        <div class="diag-metric-box">
+                            <span class="d-lbl">STRATEGY HEALTH</span>
+                            <span class="d-val font-mono text-gold" id="diag-health-score">--</span>
+                            <span class="d-sub" id="diag-health-grade">Awaiting trades</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2 & 3. BEST & WORST CONDITIONS GRID -->
+                <div class="analysis-grid-two-col">
+                    
+                    <!-- 2. BEST CONDITIONS -->
+                    <div class="analysis-card card-best-conditions">
+                        <div class="a-card-header">
+                            <div class="a-card-title-group">
+                                <span class="a-card-subtitle text-bullish">HIGH EXPECTANCY SEGMENTS</span>
+                                <h4 class="a-card-title text-bullish">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
+                                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                        <polyline points="17 6 23 6 23 12"></polyline>
+                                    </svg>
+                                    2. BEST CONDITIONS
+                                </h4>
+                            </div>
+                        </div>
+                        <div class="conditions-list" id="diag-best-list">
+                            <div class="empty-state">Evaluating highest win rate segments...</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. WORST CONDITIONS -->
+                    <div class="analysis-card card-worst-conditions">
+                        <div class="a-card-header">
+                            <div class="a-card-title-group">
+                                <span class="a-card-subtitle text-bearish">LOW EXPECTANCY & DRAG</span>
+                                <h4 class="a-card-title text-bearish">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
+                                        <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline>
+                                        <polyline points="17 18 23 18 23 12"></polyline>
+                                    </svg>
+                                    3. WORST CONDITIONS
+                                </h4>
+                            </div>
+                        </div>
+                        <div class="conditions-list" id="diag-worst-list">
+                            <div class="empty-state">Evaluating lowest win rate segments...</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- 4. PROFIT LEAKS (TOP 3 ACTUAL LEAKS) -->
+                <div class="analysis-card">
+                    <div class="a-card-header">
+                        <div class="a-card-title-group">
+                            <span class="a-card-subtitle text-amber">RANKED ROOT CAUSE ATTRIBUTION</span>
+                            <h4 class="a-card-title">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--amber-accent);margin-right:0.35rem;vertical-align:-2px;">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                4. TOP 3 ACTUAL PROFIT LEAKS
+                            </h4>
+                        </div>
+                    </div>
+                    <div class="issues-list" id="analysis-issues-list">
+                        <div class="empty-state">Evaluating journal trade telemetry...</div>
+                    </div>
+                </div>
+
+                <!-- 5. RECOMMENDED CHANGES (ADVISORY ONLY) -->
+                <div class="analysis-card">
+                    <div class="a-card-header">
+                        <div class="a-card-title-group">
+                            <span class="a-card-subtitle text-emerald">PROPOSED PARAMETER & RULE ADJUSTMENTS</span>
+                            <h4 class="a-card-title">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--emerald-accent);margin-right:0.35rem;vertical-align:-2px;">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                                5. RECOMMENDED CHANGES (REQUIRES MANUAL APPROVAL)
+                            </h4>
+                        </div>
+                        <span class="badge-advisory-only">Manual Approval Required</span>
+                    </div>
+                    <div class="tuning-list" id="analysis-tuning-list">
+                        <div class="empty-state">Generating proposed rule modifications...</div>
+                    </div>
+                </div>
+
+                <!-- Segmentation Breakdown Tables: Moneyness & Time of Day -->
+                <div class="analysis-tables-grid">
+                    
+                    <!-- Moneyness Performance Table -->
+                    <div class="analysis-sub-card">
+                        <div class="sub-card-header">
+                            <h5 class="sub-card-title">Moneyness Efficiency (ATM vs ITM vs OTM)</h5>
+                            <span class="sub-card-badge font-mono">Delta & Excursion</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="desk-table mini-table" id="diag-moneyness-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left">MONEYNESS</th>
+                                        <th class="text-center">TRADES</th>
+                                        <th class="text-right">WIN RATE</th>
+                                        <th class="text-right">PROFIT FACTOR</th>
+                                        <th class="text-right">TOTAL PTS</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="diag-moneyness-tbody">
+                                    <tr><td colspan="5" class="text-center">No moneyness data yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Time-of-Day Performance Table -->
+                    <div class="analysis-sub-card">
+                        <div class="sub-card-header">
+                            <h5 class="sub-card-title">Time-of-Day Breakdown</h5>
+                            <span class="sub-card-badge font-mono">Session Windows</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="desk-table mini-table" id="diag-timewindow-table">
+                                <thead>
+                                    <tr>
+                                        <th class="text-left">SESSION WINDOW</th>
+                                        <th class="text-center">TRADES</th>
+                                        <th class="text-right">WIN RATE</th>
+                                        <th class="text-right">TOTAL PTS</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="diag-timewindow-tbody">
+                                    <tr><td colspan="4" class="text-center">No session window data yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
             </div>
         </div>
     </section>

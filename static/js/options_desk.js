@@ -764,10 +764,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Journal DOM Elements
     const tabBtnActive = document.getElementById("tab-btn-active-signals");
     const tabBtnHistory = document.getElementById("tab-btn-history-signals");
+    const tabBtnAnalysis = document.getElementById("tab-btn-analysis");
     const paneActive = document.getElementById("pane-active-signals");
     const paneHistory = document.getElementById("pane-history-signals");
+    const paneAnalysis = document.getElementById("pane-analysis");
     const activeCountBadge = document.getElementById("active-signals-count-badge");
     const historyCountBadge = document.getElementById("history-signals-count-badge");
+    const strategyScoreBadge = document.getElementById("strategy-score-badge");
 
     const metricWinRate = document.getElementById("metric-win-rate");
     const metricWinRatio = document.getElementById("metric-win-ratio");
@@ -785,24 +788,58 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnExportJournalCsv = document.getElementById("btn-export-journal-csv");
     const btnClearJournal = document.getElementById("btn-clear-journal");
 
+    // Strategy Diagnostics DOM Elements
+    const diagHealthScore = document.getElementById("diag-health-score");
+    const diagHealthGrade = document.getElementById("diag-health-grade");
+    const diagMfeEff = document.getElementById("diag-mfe-eff");
+    const diagOvWinrate = document.getElementById("diag-ov-winrate");
+    const diagOvRatio = document.getElementById("diag-ov-ratio");
+    const diagOvPf = document.getElementById("diag-ov-pf");
+    const diagOvPts = document.getElementById("diag-ov-pts");
+    const diagOvAvgWinLoss = document.getElementById("diag-ov-avg-winloss");
+    const diagOvInr = document.getElementById("diag-ov-inr");
+    const diagLastAnalyzed = document.getElementById("diag-last-analyzed");
+    const diagBestList = document.getElementById("diag-best-list");
+    const diagWorstList = document.getElementById("diag-worst-list");
+    const btnRunDiagnostics = document.getElementById("btn-run-diagnostics");
+    const analysisIssuesList = document.getElementById("analysis-issues-list");
+    const analysisTuningList = document.getElementById("analysis-tuning-list");
+    const diagMoneynessTbody = document.getElementById("diag-moneyness-tbody");
+    const diagTimewindowTbody = document.getElementById("diag-timewindow-tbody");
+
     let lastSignalsSummary = null;
 
     /**
-     * Tab Switcher (Active Trades vs Trade Journal)
+     * Tab Switcher (Active Trades vs Trade Journal vs AI Diagnostics)
      */
-    if (tabBtnActive && tabBtnHistory && paneActive && paneHistory) {
-        tabBtnActive.addEventListener("click", () => {
-            tabBtnActive.classList.add("active");
-            tabBtnHistory.classList.remove("active");
-            paneActive.classList.add("active");
-            paneHistory.classList.remove("active");
-        });
+    function switchJournalTab(targetTab) {
+        if (tabBtnActive) tabBtnActive.classList.toggle("active", targetTab === "active");
+        if (tabBtnHistory) tabBtnHistory.classList.toggle("active", targetTab === "history");
+        if (tabBtnAnalysis) tabBtnAnalysis.classList.toggle("active", targetTab === "analysis");
 
-        tabBtnHistory.addEventListener("click", () => {
-            tabBtnHistory.classList.add("active");
-            tabBtnActive.classList.remove("active");
-            paneHistory.classList.add("active");
-            paneActive.classList.remove("active");
+        if (paneActive) paneActive.classList.toggle("active", targetTab === "active");
+        if (paneHistory) paneHistory.classList.toggle("active", targetTab === "history");
+        if (paneAnalysis) paneAnalysis.classList.toggle("active", targetTab === "analysis");
+
+        if (targetTab === "analysis") {
+            loadTradeAnalysis();
+        }
+    }
+
+    const btnTopTradeAnalysis = document.getElementById("btn-top-trade-analysis");
+
+    if (tabBtnActive) tabBtnActive.addEventListener("click", () => switchJournalTab("active"));
+    if (tabBtnHistory) tabBtnHistory.addEventListener("click", () => switchJournalTab("history"));
+    if (tabBtnAnalysis) tabBtnAnalysis.addEventListener("click", () => switchJournalTab("analysis"));
+    if (btnRunDiagnostics) btnRunDiagnostics.addEventListener("click", () => loadTradeAnalysis());
+
+    if (btnTopTradeAnalysis) {
+        btnTopTradeAnalysis.addEventListener("click", () => {
+            switchJournalTab("analysis");
+            const journalSec = document.getElementById("signal-journal-section");
+            if (journalSec) {
+                journalSec.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
         });
     }
 
@@ -974,12 +1011,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td class="text-left">
                     <span class="side-pill ${sig.signal_type}">${sig.symbol}</span>
                     <strong class="font-mono" style="margin-left:0.35rem;">${sig.contract_name}</strong>
-                    ${sig.is_paper_trade ? '<small style="color:var(--cyan-accent);font-size:0.65rem;">(Paper)</small>' : ''}
+                    <span class="chip-moneyness" style="font-size:0.65rem;padding:0.15rem 0.35rem;background:rgba(255,255,255,0.06);border-radius:4px;color:var(--text-secondary);margin-left:0.25rem;">${sig.moneyness || 'ATM'}</span>
+                    ${sig.is_paper_trade ? '<small style="color:var(--cyan-accent);font-size:0.65rem;margin-left:0.25rem;">(Paper)</small>' : ''}
+                    <div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;">PCR: ${sig.pcr_at_entry ? sig.pcr_at_entry.toFixed(2) : '1.0'} &bull; ${sig.duration_mins || 0}m</div>
                 </td>
                 <td class="text-right font-mono">₹${sig.entry_price.toFixed(2)}</td>
                 <td class="text-right font-mono" style="font-weight:700;">₹${sig.current_price.toFixed(2)}</td>
                 <td class="text-right font-mono" style="font-size:0.75rem;color:var(--text-muted);">
                     L: ₹${sig.lowest_price.toFixed(1)} &bull; H: ₹${sig.highest_price.toFixed(1)}
+                    <div style="color:var(--emerald-accent);font-size:0.68rem;">MFE: +${sig.mfe_points ? sig.mfe_points.toFixed(1) : (sig.highest_price - sig.entry_price).toFixed(1)} pts</div>
                 </td>
                 <td class="text-center">
                     <div class="targets-chip-wrap font-mono">
@@ -1061,14 +1101,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 outcomeText = "✋ SQUARED OFF";
             }
 
+            const mfeDisplay = sig.mfe_points ? `+${sig.mfe_points.toFixed(1)} pts` : `${(sig.highest_price - sig.entry_price).toFixed(1)} pts`;
+
             tr.innerHTML = `
                 <td class="text-left font-mono" style="font-size:0.75rem;">
                     <div>${sig.created_at.split(" ")[0]}</div>
-                    <div style="color:var(--text-muted);">${sig.created_at.split(" ")[1] || ""}</div>
+                    <div style="color:var(--text-muted);">${sig.created_at.split(" ")[1] || ""} (${sig.duration_mins || 0}m)</div>
                 </td>
                 <td class="text-left">
                     <span class="side-pill ${sig.signal_type}">${sig.symbol}</span>
                     <strong class="font-mono" style="margin-left:0.35rem;">${sig.contract_name}</strong>
+                    <span class="chip-moneyness" style="font-size:0.65rem;padding:0.15rem 0.35rem;background:rgba(255,255,255,0.06);border-radius:4px;color:var(--text-secondary);margin-left:0.25rem;">${sig.moneyness || 'ATM'}</span>
+                    <div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;">Peak: ${mfeDisplay} &bull; PCR: ${sig.pcr_at_entry ? sig.pcr_at_entry.toFixed(2) : '1.0'}</div>
                 </td>
                 <td class="text-right font-mono">₹${sig.entry_price.toFixed(2)}</td>
                 <td class="text-right font-mono" style="font-weight:600;">₹${sig.exit_price ? sig.exit_price.toFixed(2) : sig.current_price.toFixed(2)}</td>
@@ -1188,9 +1232,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 setup_score: optBuying.setup_score || 0,
                 reason: optBuying.reason || "Manual Paper Trade Setup",
                 lots: lots,
+                pcr: bias.pcr || state.lastData.pcr || 1.0,
+                bias: bias.bias || "NEUTRAL",
+                atm_iv: state.lastData.atm_iv || 0.0,
+                moneyness: tradePlan.moneyness || "ATM",
             };
 
             try {
+                btnLogPaperTrade.disabled = true;
                 const resp = await fetch("/api/options-desk/signals/record", {
                     method: "POST",
                     headers: {
@@ -1211,6 +1260,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             } catch (err) {
                 console.error("Failed to log paper trade:", err);
+            } finally {
+                btnLogPaperTrade.disabled = false;
             }
         });
     }
@@ -1242,35 +1293,246 @@ document.addEventListener("DOMContentLoaded", () => {
      */
     if (btnExportJournalCsv) {
         btnExportJournalCsv.addEventListener("click", () => {
-            if (!lastSignalsSummary || !lastSignalsSummary.history_signals) {
-                alert("No trade history available to export.");
-                return;
-            }
-            const history = lastSignalsSummary.history_signals;
-            const headers = [
-                "ID", "SYMBOL", "TYPE", "CONTRACT", "STRIKE", "EXPIRY",
-                "ENTRY_PRICE", "EXIT_PRICE", "STOP_LOSS", "TARGET_1", "TARGET_2",
-                "POINTS_PNL", "PNL_PCT", "LOTS", "LOT_SIZE", "NET_PNL_INR",
-                "STATUS", "TRIGGER_REASON", "CREATED_AT", "EXIT_TIME"
-            ];
-
-            const rows = history.map((s) => [
-                s.id, s.symbol, s.signal_type, `"${s.contract_name}"`, s.strike, s.expiry,
-                s.entry_price, s.exit_price || s.current_price, s.stop_loss, s.target_1, s.target_2,
-                s.points_pnl, s.pnl_pct, s.lots, s.lot_size, s.net_pnl_inr,
-                `"${s.status}"`, `"${(s.trigger_reason || "").replace(/"/g, '""')}"`,
-                `"${s.created_at}"`, `"${s.exit_time || ""}"`
-            ]);
-
-            let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Option_Desk_Trade_Journal_${new Date().toISOString().slice(0,10)}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            window.location.href = "/api/options-desk/signals/export-csv";
         });
+    }
+
+    /**
+     * Fetches AI Strategy Diagnostic & Parameter Optimization Report
+     */
+    async function loadTradeAnalysis() {
+        try {
+            const resp = await fetch("/api/options-desk/trade-analysis");
+            const result = await resp.json();
+            if (result.success && result.report) {
+                renderTradeAnalysis(result.report);
+            }
+        } catch (err) {
+            console.error("Error loading trade analysis:", err);
+        }
+    }
+
+    /**
+     * Renders Strategy Diagnostics & Optimization Blueprint (5 Required Dashboard Sections)
+     */
+    function renderTradeAnalysis(rep) {
+        const perf = rep.overall_performance || rep.performance || {};
+        const exc = (rep.dimensions && rep.dimensions.excursion) || rep.excursion_analysis || {};
+        const bestConds = rep.best_conditions || [];
+        const worstConds = rep.worst_conditions || [];
+        const leaks = rep.top_profit_leaks || rep.diagnostic_issues || [];
+        const recs = rep.recommended_changes || rep.tuning_recommendations || [];
+        const dims = rep.dimensions || {};
+        const segs = rep.segmentations || {};
+        const samples = rep.sample_size || {};
+
+        const score = perf.strategy_health_score !== undefined ? perf.strategy_health_score : 50;
+        const totalTrades = samples.closed_trades || 0;
+
+        // Badge in Tab Header
+        if (strategyScoreBadge) {
+            strategyScoreBadge.textContent = `${score}`;
+        }
+
+        // Section 1: Overall Performance Summary
+        if (diagLastAnalyzed) {
+            diagLastAnalyzed.textContent = `Last Audited: ${rep.timestamp || '--'}`;
+        }
+
+        if (diagOvWinrate) {
+            const wr = samples.win_rate_pct !== undefined ? samples.win_rate_pct : 0.0;
+            diagOvWinrate.textContent = `${wr.toFixed(1)}%`;
+            diagOvWinrate.className = `d-val font-mono ${wr >= 50 ? 'val-win' : 'val-loss'}`;
+        }
+
+        if (diagOvRatio) {
+            diagOvRatio.textContent = totalTrades > 0
+                ? `${samples.win_count}W / ${samples.loss_count}L / ${samples.be_count || 0}BE`
+                : '0 Closed Trades';
+        }
+
+        if (diagOvPf) {
+            diagOvPf.textContent = perf.profit_factor !== undefined ? perf.profit_factor : '1.00';
+        }
+
+        if (diagOvPts) {
+            const pts = perf.total_pts || 0.0;
+            const sign = pts >= 0 ? '+' : '';
+            diagOvPts.textContent = `${sign}${pts.toFixed(1)} pts`;
+            diagOvPts.className = `d-val font-mono ${pts >= 0 ? 'val-win' : 'val-loss'}`;
+        }
+
+        if (diagOvAvgWinLoss) {
+            diagOvAvgWinLoss.textContent = `Avg W: +${perf.avg_win_pts || 0} | Avg L: -${perf.avg_loss_pts || 0} pts`;
+        }
+
+        if (diagOvInr) {
+            const inr = perf.total_inr || 0.0;
+            const sign = inr >= 0 ? '+₹' : '-₹';
+            diagOvInr.textContent = `${sign}${formatIndianNumber(Math.abs(inr).toFixed(2))}`;
+            diagOvInr.className = `d-val font-mono ${inr >= 0 ? 'val-win' : 'val-loss'}`;
+        }
+
+        if (diagMfeEff) {
+            diagMfeEff.textContent = `${exc.mfe_capture_efficiency_pct || 0}%`;
+        }
+
+        if (diagHealthScore) {
+            diagHealthScore.textContent = `${score}/100`;
+            if (score >= 75) {
+                diagHealthScore.style.color = "var(--bullish-green)";
+            } else if (score >= 50) {
+                diagHealthScore.style.color = "var(--gold-light)";
+            } else {
+                diagHealthScore.style.color = "var(--bearish-red)";
+            }
+        }
+
+        if (diagHealthGrade) {
+            if (totalTrades === 0) {
+                diagHealthGrade.textContent = "Awaiting Paper Trade Logs";
+            } else if (score >= 80) {
+                diagHealthGrade.textContent = "★ Robust Execution";
+            } else if (score >= 65) {
+                diagHealthGrade.textContent = "✓ Moderate Quality";
+            } else {
+                diagHealthGrade.textContent = "⚠ High Leakage Drag";
+            }
+        }
+
+        // Section 2: Best Conditions
+        if (diagBestList) {
+            if (bestConds.length === 0) {
+                diagBestList.innerHTML = `<div class="empty-state" style="padding:1rem;color:var(--text-muted);">Awaiting winning trade samples to detect optimal conditions.</div>`;
+            } else {
+                diagBestList.innerHTML = "";
+                bestConds.forEach((c) => {
+                    const el = document.createElement("div");
+                    el.className = "condition-item condition-best";
+                    el.innerHTML = `
+                        <div class="condition-header">
+                            <span class="condition-cat font-mono">${c.category}</span>
+                            <span class="condition-name font-mono"><strong>${c.condition}</strong></span>
+                        </div>
+                        <div class="condition-metric font-mono text-bullish">${c.metric}</div>
+                    `;
+                    diagBestList.appendChild(el);
+                });
+            }
+        }
+
+        // Section 3: Worst Conditions
+        if (diagWorstList) {
+            if (worstConds.length === 0) {
+                diagWorstList.innerHTML = `<div class="empty-state" style="padding:1rem;color:var(--text-muted);">No persistent underperforming conditions detected.</div>`;
+            } else {
+                diagWorstList.innerHTML = "";
+                worstConds.forEach((c) => {
+                    const el = document.createElement("div");
+                    el.className = "condition-item condition-worst";
+                    el.innerHTML = `
+                        <div class="condition-header">
+                            <span class="condition-cat font-mono">${c.category}</span>
+                            <span class="condition-name font-mono"><strong>${c.condition}</strong></span>
+                        </div>
+                        <div class="condition-metric font-mono text-bearish">${c.metric}</div>
+                    `;
+                    diagWorstList.appendChild(el);
+                });
+            }
+        }
+
+        // Section 4: Top 3 Actual Profit Leaks
+        if (analysisIssuesList) {
+            if (leaks.length === 0) {
+                analysisIssuesList.innerHTML = `<div class="empty-state" style="padding:1rem;color:var(--text-muted);">No major profit leakages detected in recorded journal trades.</div>`;
+            } else {
+                analysisIssuesList.innerHTML = "";
+                leaks.forEach((item, idx) => {
+                    const sev = item.severity || "WARNING";
+                    const el = document.createElement("div");
+                    el.className = `issue-item severity-${sev}`;
+                    el.innerHTML = `
+                        <div class="issue-header">
+                            <span class="issue-title"><span class="leak-rank">#${idx + 1}</span> ${item.title}</span>
+                            <span class="issue-badge badge-${sev}">${sev}</span>
+                        </div>
+                        <div class="issue-desc"><strong>Evidence:</strong> ${item.evidence || item.message}</div>
+                        ${item.likely_cause ? `<div class="issue-root-cause"><strong>Likely Cause:</strong> ${item.likely_cause}</div>` : (item.root_cause ? `<div class="issue-root-cause"><strong>Likely Cause:</strong> ${item.root_cause}</div>` : "")}
+                        ${item.impact ? `<div class="issue-impact font-mono text-amber">Impact: ${item.impact}</div>` : ""}
+                    `;
+                    analysisIssuesList.appendChild(el);
+                });
+            }
+        }
+
+        // Section 5: Recommended Changes (Advisory Only)
+        if (analysisTuningList) {
+            if (recs.length === 0) {
+                analysisTuningList.innerHTML = `<div class="empty-state" style="padding:1rem;color:var(--text-muted);">No parameter adjustments currently required.</div>`;
+            } else {
+                analysisTuningList.innerHTML = "";
+                recs.forEach((r) => {
+                    const el = document.createElement("div");
+                    el.className = "tuning-item";
+                    el.innerHTML = `
+                        <div class="tuning-header">
+                            <span class="tuning-param">${r.rule || r.parameter}</span>
+                            <span class="tuning-cat font-mono">${r.target_file ? r.target_file.split('/').pop() : 'Advisory'}</span>
+                        </div>
+                        <div class="tuning-obs"><strong>Observation:</strong> ${r.observation || r.impact || ''}</div>
+                        <div class="tuning-prop"><strong>Proposed Change:</strong> <span class="text-bullish font-mono">${r.proposal || r.recommended}</span></div>
+                        ${r.expected_benefit ? `<div class="tuning-benefit"><strong>Expected Benefit:</strong> ${r.expected_benefit}</div>` : ""}
+                        <div class="tuning-target-tag">Target: ${r.target_file || r.code_target || 'Strategy Rules'} (Manual Approval Required)</div>
+                    `;
+                    analysisTuningList.appendChild(el);
+                });
+            }
+        }
+
+        // Section 6: Breakdown Tables (Moneyness & Time)
+        if (diagMoneynessTbody) {
+            const mList = (dims.moneyness) || (segs.by_moneyness) || [];
+            if (mList.length === 0) {
+                diagMoneynessTbody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding:1rem;color:var(--text-muted);">No moneyness data recorded yet.</td></tr>`;
+            } else {
+                diagMoneynessTbody.innerHTML = "";
+                mList.forEach((m) => {
+                    const tr = document.createElement("tr");
+                    const ptsClass = m.total_pts >= 0 ? "val-pos" : "val-neg";
+                    const ptsSign = m.total_pts >= 0 ? "+" : "";
+                    tr.innerHTML = `
+                        <td class="text-left font-mono"><strong>${m.moneyness}</strong></td>
+                        <td class="text-center font-mono">${m.count}</td>
+                        <td class="text-right font-mono ${m.win_rate_pct >= 50 ? 'val-pos' : 'val-neg'}">${m.win_rate_pct}%</td>
+                        <td class="text-right font-mono">${m.profit_factor}</td>
+                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${m.total_pts.toFixed(1)} pts</td>
+                    `;
+                    diagMoneynessTbody.appendChild(tr);
+                });
+            }
+        }
+
+        if (diagTimewindowTbody) {
+            const wList = (dims.time_of_day) || (segs.by_time_window) || [];
+            if (wList.length === 0) {
+                diagTimewindowTbody.innerHTML = `<tr><td colspan="4" class="text-center" style="padding:1rem;color:var(--text-muted);">No session time data recorded yet.</td></tr>`;
+            } else {
+                diagTimewindowTbody.innerHTML = "";
+                wList.forEach((w) => {
+                    const tr = document.createElement("tr");
+                    const ptsClass = w.total_pts >= 0 ? "val-pos" : "val-neg";
+                    const ptsSign = w.total_pts >= 0 ? "+" : "";
+                    tr.innerHTML = `
+                        <td class="text-left font-mono">${w.window || w.label}</td>
+                        <td class="text-center font-mono">${w.count}</td>
+                        <td class="text-right font-mono ${w.win_rate_pct >= 50 ? 'val-pos' : 'val-neg'}">${w.win_rate_pct}%</td>
+                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${w.total_pts.toFixed(1)} pts</td>
+                    `;
+                    diagTimewindowTbody.appendChild(tr);
+                });
+            }
+        }
     }
 
     // Export Chain CSV Handler
@@ -1278,9 +1540,16 @@ document.addEventListener("DOMContentLoaded", () => {
         btnExportCsv.addEventListener("click", exportChainToCsv);
     }
 
-    // Initial Load & Start Timer
+    // Initial Load & Start Timers
     loadOptionsDeskData(false);
     loadSignalsData();
+    loadTradeAnalysis();
     startCountdown();
+
+    // Dedicated 1-minute auto-refresh for Signal Tracker & Journal only
+    setInterval(() => {
+        loadSignalsData();
+    }, 60000);
 });
+
 

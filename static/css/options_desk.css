@@ -1643,20 +1643,465 @@ body.desk-body {
 }
 
 /* ==========================================================================
-   Footer
+   AI Strategy Diagnostics & Optimization Agent
    ========================================================================== */
-.desk-footer {
-    background: var(--bg-surface);
-    border-top: 1px solid var(--border-subtle);
-    padding: 0.75rem 0;
-    font-size: 0.68rem;
-    color: var(--text-muted);
+.tab-badge-gold {
+    background: rgba(229, 169, 59, 0.18) !important;
+    color: var(--gold-primary) !important;
+    border: 1px solid rgba(229, 169, 59, 0.35) !important;
 }
 
-.footer-inner {
+.analysis-agent-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 0.5rem 0;
+}
+
+/* Advisory Banner */
+.analysis-advisory-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(229, 169, 59, 0.08);
+    border: 1px solid rgba(229, 169, 59, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.9rem;
+}
+
+.advisory-icon {
+    color: var(--gold-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.advisory-text {
+    flex: 1;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.advisory-text strong {
+    color: var(--gold-primary);
+    font-weight: 700;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.6rem !important;
+    font-size: 0.72rem !important;
+}
+
+/* Section 1: Diagnostic Overview Card */
+.diag-overview-card {
+    background: linear-gradient(135deg, rgba(26, 32, 44, 0.85), rgba(18, 22, 31, 0.95));
+    border: 1px solid rgba(229, 169, 59, 0.25);
+}
+
+.diag-timestamp {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.diag-metrics-strip {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.65rem;
+}
+
+.diag-metric-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.5rem 0.65rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.d-lbl {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+
+.d-val {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.d-sub {
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.text-gold {
+    color: var(--gold-light) !important;
+}
+
+.text-bullish {
+    color: var(--bullish-green) !important;
+}
+
+.text-bearish {
+    color: var(--bearish-red) !important;
+}
+
+.text-amber {
+    color: var(--amber-accent) !important;
+}
+
+.text-emerald {
+    color: var(--emerald-accent) !important;
+}
+
+/* Sections 2 & 3: Best / Worst Conditions */
+.card-best-conditions {
+    border-color: rgba(16, 185, 129, 0.25);
+}
+
+.card-worst-conditions {
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.conditions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.condition-item {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.condition-best {
+    border-left: 3px solid var(--bullish-green);
+    background: rgba(16, 185, 129, 0.02);
+}
+
+.condition-worst {
+    border-left: 3px solid var(--bearish-red);
+    background: rgba(239, 68, 68, 0.02);
+}
+
+.condition-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.condition-cat {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.condition-name {
+    font-size: 0.75rem;
+    color: var(--text-primary);
+}
+
+.condition-metric {
+    font-size: 0.72rem;
+}
+
+/* Section 4: Top 3 Profit Leaks */
+.leak-rank {
+    display: inline-block;
+    background: var(--bearish-red);
+    color: #ffffff;
+    font-size: 0.6rem;
+    font-weight: 800;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-right: 0.35rem;
+    vertical-align: 1px;
+}
+
+.issue-impact {
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+/* Section 5: Recommended Changes (Advisory) */
+.badge-advisory-only {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--gold-primary);
+    background: rgba(229, 169, 59, 0.12);
+    border: 1px solid rgba(229, 169, 59, 0.3);
+    padding: 0.15rem 0.45rem;
+    border-radius: 3px;
+}
+
+.tuning-obs, .tuning-prop, .tuning-benefit {
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.tuning-obs {
+    color: var(--text-secondary);
+}
+
+.tuning-prop {
+    color: var(--text-primary);
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+}
+
+.tuning-benefit {
+    color: var(--emerald-accent);
+}
+
+.tuning-target-tag {
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border-top: 1px dashed var(--border-subtle);
+    padding-top: 0.35rem;
+    margin-top: 0.2rem;
+}
+
+.btn-gold {
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold-primary));
+    color: #12161f;
+    font-weight: 700;
+    border: none;
+    box-shadow: 0 2px 8px rgba(229, 169, 59, 0.3);
+}
+
+.btn-gold:hover {
+    background: linear-gradient(135deg, var(--gold-primary), var(--gold-light));
+    color: #0d1117;
+}
+
+.analysis-grid-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.analysis-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.a-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 0.65rem;
+}
+
+.a-card-subtitle {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    display: block;
+}
+
+.a-card-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+}
+
+.issues-list, .tuning-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.issue-item {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    border-left: 3px solid var(--amber-accent);
+}
+
+.issue-item.severity-CRITICAL {
+    border-left-color: var(--bearish-red);
+    background: rgba(239, 68, 68, 0.03);
+}
+
+.issue-item.severity-WARNING {
+    border-left-color: var(--amber-accent);
+    background: rgba(245, 158, 11, 0.03);
+}
+
+.issue-item.severity-POSITIVE {
+    border-left-color: var(--bullish-green);
+    background: rgba(16, 185, 129, 0.03);
+}
+
+.issue-item.severity-INFO {
+    border-left-color: var(--cyan-accent);
+}
+
+.issue-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+}
+
+.issue-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.issue-badge {
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 0.12rem 0.4rem;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+}
+
+.issue-badge.badge-CRITICAL {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
+}
+
+.issue-badge.badge-WARNING {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--amber-accent);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.issue-badge.badge-POSITIVE {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.issue-badge.badge-INFO {
+    background: rgba(6, 182, 212, 0.12);
+    color: var(--cyan-accent);
+    border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.issue-desc {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.issue-root-cause {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+}
+
+.issue-root-cause strong {
+    color: var(--amber-accent);
+}
+
+.tuning-item {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    border-left: 3px solid var(--emerald-accent);
+}
+
+.tuning-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tuning-param {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.tuning-cat {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+}
+
+.analysis-tables-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.analysis-sub-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.sub-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sub-card-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.sub-card-badge {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+}
+
+.mini-table th {
+    font-size: 0.65rem;
+    padding: 0.4rem 0.5rem;
+}
+
+.mini-table td {
+    font-size: 0.72rem;
+    padding: 0.4rem 0.5rem;
 }
 
 @keyframes fadeIn {
