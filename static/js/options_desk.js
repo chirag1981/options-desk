@@ -1546,10 +1546,10 @@ document.addEventListener("DOMContentLoaded", () => {
     loadTradeAnalysis();
     startCountdown();
 
-    // Dedicated 1-minute auto-refresh for Signal Tracker & Journal only
+    // Dedicated 15-second auto-refresh for Signal Tracker & Journal only
     setInterval(() => {
         loadSignalsData();
-    }, 60000);
+    }, 15000);
 });
 
 
