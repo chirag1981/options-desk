@@ -71,11 +71,15 @@ def get_symbols():
 @options_desk_bp.route("/api/options-desk/status", methods=["GET"])
 def get_desk_status():
     """Returns health and safe connection status without disclosing secrets."""
+    from app.services.flattrade_auth import get_flattrade_token
     from app.services.fyers_auth import load_cached_token
-    has_token = bool(load_cached_token())
+    ft_token = bool(get_flattrade_token())
+    fyers_token = bool(load_cached_token())
     return jsonify({
         "success": True,
-        "fyers_authenticated": has_token,
+        "broker": "FLATTRADE" if ft_token else ("FYERS" if fyers_token else "NONE"),
+        "flattrade_authenticated": ft_token,
+        "fyers_authenticated": fyers_token,
         "engine_status": "OPERATIONAL",
         "auto_refresh_interval_sec": 180,
     })
