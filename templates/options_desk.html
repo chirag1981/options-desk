@@ -323,14 +323,6 @@
                     </svg>
                     <span>Export Journal</span>
                 </button>
-
-                <button type="button" class="btn-action btn-danger-soft" id="btn-clear-journal" aria-label="Clear Trade History" title="Clear Completed History">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                    <span>Clear Closed</span>
-                </button>
             </div>
         </div>
 
@@ -737,16 +729,76 @@
 
     </section>
 
-    <!-- SECTION 3: OI TREND (ATM ± 5 STRIKES: 5 UP, 5 DOWN) -->
-    <section class="desk-section" aria-label="OI Trend Near Spot">
+    <!-- SECTION 3: TRENDING OI (ATM ± 5 STRIKES: 5 UP, 5 DOWN) -->
+    <section class="desk-section" aria-label="Trending OI Near Spot" id="section-trending-oi">
         <div class="section-header-strip">
             <div class="strip-left">
-                <h3 class="section-title">OI TREND</h3>
-                <span class="section-subtitle">Focused strike cluster around current spot (ATM &plusmn; 5 strikes: 5 Up, 5 Down)</span>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <h3 class="section-title">TRENDING OI</h3>
+                    <span class="badge badge-primary font-mono" style="font-size:0.7rem;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">ATM &plusmn; 5 STRIKES</span>
+                </div>
+                <span class="section-subtitle">Automatic 5 strikes up &amp; 5 strikes down from ATM (11 strikes). Real-time &Delta;OI difference percentage, strength dots (&ge;40% conviction rule), direction of change &amp; sentiment analysis</span>
+            </div>
+            <div class="strip-controls">
+                <!-- Sub-view tabs -->
+                <div class="trending-view-tabs" role="tablist" style="display:flex;gap:0.25rem;background:rgba(255,255,255,0.04);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);">
+                    <button type="button" class="btn-tab-pill active" id="btn-tab-trending-oi" role="tab" aria-selected="true" style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:var(--accent-color, #3b82f6);color:#fff;cursor:pointer;font-weight:600;">Trending OI (Time Series)</button>
+                    <button type="button" class="btn-tab-pill" id="btn-tab-strike-breakdown" role="tab" aria-selected="false" style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:transparent;color:var(--text-muted, #94a3b8);cursor:pointer;font-weight:500;">Strike Breakdown</button>
+                </div>
+
+                <!-- Interval Selector -->
+                <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
+                    <label for="trending-interval-select" class="control-label" style="font-size:0.75rem;">INTERVAL:</label>
+                    <select id="trending-interval-select" class="desk-select" aria-label="Select Time Interval" style="padding:0.25rem 0.5rem;font-size:0.75rem;">
+                        <option value="5" selected>5 min</option>
+                        <option value="15">15 min</option>
+                        <option value="3">3 min</option>
+                    </select>
+                </div>
             </div>
         </div>
 
-        <div class="table-responsive">
+        <!-- Selected Strikes Bar & Live Capsule KPI (matching Oi Pulse header bar) -->
+        <div class="trending-oi-meta-strip" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:0.6rem 1rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:6px;margin-bottom:0.75rem;gap:0.5rem;">
+            <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);font-weight:600;">Selected Strike Prices (ATM &plusmn; 5):</span>
+                <div id="trending-selected-strikes-container" style="display:flex;gap:0.25rem;flex-wrap:wrap;align-items:center;">
+                    <span style="color:var(--text-muted,#94a3b8);font-size:0.75rem;">Loading strikes...</span>
+                </div>
+            </div>
+            <div id="trending-live-capsule-summary" style="display:flex;align-items:center;gap:0.75rem;">
+                <!-- Live Strength Capsule & Summary Info populated by JS -->
+            </div>
+        </div>
+
+        <!-- VIEW 1: Trending OI Oi Pulse Table -->
+        <div id="trending-oi-timeseries-container" class="table-responsive">
+            <table class="desk-table trending-pulse-table" id="trending-pulse-table">
+                <thead>
+                    <tr>
+                        <th class="text-center">Time</th>
+                        <th class="text-right">LTP</th>
+                        <th class="text-center">Day H/L</th>
+                        <th class="text-right">Call &Delta;OI</th>
+                        <th class="text-right">Put &Delta;OI</th>
+                        <th class="text-right">Diff OI</th>
+                        <th class="text-center">Strength</th>
+                        <th class="text-center">Dir</th>
+                        <th class="text-right">&Delta; Dir</th>
+                        <th class="text-right">Dir %</th>
+                        <th class="text-center">PCR</th>
+                        <th class="text-center">Day H/L Diff</th>
+                        <th class="text-center">Sentiment</th>
+                    </tr>
+                </thead>
+                <tbody id="trending-pulse-tbody">
+                    <tr><td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">Loading Trending OI data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- VIEW 2: Strike Breakdown Table (ATM ± 5 Strikes) -->
+        <div id="trending-strike-breakdown-container" class="table-responsive" style="display:none;">
             <table class="desk-table trend-table" id="oi-trend-table">
                 <thead>
                     <tr>

@@ -11,6 +11,7 @@ from app.services.fyers_options_service import (
     INDEX_CONFIGS
 )
 from app.services.options_engine import analyze_option_desk
+from app.services.options_signal_service import get_trending_oi_timeseries
 
 options_desk_bp = Blueprint("options_desk", __name__)
 
@@ -49,7 +50,58 @@ def get_options_desk_data():
     try:
         raw_chain = fetch_option_chain_data(symbol=symbol, expiry=expiry, force_refresh=force)
         analysis = analyze_option_desk(raw_chain)
+
+        # Attach Trending OI timeseries (ATM ± 5 strikes, default 5m intervals)
+        try:
+            interval_m = int(request.args.get("interval", 5))
+        except (TypeError, ValueError):
+            interval_m = 5
+
+        timeseries = get_trending_oi_timeseries(
+            symbol=symbol,
+            interval_minutes=interval_m,
+            current_chain=analysis.get("detailed_chain", []),
+            spot_price=float(analysis.get("market_bias", {}).get("spot_price", 0.0)),
+            strike_step=float(analysis.get("key_levels", {}).get("strike_step", 50.0)),
+        )
+        analysis["trending_oi_timeseries"] = timeseries
+
         return jsonify({"success": True, "data": analysis})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@options_desk_bp.route("/api/options-desk/trending-oi", methods=["GET"])
+def get_trending_oi():
+    """
+    Dedicated endpoint for Oi Pulse style Trending OI time-series table.
+    Query params:
+      - symbol: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX
+      - interval: 3, 5, 15 (minutes, default 5)
+      - date: YYYY-MM-DD (optional, defaults to today)
+    """
+    symbol = request.args.get("symbol", "NIFTY").upper()
+    if symbol not in INDEX_CONFIGS:
+        symbol = "NIFTY"
+    try:
+        interval_m = int(request.args.get("interval", 5))
+    except (TypeError, ValueError):
+        interval_m = 5
+
+    trade_date = request.args.get("date", None)
+
+    try:
+        raw_chain = fetch_option_chain_data(symbol=symbol)
+        analysis = analyze_option_desk(raw_chain)
+        timeseries = get_trending_oi_timeseries(
+            symbol=symbol,
+            trade_date=trade_date,
+            interval_minutes=interval_m,
+            current_chain=analysis.get("detailed_chain", []),
+            spot_price=float(analysis.get("market_bias", {}).get("spot_price", 0.0)),
+            strike_step=float(analysis.get("key_levels", {}).get("strike_step", 50.0)),
+        )
+        return jsonify({"success": True, "data": timeseries})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -70,16 +122,13 @@ def get_symbols():
 
 @options_desk_bp.route("/api/options-desk/status", methods=["GET"])
 def get_desk_status():
-    """Returns health and safe connection status without disclosing secrets."""
-    from app.services.flattrade_auth import get_flattrade_token
-    from app.services.fyers_auth import load_cached_token
-    ft_token = bool(get_flattrade_token())
-    fyers_token = bool(load_cached_token())
+    """Returns health and safe FYERS connection status without disclosing secrets."""
+    from app.services.fyers_auth import get_fyers_token
+    fy_token = bool(get_fyers_token())
     return jsonify({
         "success": True,
-        "broker": "FLATTRADE" if ft_token else ("FYERS" if fyers_token else "NONE"),
-        "flattrade_authenticated": ft_token,
-        "fyers_authenticated": fyers_token,
+        "broker": "FYERS" if fy_token else "NONE",
+        "fyers_authenticated": fy_token,
         "engine_status": "OPERATIONAL",
         "auto_refresh_interval_sec": 180,
     })

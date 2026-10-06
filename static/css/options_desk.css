@@ -2135,3 +2135,209 @@ body.desk-body {
     .ticker-divider { display: none; }
     .activity-grid { grid-template-columns: 1fr; }
 }
+
+/* ==============================================================================
+   TRENDING OI & OI PULSE COMPONENT STYLES
+   ============================================================================== */
+.trending-pulse-table {
+    width: 100%;
+    table-layout: auto;
+    border-collapse: collapse;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.73rem;
+}
+
+.trending-pulse-table th {
+    padding: 0.4rem 0.35rem;
+    font-size: 0.67rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: var(--bg-surface-elevated, #1e293b);
+    border-bottom: 2px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    white-space: nowrap;
+}
+
+.trending-pulse-table td {
+    padding: 0.35rem 0.35rem;
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+    white-space: nowrap;
+    font-size: 0.73rem;
+}
+
+.trending-pulse-table tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.trending-pulse-table .sub-date {
+    display: block;
+    font-size: 0.58rem;
+    color: var(--text-muted, #94a3b8);
+    font-weight: 500;
+    line-height: 1;
+    margin-top: 1px;
+}
+
+/* Strength Capsule */
+.strength-capsule {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    font-family: var(--font-mono, monospace);
+    font-weight: 700;
+    font-size: 0.70rem;
+    letter-spacing: 0.3px;
+    transition: transform 0.15s ease;
+}
+
+.strength-capsule.strength-bearish {
+    background: rgba(239, 68, 68, 0.18);
+    border: 1px solid rgba(239, 68, 68, 0.6);
+    color: #f87171;
+}
+
+.strength-capsule.strength-bullish {
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.6);
+    color: #4ade80;
+}
+
+.strength-capsule.strength-weak {
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    color: #94a3b8;
+}
+
+.strength-dots {
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    line-height: 1;
+}
+
+/* Day H/L Break Badges */
+.badge-dlb {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    background: rgba(239, 68, 68, 0.25);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.badge-dhb {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    background: rgba(34, 197, 94, 0.25);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.5);
+}
+
+.badge-diff-break-low {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    background: rgba(239, 68, 68, 0.22);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.badge-diff-break-high {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    background: rgba(34, 197, 94, 0.22);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.5);
+}
+
+/* Direction Arrows */
+.dir-arrow-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    font-weight: 800;
+    font-size: 0.8rem;
+}
+
+.dir-arrow-pill.dir-green {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.dir-arrow-pill.dir-red {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+/* Sentiment Badges */
+.badge-sentiment-bullish {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.5);
+}
+
+.badge-sentiment-bearish {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.badge-sentiment-neutral {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.67rem;
+    font-weight: 600;
+    background: rgba(148, 163, 184, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+/* Strike Chips */
+.strike-chip {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-family: var(--font-mono, monospace);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-color, #e2e8f0);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.strike-chip.is-atm {
+    background: rgba(59, 130, 246, 0.25);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.7);
+    font-weight: 800;
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.3);
+}

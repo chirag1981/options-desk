@@ -7,15 +7,25 @@ __pycache__/
 env/
 venv/
 .venv/
+.pytest_cache/
 
 # Environment and Secrets (CRITICAL)
 .env
 .env.local
 .env.*.local
+config/.env
 instance/
 *.json
 !app/
 !config/
+
+# SQLite Databases & Locks
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.lock
+*.exclusive.lock
 
 # Logs
 *.log

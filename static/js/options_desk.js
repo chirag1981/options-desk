@@ -1,5 +1,5 @@
 /**
- * static/js/options_desk.js — Vanilla ES6 Client Controller for Fyers Option Desk
+ * static/js/options_desk.js — Vanilla ES6 Client Controller for FYERS Options Desk Terminal
  * Handles 3-minute auto-refresh cycle, symbol/expiry changes, data rendering,
  * and CSV export without UI flickering.
  */
@@ -93,6 +93,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const optionChainTbody = document.getElementById("option-chain-tbody");
     const btnExportCsv = document.getElementById("btn-export-csv");
 
+    // Trending OI Elements
+    const btnTabTrendingOi = document.getElementById("btn-tab-trending-oi");
+    const btnTabStrikeBreakdown = document.getElementById("btn-tab-strike-breakdown");
+    const trendingIntervalSelect = document.getElementById("trending-interval-select");
+    const trendingSelectedStrikesContainer = document.getElementById("trending-selected-strikes-container");
+    const trendingLiveCapsuleSummary = document.getElementById("trending-live-capsule-summary");
+    const trendingOiTimeseriesContainer = document.getElementById("trending-oi-timeseries-container");
+    const trendingStrikeBreakdownContainer = document.getElementById("trending-strike-breakdown-container");
+    const trendingPulseTbody = document.getElementById("trending-pulse-tbody");
+
     // Initial state setup
     if (symbolSelect) state.symbol = symbolSelect.value;
     if (expirySelect) state.expiry = expirySelect.value;
@@ -134,27 +144,46 @@ document.addEventListener("DOMContentLoaded", () => {
         if (btnRefresh) btnRefresh.classList.add("spinning");
         if (liveStatusText) liveStatusText.textContent = "UPDATING...";
 
+        const selectedInterval = trendingIntervalSelect ? trendingIntervalSelect.value : "5";
         const params = new URLSearchParams({
             symbol: state.symbol,
             expiry: state.expiry || "",
+            interval: selectedInterval || "5",
             refresh: isManual ? "true" : "false",
         });
 
         try {
             const resp = await fetch(`/api/options-desk/data?${params.toString()}`);
-            const result = await resp.json();
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+            }
+            result = await resp.json();
 
-            if (result.success && result.data) {
+            if (result && result.success && result.data) {
                 state.lastData = result.data;
-                renderDashboard(result.data);
-                loadSignalsData();
-                if (liveStatusText) liveStatusText.textContent = result.data.meta.data_status || "LIVE";
+                try {
+                    renderDashboard(result.data);
+                } catch (renderErr) {
+                    console.error("Error rendering dashboard UI:", renderErr);
+                }
+                try {
+                    loadSignalsData();
+                } catch (sigErr) {
+                    console.error("Error loading signal tracker data:", sigErr);
+                }
+                const statusLabel = (result.data.meta && result.data.meta.data_status) || "LIVE";
+                if (liveStatusText) liveStatusText.textContent = statusLabel;
+                if (liveStatusPill) {
+                    liveStatusPill.className = `status-pill ${statusLabel.toLowerCase()}`;
+                }
             } else {
                 if (liveStatusText) liveStatusText.textContent = "ERROR";
-                console.error("Options API Error:", result.error);
+                if (liveStatusPill) liveStatusPill.className = "status-pill error";
+                console.error("Options API Error:", result ? result.error : "Empty response");
             }
         } catch (err) {
             if (liveStatusText) liveStatusText.textContent = "OFFLINE";
+            if (liveStatusPill) liveStatusPill.className = "status-pill offline";
             console.error("Network Error fetching options data:", err);
         } finally {
             state.isFetching = false;
@@ -199,6 +228,24 @@ document.addEventListener("DOMContentLoaded", () => {
         if (otherNumbers !== "") lastThree = "," + lastThree;
         const res = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + lastThree;
         return parts.length > 1 ? res + "." + parts[1] : res;
+    }
+
+    /**
+     * Formats numbers compactly into Lakhs/Crores (e.g. +1.04Cr, -2.92L)
+     */
+    function formatCompactOi(x) {
+        if (x === undefined || x === null || isNaN(x)) return "--";
+        const num = Number(x);
+        const sign = num > 0 ? "+" : (num < 0 ? "-" : "");
+        const abs = Math.abs(num);
+        if (abs >= 10000000) {
+            return `${sign}${(abs / 10000000).toFixed(2)}Cr`;
+        } else if (abs >= 100000) {
+            return `${sign}${(abs / 100000).toFixed(2)}L`;
+        } else if (abs >= 1000) {
+            return `${sign}${(abs / 1000).toFixed(1)}k`;
+        }
+        return `${sign}${abs}`;
     }
 
     /**
@@ -339,8 +386,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (focusHeroBox) {
             focusHeroBox.classList.remove("bullish-hero", "bearish-hero", "neutral-hero");
             const dec = (optBuying.decision || optBuying.type || "WAIT").toUpperCase();
-            if (dec === "CE") focusHeroBox.classList.add("bullish-hero");
-            else if (dec === "PE") focusHeroBox.classList.add("bearish-hero");
+            if (dec.includes("CE")) focusHeroBox.classList.add("bullish-hero");
+            else if (dec.includes("PE")) focusHeroBox.classList.add("bearish-hero");
             else focusHeroBox.classList.add("neutral-hero");
         }
 
@@ -385,7 +432,8 @@ document.addEventListener("DOMContentLoaded", () => {
         // 6. Card 5: Big OI Movements
         renderBigOiMovements(data.big_oi_movements || []);
 
-        // 7. Section 3: OI Trend (ATM ± 8 strikes)
+        // 7. Section 3: Trending OI & Strike Breakdown (ATM ± 5 strikes)
+        renderTrendingOiTable(data.trending_oi_timeseries || {}, levels.atm_strike, bias.spot_price);
         renderOiTrendTable(data.oi_trend || [], levels.atm_strike, bias.spot_price);
 
         // 8. Section 4: Detailed Option Chain
@@ -536,44 +584,48 @@ document.addEventListener("DOMContentLoaded", () => {
             const row = document.createElement("div");
             row.className = "big-oi-item";
 
-            const sideClass = item.side === "CE" ? "CE" : "PE";
-            const isAddition = item.change_oi >= 0;
+            const sideClass = (item.side || (item.activity && item.activity.includes("CALL") ? "CE" : "PE"));
+            const chgVal = item.change_oi !== undefined ? item.change_oi : (item.ce_change_oi || item.pe_change_oi || 0);
+            const isAddition = chgVal >= 0;
             const deltaClass = isAddition ? "pos" : "neg";
             const deltaSign = isAddition ? "▲ +" : "▼ ";
-            const widthPct = Math.min(100, Math.max(10, Math.round((Math.abs(item.change_oi) / maxOi) * 100)));
+            const widthPct = Math.min(100, Math.max(10, Math.round((Math.abs(chgVal) / maxOi) * 100)));
             row.style.setProperty("--bar-width", `${widthPct}%`);
 
             // Format directional impact tag
             let tagClass = "tag-neutral";
-            let tagHtml = item.activity;
+            const act = item.activity || "";
+            let tagHtml = act;
             let rowTitle = "";
 
-            if (item.activity.includes("CALL WRITING") || (item.side === "CE" && item.change_oi > 0)) {
+            if (act.includes("CALL WRITING") || (sideClass === "CE" && chgVal > 0)) {
                 tagClass = "tag-bearish";
                 tagHtml = `<span class="dir-icon">🔻</span> Resistance Build`;
                 rowTitle = "Call Writing: Institutional resistance building (Bearish Ceiling)";
-            } else if (item.activity.includes("PUT WRITING") || (item.side === "PE" && item.change_oi > 0)) {
+            } else if (act.includes("PUT WRITING") || (sideClass === "PE" && chgVal > 0)) {
                 tagClass = "tag-bullish";
                 tagHtml = `<span class="dir-icon">🔺</span> Support Build`;
                 rowTitle = "Put Writing: Institutional support building (Bullish Floor)";
-            } else if (item.activity.includes("CALL UNWINDING") || (item.side === "CE" && item.change_oi < 0)) {
+            } else if (act.includes("CALL UNWINDING") || (sideClass === "CE" && chgVal < 0)) {
                 tagClass = "tag-bullish";
                 tagHtml = `<span class="dir-icon">↗️</span> Short Covering`;
                 rowTitle = "Call Unwinding: Call sellers exiting (Bulls pushing higher)";
-            } else if (item.activity.includes("PUT UNWINDING") || (item.side === "PE" && item.change_oi < 0)) {
+            } else if (act.includes("PUT UNWINDING") || (sideClass === "PE" && chgVal < 0)) {
                 tagClass = "tag-bearish";
                 tagHtml = `<span class="dir-icon">↘️</span> Support Cracking`;
                 rowTitle = "Put Unwinding: Put sellers exiting (Downside risk increasing)";
             }
 
+            const formattedChg = item.change_oi_formatted ? item.change_oi_formatted.replace("+", "").replace("-", "") : formatIndianNumber(Math.abs(chgVal));
+
             row.setAttribute("title", rowTitle);
             row.innerHTML = `
                 <div class="big-oi-strike-side">
-                    <span class="side-pill ${sideClass}">${item.side}</span>
+                    <span class="side-pill ${sideClass}">${sideClass}</span>
                     <span class="big-oi-strike font-mono">${formatIndianNumber(item.strike)}</span>
                 </div>
                 <div class="big-oi-delta ${deltaClass} font-mono">
-                    ${deltaSign}${item.change_oi_formatted.replace("+", "").replace("-", "")} OI
+                    ${deltaSign}${formattedChg} OI
                 </div>
                 <div class="big-oi-tag ${tagClass}">
                     ${tagHtml}
@@ -584,7 +636,141 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
-     * Renders OI Trend Table (ATM ± 8 strikes)
+     * Renders Trending OI Oi Pulse Table (ATM ± 5 strikes)
+     */
+    function renderTrendingOiTable(trendingTimeseries, atmStrike, spotPrice) {
+        if (!trendingPulseTbody) return;
+        if (!trendingTimeseries || !trendingTimeseries.rows || trendingTimeseries.rows.length === 0) {
+            trendingPulseTbody.innerHTML = `<tr><td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
+            return;
+        }
+
+        // Render selected strike chips
+        if (trendingSelectedStrikesContainer) {
+            const strikes = trendingTimeseries.selected_strikes || [];
+            const effectiveAtm = trendingTimeseries.atm_strike || atmStrike;
+            if (strikes.length > 0) {
+                trendingSelectedStrikesContainer.innerHTML = strikes.map(s => {
+                    const isAtm = Math.abs(s - effectiveAtm) < 1.0;
+                    return `<span class="strike-chip ${isAtm ? 'is-atm' : ''}" title="${isAtm ? 'ATM Strike' : 'Selected Strike'}">${formatIndianNumber(s)}${isAtm ? ' [ATM]' : ''}</span>`;
+                }).join("");
+            }
+        }
+
+        // Render live capsule in header strip
+        if (trendingLiveCapsuleSummary && trendingTimeseries.latest_summary) {
+            const latest = trendingTimeseries.latest_summary;
+            const pctSign = latest.strength_pct >= 0 ? "+" : "";
+            const dotChar = "●";
+            const dotsStr = dotChar.repeat(latest.strength_dots || 0);
+
+            trendingLiveCapsuleSummary.innerHTML = `
+                <div style="display:flex;align-items:center;gap:0.4rem;" title="Oi Pulse Conviction Rule: >=40% diff with 2+ dots indicates trading conviction. <30% is noise/chop.">
+                    <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);">Live Strength:</span>
+                    <span class="strength-capsule ${latest.strength_class || 'strength-weak'}">
+                        <span>${pctSign}${latest.strength_pct}%</span>
+                        ${dotsStr ? `<span class="strength-dots">${dotsStr}</span>` : ''}
+                    </span>
+                    <span class="badge ${latest.sentiment === 'Bullish' ? 'badge-sentiment-bullish' : (latest.sentiment === 'Bearish' ? 'badge-sentiment-bearish' : 'badge-sentiment-neutral')}" style="margin-left:0.3rem;">
+                        ${latest.sentiment}
+                    </span>
+                    <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.5rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
+                </div>
+            `;
+        }
+
+        // Render table rows
+        trendingPulseTbody.innerHTML = "";
+        trendingTimeseries.rows.forEach(r => {
+            const tr = document.createElement("tr");
+
+            // Format Day H/L Break
+            let dlbHtml = "-";
+            if (r.day_hl_break && r.day_hl_break !== "-") {
+                if (r.day_hl_break.startsWith("D.L.B.")) {
+                    dlbHtml = `<span class="badge-dlb">${r.day_hl_break}</span>`;
+                } else if (r.day_hl_break.startsWith("D.H.B.")) {
+                    dlbHtml = `<span class="badge-dhb">${r.day_hl_break}</span>`;
+                } else {
+                    dlbHtml = r.day_hl_break;
+                }
+            }
+
+            // Diff in OI class
+            const diffClass = r.diff_oi >= 0 ? "val-pos" : "val-neg";
+            const diffSign = r.diff_oi >= 0 ? "+" : "";
+
+            // Strength capsule
+            const pctSign = r.strength_pct >= 0 ? "+" : "";
+            const dotChar = "●";
+            const dotsStr = dotChar.repeat(r.strength_dots || 0);
+            const strengthHtml = `
+                <span class="strength-capsule ${r.strength_class}">
+                    <span>${pctSign}${r.strength_pct}%</span>
+                    ${dotsStr ? `<span class="strength-dots">${dotsStr}</span>` : ''}
+                </span>
+            `;
+
+            // Direction arrow pill
+            const dirClass = r.direction_color === "green" ? "dir-green" : "dir-red";
+            const dirArrowHtml = `<span class="dir-arrow-pill ${dirClass}">${r.direction_arrow}</span>`;
+
+            // Chng In Direction
+            const chngDirClass = r.chng_in_direction >= 0 ? "val-pos" : "val-neg";
+            const chngDirSign = r.chng_in_direction >= 0 ? "+" : "";
+
+            // Direction of Chng %
+            const dirPctClass = r.direction_chng_pct >= 0 ? "val-pos" : "val-neg";
+            const dirPctSign = r.direction_chng_pct >= 0 ? "+" : "";
+
+            // Day High/Low Diff in OI badge
+            let dayHlDiffHtml = "-";
+            if (r.day_hl_diff_oi === "Day Low Break") {
+                dayHlDiffHtml = `<span class="badge-diff-break-low">Day Low Break</span>`;
+            } else if (r.day_hl_diff_oi === "Day High Break") {
+                dayHlDiffHtml = `<span class="badge-diff-break-high">Day High Break</span>`;
+            }
+
+            // Sentiment badge
+            let sentClass = "badge-sentiment-neutral";
+            if (r.sentiment === "Bullish") sentClass = "badge-sentiment-bullish";
+            else if (r.sentiment === "Bearish") sentClass = "badge-sentiment-bearish";
+
+            const fullCeChg = formatIndianNumber(r.ce_change_oi);
+            const fullPeChg = formatIndianNumber(r.pe_change_oi);
+            const fullDiffOi = formatIndianNumber(r.diff_oi);
+            const fullChngDir = formatIndianNumber(r.chng_in_direction);
+
+            const compactCeChg = formatCompactOi(r.ce_change_oi);
+            const compactPeChg = formatCompactOi(r.pe_change_oi);
+            const compactDiffOi = formatCompactOi(r.diff_oi);
+            const compactChngDir = formatCompactOi(r.chng_in_direction);
+
+            tr.innerHTML = `
+                <td class="text-center font-mono">
+                    <strong style="font-size:0.75rem;">${r.time}</strong>
+                    <span class="sub-date">${r.date}</span>
+                </td>
+                <td class="text-right font-mono">₹${r.ltp.toFixed(2)}</td>
+                <td class="text-center">${dlbHtml}</td>
+                <td class="text-right font-mono" title="${fullCeChg} contracts">${compactCeChg}</td>
+                <td class="text-right font-mono" title="${fullPeChg} contracts">${compactPeChg}</td>
+                <td class="text-right font-mono ${diffClass}" title="${diffSign}${fullDiffOi} contracts"><strong>${compactDiffOi}</strong></td>
+                <td class="text-center">${strengthHtml}</td>
+                <td class="text-center">${dirArrowHtml}</td>
+                <td class="text-right font-mono ${chngDirClass}" title="${chngDirSign}${fullChngDir} contracts">${compactChngDir}</td>
+                <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${r.direction_chng_pct.toFixed(2)}%</td>
+                <td class="text-center font-mono"><strong>${r.net_pcr.toFixed(2)}</strong></td>
+                <td class="text-center">${dayHlDiffHtml}</td>
+                <td class="text-center"><span class="${sentClass}">${r.sentiment}</span></td>
+            `;
+
+            trendingPulseTbody.appendChild(tr);
+        });
+    }
+
+    /**
+     * Renders OI Trend Table (ATM ± 5 strikes)
      */
     function renderOiTrendTable(rows, atmStrike, spotPrice) {
         if (!oiTrendTbody) return;
@@ -778,6 +964,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const metricPtsSub = document.getElementById("metric-pts-sub");
     const metricNetInr = document.getElementById("metric-net-inr");
     const metricProfitFactor = document.getElementById("metric-profit-factor");
+    const metricRrSub = document.getElementById("metric-rr-sub");
     const metricActiveCount = document.getElementById("metric-active-count");
 
     const activeSignalsTbody = document.getElementById("active-signals-tbody");
@@ -786,7 +973,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const paperLotsInput = document.getElementById("paper-lots-input");
     const paperTradeMsg = document.getElementById("paper-trade-msg");
     const btnExportJournalCsv = document.getElementById("btn-export-journal-csv");
-    const btnClearJournal = document.getElementById("btn-clear-journal");
 
     // Strategy Diagnostics DOM Elements
     const diagHealthScore = document.getElementById("diag-health-score");
@@ -864,7 +1050,8 @@ document.addEventListener("DOMContentLoaded", () => {
      */
     function renderSignalsDashboard(data) {
         const active = data.active_signals || [];
-        const history = data.history_signals || [];
+        const history = data.history_signals || data.history || [];
+        const metrics = data.metrics || {};
 
         // 1. Badges
         if (activeCountBadge) activeCountBadge.textContent = active.length;
@@ -905,21 +1092,29 @@ document.addEventListener("DOMContentLoaded", () => {
         const totalCombinedPts = closedPts + openPts;
         const totalCombinedInr = closedInr + openInr;
         const closedCount = history.length;
-        const winRate = closedCount > 0 ? ((winCount / closedCount) * 100).toFixed(1) : null;
-        
-        let profitFactor = null;
-        if (grossLossPts > 0) {
-            profitFactor = (grossWinPts / grossLossPts).toFixed(2);
-        } else if (grossWinPts > 0) {
-            profitFactor = grossWinPts.toFixed(2);
-        } else if (closedCount > 0) {
-            profitFactor = "1.00";
+
+        const winRate = (metrics.win_rate_pct !== undefined && metrics.win_rate_pct !== null)
+            ? metrics.win_rate_pct
+            : (closedCount > 0 ? ((winCount / closedCount) * 100).toFixed(1) : null);
+
+        let profitFactor = (metrics.profit_factor !== undefined && metrics.profit_factor !== null)
+            ? metrics.profit_factor
+            : null;
+
+        if (profitFactor === null) {
+            if (grossLossPts > 0) {
+                profitFactor = (grossWinPts / grossLossPts).toFixed(2);
+            } else if (grossWinPts > 0) {
+                profitFactor = grossWinPts.toFixed(2);
+            } else if (closedCount > 0) {
+                profitFactor = "1.00";
+            }
         }
 
         // 2. Metrics Cards
         if (metricWinRate) {
-            if (winRate !== null) {
-                metricWinRate.textContent = `${winRate}%`;
+            if (winRate !== null && winRate !== undefined) {
+                metricWinRate.textContent = `${parseFloat(winRate).toFixed(1)}%`;
                 metricWinRate.className = `metric-val font-mono ${parseFloat(winRate) >= 50 ? "val-win" : "val-loss"}`;
             } else {
                 metricWinRate.textContent = "--";
@@ -960,10 +1155,26 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (metricProfitFactor) {
-            if (profitFactor !== null) {
-                metricProfitFactor.textContent = profitFactor;
+            if (profitFactor !== null && profitFactor !== undefined) {
+                metricProfitFactor.textContent = typeof profitFactor === "number" ? profitFactor.toFixed(2) : profitFactor;
+                metricProfitFactor.className = `metric-val font-mono ${parseFloat(profitFactor) >= 1.5 ? "val-win" : (parseFloat(profitFactor) < 1.0 ? "val-loss" : "")}`;
             } else {
                 metricProfitFactor.textContent = "--";
+                metricProfitFactor.className = "metric-val font-mono";
+            }
+        }
+
+        if (metricRrSub) {
+            if (closedCount > 0) {
+                if (grossLossPts > 0 && winCount > 0 && lossCount > 0) {
+                    metricRrSub.textContent = `Avg W: +${(grossWinPts/winCount).toFixed(1)} | L: -${(grossLossPts/lossCount).toFixed(1)}`;
+                } else if (grossWinPts > 0) {
+                    metricRrSub.textContent = `Gross Win: +${grossWinPts.toFixed(1)} pts`;
+                } else {
+                    metricRrSub.textContent = `Gross Loss: -${grossLossPts.toFixed(1)} pts`;
+                }
+            } else {
+                metricRrSub.textContent = "Awaiting Closed Trades";
             }
         }
 
@@ -1266,27 +1477,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    /**
-     * Clear Closed Journal History Action
-     */
-    if (btnClearJournal) {
-        btnClearJournal.addEventListener("click", async () => {
-            if (confirm("Are you sure you want to clear all closed trade history from the journal?")) {
-                try {
-                    const resp = await fetch("/api/options-desk/signals/clear-history", {
-                        method: "POST",
-                        headers: { "X-CSRFToken": csrfToken },
-                    });
-                    const res = await resp.json();
-                    if (res.success) {
-                        await loadSignalsData();
-                    }
-                } catch (e) {
-                    console.error("Failed to clear journal history:", e);
-                }
-            }
-        });
-    }
 
     /**
      * Export Trade Journal to CSV
@@ -1540,16 +1730,57 @@ document.addEventListener("DOMContentLoaded", () => {
         btnExportCsv.addEventListener("click", exportChainToCsv);
     }
 
+    // Trending OI View Tab Switching
+    if (btnTabTrendingOi && btnTabStrikeBreakdown) {
+        btnTabTrendingOi.addEventListener("click", () => {
+            btnTabTrendingOi.classList.add("active");
+            btnTabTrendingOi.style.background = "var(--accent-color, #3b82f6)";
+            btnTabTrendingOi.style.color = "#fff";
+            btnTabStrikeBreakdown.classList.remove("active");
+            btnTabStrikeBreakdown.style.background = "transparent";
+            btnTabStrikeBreakdown.style.color = "var(--text-muted, #94a3b8)";
+            if (trendingOiTimeseriesContainer) trendingOiTimeseriesContainer.style.display = "block";
+            if (trendingStrikeBreakdownContainer) trendingStrikeBreakdownContainer.style.display = "none";
+        });
+
+        btnTabStrikeBreakdown.addEventListener("click", () => {
+            btnTabStrikeBreakdown.classList.add("active");
+            btnTabStrikeBreakdown.style.background = "var(--accent-color, #3b82f6)";
+            btnTabStrikeBreakdown.style.color = "#fff";
+            btnTabTrendingOi.classList.remove("active");
+            btnTabTrendingOi.style.background = "transparent";
+            btnTabTrendingOi.style.color = "var(--text-muted, #94a3b8)";
+            if (trendingOiTimeseriesContainer) trendingOiTimeseriesContainer.style.display = "none";
+            if (trendingStrikeBreakdownContainer) trendingStrikeBreakdownContainer.style.display = "block";
+        });
+    }
+
+    // Trending OI Interval Selection
+    if (trendingIntervalSelect) {
+        trendingIntervalSelect.addEventListener("change", () => {
+            const intervalVal = trendingIntervalSelect.value;
+            fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`)
+                .then(res => res.json())
+                .then(res => {
+                    if (res.success && res.data) {
+                        const spot = parseFloat(document.getElementById("spot-price")?.textContent?.replace(/,/g, "") || "0");
+                        renderTrendingOiTable(res.data, null, spot);
+                    }
+                })
+                .catch(err => console.error("Error updating trending OI interval:", err));
+        });
+    }
+
     // Initial Load & Start Timers
     loadOptionsDeskData(false);
     loadSignalsData();
     loadTradeAnalysis();
     startCountdown();
 
-    // Dedicated 15-second auto-refresh for Signal Tracker & Journal only
+    // Dedicated 5-second auto-refresh for Signal Tracker & Journal live prices & P&L
     setInterval(() => {
         loadSignalsData();
-    }, 15000);
+    }, 5000);
 });
 
 

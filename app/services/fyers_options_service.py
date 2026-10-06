@@ -1,68 +1,197 @@
 """
-app/services/fyers_options_service.py — Fyers Option Chain & Market Data Provider
-Fetches live Option Chains, Spot Prices, and Expiries from Fyers API v3 with intelligent caching
-and realistic off-market / resilient market fallback simulation.
+app/services/fyers_options_service.py — FYERS Native Option Chain & Real-Time Market Data Provider
+Fetches complete, multi-strike Option Chains with Live OI, Change in OI, Greeks, and Spot Prices
+in a single sub-second API call via FYERS API v3.
 """
 
+import os
+import json
+import time
 import math
 import logging
+import threading
 from datetime import datetime, timedelta, date
-from app.services.fyers_auth import get_fyers_client
+from zoneinfo import ZoneInfo
+from app.services.fyers_auth import (
+    get_fyers_index_spot,
+    get_fyers_model,
+    get_fyers_token,
+    FYERS_INDEX_SYMBOLS,
+)
 
 log = logging.getLogger("fyers_options_service")
+IST = ZoneInfo("Asia/Kolkata")
 
 # Supported Index Configurations
 INDEX_CONFIGS = {
     "NIFTY": {
+        "token_symbol": "NIFTY",
         "fyers_symbol": "NSE:NIFTY50-INDEX",
         "name": "NIFTY 50",
-        "lot_size": 25,
+        "lot_size": 65,
         "strike_step": 50,
         "default_spot": 22500.0,
         "exchange": "NSE",
-        "opt_prefix": "NSE:NIFTY",
+        "exch_code": "NSE",
     },
     "BANKNIFTY": {
+        "token_symbol": "BANKNIFTY",
         "fyers_symbol": "NSE:NIFTYBANK-INDEX",
         "name": "BANK NIFTY",
-        "lot_size": 15,
+        "lot_size": 30,
         "strike_step": 100,
         "default_spot": 54500.0,
         "exchange": "NSE",
-        "opt_prefix": "NSE:BANKNIFTY",
+        "exch_code": "NSE",
     },
     "FINNIFTY": {
+        "token_symbol": "FINNIFTY",
         "fyers_symbol": "NSE:FINNIFTY-INDEX",
         "name": "FIN NIFTY",
-        "lot_size": 25,
+        "lot_size": 60,
         "strike_step": 50,
         "default_spot": 24600.0,
         "exchange": "NSE",
-        "opt_prefix": "NSE:FINNIFTY",
+        "exch_code": "NSE",
     },
     "MIDCPNIFTY": {
+        "token_symbol": "MIDCPNIFTY",
         "fyers_symbol": "NSE:MIDCPNIFTY-INDEX",
         "name": "MIDCP NIFTY",
-        "lot_size": 50,
+        "lot_size": 120,
         "strike_step": 25,
         "default_spot": 13700.0,
         "exchange": "NSE",
-        "opt_prefix": "NSE:MIDCPNIFTY",
+        "exch_code": "NSE",
     },
     "SENSEX": {
+        "token_symbol": "SENSEX",
         "fyers_symbol": "BSE:SENSEX-INDEX",
         "name": "BSE SENSEX",
-        "lot_size": 10,
+        "lot_size": 20,
         "strike_step": 100,
         "default_spot": 72200.0,
         "exchange": "BSE",
-        "opt_prefix": "BSE:SENSEX",
+        "exch_code": "BSE",
     },
-};
+}
 
-# In-memory option chain cache: {(symbol, expiry): {"data": ..., "timestamp": ..., "status": ...}}
 _OPTION_CHAIN_CACHE = {}
-_CACHE_TTL_SECONDS = 180  # 3 minutes
+_EXPIRIES_CACHE = {}
+_CACHE_TTL_SECONDS = 60  # 1 minute fresh cache
+_OI_BASELINE_LOCK = threading.Lock()
+_OI_BASELINE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../instance/oi_baseline.json"))
+_OI_BASELINE: dict = {"date": None, "oi": {}}
+
+
+def _change_in_oi(quote: dict | None) -> int:
+    """
+    Change in OI for a quote: oi - previous-day OI when the broker supplies 'poi' or 'oich',
+    otherwise oi - first OI observed today for that contract (0 on first sighting).
+    """
+    if not quote:
+        return 0
+    if "oich" in quote and quote.get("oich") is not None:
+        return int(quote["oich"])
+    oi = int(quote.get("oi", 0) or 0)
+    poi = quote.get("poi")
+    if poi not in (None, ""):
+        return oi - int(float(poi))
+
+    tsym = quote.get("tsym") or quote.get("symbol")
+    if not tsym or oi <= 0:
+        return 0
+
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    with _OI_BASELINE_LOCK:
+        if _OI_BASELINE["date"] != today:
+            loaded = {}
+            try:
+                with open(_OI_BASELINE_PATH, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                if saved.get("date") == today:
+                    loaded = saved.get("oi", {})
+            except Exception:
+                pass
+            _OI_BASELINE["date"] = today
+            _OI_BASELINE["oi"] = loaded
+
+        base = _OI_BASELINE["oi"].get(tsym)
+        if base is None:
+            _OI_BASELINE["oi"][tsym] = oi
+            try:
+                os.makedirs(os.path.dirname(_OI_BASELINE_PATH), exist_ok=True)
+                with open(_OI_BASELINE_PATH, "w", encoding="utf-8") as f:
+                    json.dump(_OI_BASELINE, f)
+            except Exception:
+                pass
+            return 0
+    return oi - int(base)
+
+
+def calculate_implied_volatility(
+    price: float, spot: float, strike: float, t: float, option_type: str = "CE", r: float = 0.065
+) -> float | None:
+    """
+    Solves Black-Scholes implied volatility for given option price, spot, strike, and time to maturity.
+    Returns annual IV percentage (e.g. 14.50) or None if unsolvable/illiquid.
+    """
+    if price <= 0.05 or spot <= 0 or strike <= 0 or t <= 0:
+        return None
+
+    intrinsic = max(0.0, spot - strike * math.exp(-r * t)) if option_type == "CE" else max(0.0, strike * math.exp(-r * t) - spot)
+    if price < intrinsic:
+        return None
+
+    def norm_cdf(x):
+        return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+    low_vol = 0.01   # 1%
+    high_vol = 3.00  # 300%
+
+    def bs_p(sigma):
+        d1 = (math.log(spot / strike) + (r + 0.5 * sigma * sigma) * t) / (sigma * math.sqrt(t))
+        d2 = d1 - sigma * math.sqrt(t)
+        if option_type == "CE":
+            return spot * norm_cdf(d1) - strike * math.exp(-r * t) * norm_cdf(d2)
+        else:
+            return strike * math.exp(-r * t) * norm_cdf(-d2) - spot * norm_cdf(-d1)
+
+    for _ in range(30):
+        mid_vol = (low_vol + high_vol) / 2.0
+        try:
+            val = bs_p(mid_vol)
+        except Exception:
+            return None
+        diff = val - price
+        if abs(diff) < 0.05:
+            iv_pct = round(mid_vol * 100.0, 2)
+            return iv_pct if 1.0 <= iv_pct <= 200.0 else None
+        if diff < 0:
+            low_vol = mid_vol
+        else:
+            high_vol = mid_vol
+
+    iv_pct = round(mid_vol * 100.0, 2)
+    return iv_pct if 1.0 <= iv_pct <= 200.0 else None
+
+
+def calculate_delta(
+    spot: float, strike: float, t: float, iv_pct: float | None, option_type: str = "CE", r: float = 0.065
+) -> float | None:
+    """Calculates Black-Scholes Option Delta given spot, strike, DTE, and IV."""
+    if not iv_pct or iv_pct <= 0 or spot <= 0 or strike <= 0 or t <= 0:
+        return None
+    try:
+        sigma = iv_pct / 100.0
+        d1 = (math.log(spot / strike) + (r + 0.5 * sigma * sigma) * t) / (sigma * math.sqrt(t))
+        norm_d1 = (1.0 + math.erf(d1 / math.sqrt(2.0))) / 2.0
+        if option_type == "CE":
+            return round(norm_d1, 2)
+        else:
+            return round(norm_d1 - 1.0, 2)
+    except Exception:
+        return None
 
 
 def get_supported_indices() -> list[dict]:
@@ -71,7 +200,6 @@ def get_supported_indices() -> list[dict]:
         {
             "symbol": sym,
             "name": cfg["name"],
-            "fyers_symbol": cfg["fyers_symbol"],
             "lot_size": cfg["lot_size"],
             "strike_step": cfg["strike_step"],
             "exchange": cfg["exchange"]
@@ -80,82 +208,102 @@ def get_supported_indices() -> list[dict]:
     ]
 
 
+def get_upcoming_expiries(symbol: str = "NIFTY") -> list[str]:
+    """
+    Fetches real active upcoming expiries directly from FYERS option chain metadata,
+    sorted chronologically.
+    """
+    sym = (symbol or "NIFTY").upper()
+    if sym not in INDEX_CONFIGS:
+        sym = "NIFTY"
+
+    cfg = INDEX_CONFIGS[sym]
+    now = datetime.now(IST)
+    cache_entry = _EXPIRIES_CACHE.get(sym)
+    if cache_entry and (now - cache_entry["fetch_time"]).total_seconds() < 1800:
+        return cache_entry["expiries"]
+
+    fyers = get_fyers_model()
+    if fyers:
+        try:
+            oc_resp = fyers.optionchain(data={"symbol": cfg["fyers_symbol"], "strikecount": 2})
+            if oc_resp.get("s") == "ok":
+                exp_list = oc_resp.get("data", {}).get("expiryData", [])
+                date_strings = []
+                today_d = now.date()
+                for item in exp_list:
+                    raw_date = item.get("date", "")
+                    try:
+                        # FYERS format is DD-MM-YYYY (e.g. 06-10-2026) -> convert to DD-MMM-YYYY (06-OCT-2026)
+                        dt = datetime.strptime(raw_date, "%d-%m-%Y").date()
+                        if dt >= today_d:
+                            formatted = dt.strftime("%d-%b-%Y").upper()
+                            date_strings.append((dt, formatted, item.get("expiry")))
+                    except Exception:
+                        pass
+
+                date_strings.sort(key=lambda x: x[0])
+                if date_strings:
+                    sorted_expiries = [x[1] for x in date_strings[:8]]
+                    exp_ts_map = {x[1]: x[2] for x in date_strings}
+                    _EXPIRIES_CACHE[sym] = {
+                        "expiries": sorted_expiries,
+                        "ts_map": exp_ts_map,
+                        "fetch_time": now
+                    }
+                    return sorted_expiries
+        except Exception as e:
+            log.warning(f"Failed to fetch expiries from FYERS for {sym}: {e}")
+
+    # Fallback schedules
+    FALLBACK_SCHEDULES = {
+        "NIFTY": ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"],
+        "SENSEX": ["08-OCT-2026", "15-OCT-2026", "22-OCT-2026", "29-OCT-2026"],
+        "BANKNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
+        "FINNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
+        "MIDCPNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
+    }
+    return FALLBACK_SCHEDULES.get(sym, ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"])
+
+
 def get_live_spot_price(symbol: str = "NIFTY") -> tuple[float, float, str]:
     """
-    Fetches live spot price and day change for index from FlatTrade or Fyers API.
+    Fetches real-time spot price and day change for index from FYERS.
     Returns (spot_price, change_pct, status).
     """
     cfg = INDEX_CONFIGS.get(symbol.upper(), INDEX_CONFIGS["NIFTY"])
-    fyers_sym = cfg["fyers_symbol"]
     default_price = cfg["default_spot"]
 
-    # 1. Try FlatTrade Live Spot Quotes
     try:
-        from app.services.flattrade_auth import get_flattrade_index_spot
-        ft_spot = get_flattrade_index_spot(symbol)
-        if ft_spot and ft_spot[0] > 0:
-            return ft_spot
+        spot = get_fyers_index_spot(symbol)
+        if spot and spot[0] > 0:
+            return spot
     except Exception as e:
-        log.warning(f"FlatTrade spot quote error for {symbol}: {e}")
+        log.warning(f"FYERS spot quote error for {symbol}: {e}")
 
-    # 2. Try Fyers API Quotes
-    client = get_fyers_client()
-    if client:
-        try:
-            resp = client.quotes(data={"symbols": fyers_sym})
-            if resp and resp.get("s") == "ok" and resp.get("d"):
-                v = resp["d"][0].get("v", {})
-                cmd = v.get("cmd", {})
-                ltp = float(cmd.get("c", 0.0) or v.get("lp", 0.0) or 0.0)
-                prev_close = float(v.get("prev_close_price", 0.0) or ltp)
-                chg_pct = float(v.get("chp", 0.0) or (((ltp - prev_close) / prev_close * 100) if prev_close else 0.0))
-                if ltp > 0:
-                    return ltp, chg_pct, "LIVE"
-        except Exception as e:
-            log.warning(f"Error fetching live spot from Fyers quotes: {e}")
-
-    return default_price, 0.35, "SIMULATED"
+    return default_price, 0.0, "DATA_UNAVAILABLE"
 
 
-def get_upcoming_expiries(symbol: str = "NIFTY") -> list[str]:
+def fetch_option_chain_data(
+    symbol: str = "NIFTY",
+    expiry: str | None = None,
+    force_refresh: bool = False,
+    allow_simulation: bool = False,
+) -> dict:
     """
-    Returns list of upcoming expiry dates formatted as DD-MMM-YYYY.
+    Fetches complete Option Chain data backed by FYERS API v3 optionchain in a single fast call.
+    If real data is unavailable, marks data_status = 'DATA_UNAVAILABLE' and fails closed.
     """
-    expiries = []
-    today = date.today()
-    # Find next 4 Thursdays (or Tuesdays for FINNIFTY, Mondays for MIDCPNIFTY, Fridays for SENSEX)
-    target_weekday = 3 # Thursday default for NIFTY/BANKNIFTY
-    if symbol.upper() == "FINNIFTY":
-        target_weekday = 1 # Tuesday
-    elif symbol.upper() == "MIDCPNIFTY":
-        target_weekday = 0 # Monday
-    elif symbol.upper() == "SENSEX":
-        target_weekday = 4 # Friday
-
-    curr = today
-    while len(expiries) < 4:
-        if curr.weekday() == target_weekday and curr >= today:
-            expiries.append(curr.strftime("%d-%b-%Y").upper())
-        curr += timedelta(days=1)
-
-    return expiries
-
-
-def fetch_option_chain_data(symbol: str = "NIFTY", expiry: str | None = None, force_refresh: bool = False) -> dict:
-    """
-    Fetches complete Option Chain data from Fyers API v3 or uses cached/fallback data.
-    Ensures 3-minute caching and returns enriched options data.
-    """
-    symbol = symbol.upper()
+    symbol = (symbol or "NIFTY").upper()
     if symbol not in INDEX_CONFIGS:
         symbol = "NIFTY"
-    
+
     cfg = INDEX_CONFIGS[symbol]
     expiries = get_upcoming_expiries(symbol)
-    selected_expiry = expiry if expiry and expiry in expiries else expiries[0]
+    selected_expiry = expiry if expiry and expiry in expiries else (expiries[0] if expiries else "06-OCT-2026")
 
-    cache_key = (symbol, selected_expiry)
-    now = datetime.now()
+    cache_key = (symbol, selected_expiry, allow_simulation)
+    now = datetime.now(IST)
 
     # Check cache
     if not force_refresh and cache_key in _OPTION_CHAIN_CACHE:
@@ -164,39 +312,136 @@ def fetch_option_chain_data(symbol: str = "NIFTY", expiry: str | None = None, fo
         if age_seconds < _CACHE_TTL_SECONDS:
             return cached["data"]
 
-    # Try fetching from Fyers API
-    client = get_fyers_client()
-    spot_price, spot_chg, data_status = get_live_spot_price(symbol)
+    fyers = get_fyers_model()
     chain_records = []
-    source = "SIMULATED"
+    spot_price = cfg["default_spot"]
+    spot_chg = 0.0
+    data_status = "DATA_UNAVAILABLE"
+    source = "FYERS_UNAVAILABLE"
 
-    if client:
+    # Compute DTE in years
+    t_years = 4.0 / 365.0
+    if selected_expiry:
         try:
-            # Fyers V3 Option Chain API
-            payload = {
+            exp_dt = datetime.strptime(selected_expiry, "%d-%b-%Y").date()
+            today_d = now.date()
+            diff_d = float((exp_dt - today_d).days)
+            if diff_d <= 0:
+                now_mins = now.hour * 60 + now.minute
+                market_close_mins = 15 * 60 + 30
+                mins_left = max(1.0, float(market_close_mins - now_mins))
+                t_years = mins_left / (365.0 * 24.0 * 60.0)
+            else:
+                t_years = max(diff_d, 0.0) / 365.0
+        except Exception:
+            t_years = 4.0 / 365.0
+
+    if fyers:
+        try:
+            # Check if we have a specific expiry timestamp in cache
+            exp_ts = None
+            if sym_cache := _EXPIRIES_CACHE.get(symbol):
+                exp_ts = sym_cache.get("ts_map", {}).get(selected_expiry)
+
+            req_payload = {
                 "symbol": cfg["fyers_symbol"],
-                "strikecount": 25,
-                "timestamp": ""
+                "strikecount": 10,
             }
-            res = client.optionchain(data=payload)
-            if res and res.get("s") == "ok" and res.get("data"):
-                opt_data = res.get("data", {})
-                # Parse strikes and option chain items from Fyers
-                options_chain = opt_data.get("optionsChain", [])
-                if options_chain:
-                    source = "LIVE"
+            if exp_ts:
+                req_payload["timestamp"] = exp_ts
+
+            oc_resp = fyers.optionchain(data=req_payload)
+            if oc_resp.get("s") == "ok":
+                oc_data = oc_resp.get("data", {})
+                raw_chain = oc_data.get("optionsChain", [])
+
+                # Extract spot price from the first index entry or separate spot quote
+                for item in raw_chain:
+                    if item.get("strike_price") == -1:
+                        spot_price = float(item.get("ltp", spot_price) or spot_price)
+                        spot_chg = float(item.get("ltpchp", 0.0) or 0.0)
+                        break
+
+                # Group by strike
+                strikes_map = {}
+                for item in raw_chain:
+                    strike = item.get("strike_price")
+                    if strike is None or strike < 0:
+                        continue
+                    strike_f = float(strike)
+                    optt = (item.get("option_type") or "").upper()
+                    if strike_f not in strikes_map:
+                        strikes_map[strike_f] = {"strike": strike_f, "CE": {}, "PE": {}}
+                    if optt in ("CE", "PE"):
+                        strikes_map[strike_f][optt] = item
+
+                for strike_f, s_data in sorted(strikes_map.items()):
+                    ce = s_data.get("CE", {})
+                    pe = s_data.get("PE", {})
+
+                    ce_ltp = float(ce.get("ltp", 0.0) or 0.0)
+                    ce_bid = float(ce.get("bid", 0.0) or 0.0)
+                    ce_ask = float(ce.get("ask", 0.0) or 0.0)
+                    ce_oi = int(ce.get("oi", 0) or 0)
+                    ce_chg_oi = int(ce.get("oich", 0) or 0)
+                    ce_vol = int(ce.get("volume", 0) or 0)
+
+                    pe_ltp = float(pe.get("ltp", 0.0) or 0.0)
+                    pe_bid = float(pe.get("bid", 0.0) or 0.0)
+                    pe_ask = float(pe.get("ask", 0.0) or 0.0)
+                    pe_oi = int(pe.get("oi", 0) or 0)
+                    pe_chg_oi = int(pe.get("oich", 0) or 0)
+                    pe_vol = int(pe.get("volume", 0) or 0)
+
+                    # Compute IV & Delta
+                    ce_calc_price = (ce_bid + ce_ask) / 2.0 if (ce_bid > 0 and ce_ask > 0) else ce_ltp
+                    pe_calc_price = (pe_bid + pe_ask) / 2.0 if (pe_bid > 0 and pe_ask > 0) else pe_ltp
+
+                    ce_iv = calculate_implied_volatility(ce_calc_price, spot_price, strike_f, t_years, "CE") if (t_years and ce_calc_price > 0.05) else None
+                    ce_delta = calculate_delta(spot_price, strike_f, t_years, ce_iv, "CE") if (t_years and ce_iv) else None
+
+                    pe_iv = calculate_implied_volatility(pe_calc_price, spot_price, strike_f, t_years, "PE") if (t_years and pe_calc_price > 0.05) else None
+                    pe_delta = calculate_delta(spot_price, strike_f, t_years, pe_iv, "PE") if (t_years and pe_iv) else None
+
+                    chain_records.append({
+                        "strike": strike_f,
+                        "ce_ltp": round(ce_ltp, 2),
+                        "ce_bid": round(ce_bid, 2) if ce_bid > 0 else None,
+                        "ce_ask": round(ce_ask, 2) if ce_ask > 0 else None,
+                        "ce_oi": ce_oi,
+                        "ce_change_oi": ce_chg_oi,
+                        "ce_volume": ce_vol,
+                        "ce_iv": ce_iv,
+                        "ce_delta": ce_delta,
+                        "pe_ltp": round(pe_ltp, 2),
+                        "pe_bid": round(pe_bid, 2) if pe_bid > 0 else None,
+                        "pe_ask": round(pe_ask, 2) if pe_ask > 0 else None,
+                        "pe_oi": pe_oi,
+                        "pe_change_oi": pe_chg_oi,
+                        "pe_volume": pe_vol,
+                        "pe_iv": pe_iv,
+                        "pe_delta": pe_delta,
+                    })
+
+                if chain_records:
                     data_status = "LIVE"
-                    chain_records = _parse_fyers_option_chain(options_chain, cfg, spot_price)
+                    source = "FYERS_LIVE"
+
         except Exception as e:
-            log.warning(f"Fyers optionchain API call failed: {e}")
+            log.warning(f"Error fetching FYERS option chain for {symbol}: {e}")
 
-    # Fallback to simulated high-fidelity options data if API call returns empty or unavailable
+    # Fallback to simulation if requested and broker unavailable
     if not chain_records:
-        chain_records = _generate_simulated_option_chain(symbol, cfg, spot_price, selected_expiry)
+        if allow_simulation:
+            chain_records = _generate_option_chain_records(symbol, cfg, spot_price, selected_expiry)
+            data_status = "SIMULATED"
+            source = "SIMULATED_TEST"
+        else:
+            data_status = "DATA_UNAVAILABLE"
+            source = "FYERS_UNAVAILABLE"
 
-    # Format result payload
     atm_strike = round(spot_price / cfg["strike_step"]) * cfg["strike_step"]
-    
+
     result = {
         "symbol": symbol,
         "name": cfg["name"],
@@ -214,7 +459,7 @@ def fetch_option_chain_data(symbol: str = "NIFTY", expiry: str | None = None, fo
         "chain": chain_records,
     }
 
-    # Update cache
+    # Cache result
     _OPTION_CHAIN_CACHE[cache_key] = {
         "data": result,
         "fetch_time": now,
@@ -224,76 +469,17 @@ def fetch_option_chain_data(symbol: str = "NIFTY", expiry: str | None = None, fo
     return result
 
 
-def _parse_fyers_option_chain(raw_chain: list, cfg: dict, spot: float) -> list[dict]:
-    """Parses raw Fyers option chain records into normalized structure."""
-    strikes_map = {}
-    for item in raw_chain:
-        strike = float(item.get("strike_price", 0.0))
-        opt_type = item.get("option_type", "").upper()
-        ltp = float(item.get("ltp", 0.0) or 0.0)
-        oi = int(item.get("oi", 0) or 0)
-        prev_oi = int(item.get("prev_oi", oi) or oi)
-        change_oi = oi - prev_oi
-        volume = int(item.get("volume", 0) or 0)
-        iv = float(item.get("iv", 0.0) or 0.0)
-        greeks = item.get("greeks", {}) or {}
-
-        if strike not in strikes_map:
-            strikes_map[strike] = {
-                "strike": strike,
-                "ce_ltp": 0.0,
-                "ce_oi": 0,
-                "ce_change_oi": 0,
-                "ce_volume": 0,
-                "ce_iv": 0.0,
-                "ce_delta": 0.0,
-                "pe_ltp": 0.0,
-                "pe_oi": 0,
-                "pe_change_oi": 0,
-                "pe_volume": 0,
-                "pe_iv": 0.0,
-                "pe_delta": 0.0,
-            }
-
-        if opt_type == "CE":
-            strikes_map[strike]["ce_ltp"] = ltp
-            strikes_map[strike]["ce_oi"] = oi
-            strikes_map[strike]["ce_change_oi"] = change_oi
-            strikes_map[strike]["ce_volume"] = volume
-            strikes_map[strike]["ce_iv"] = iv
-            strikes_map[strike]["ce_delta"] = float(greeks.get("delta", 0.0) or 0.0)
-        elif opt_type == "PE":
-            strikes_map[strike]["pe_ltp"] = ltp
-            strikes_map[strike]["pe_oi"] = oi
-            strikes_map[strike]["pe_change_oi"] = change_oi
-            strikes_map[strike]["pe_volume"] = volume
-            strikes_map[strike]["pe_iv"] = iv
-            strikes_map[strike]["pe_delta"] = float(greeks.get("delta", 0.0) or 0.0)
-
-    # Convert to sorted list around spot
-    sorted_strikes = sorted(strikes_map.keys())
-    return [strikes_map[k] for k in sorted_strikes]
-
-
-def _generate_simulated_option_chain(symbol: str, cfg: dict, spot: float, expiry: str) -> list[dict]:
-    """
-    Generates realistic, mathematically sound option chain data centered around spot
-    for offline testing and off-market hours.
-    """
+def _generate_option_chain_records(symbol: str, cfg: dict, spot: float, expiry: str) -> list[dict]:
+    """Generates synthetic option chain records for offline tests / simulations."""
     step = cfg["strike_step"]
     atm = round(spot / step) * step
-    strikes = [atm + i * step for i in range(-15, 16)]
-
+    strikes = [atm + i * step for i in range(-10, 11)]
     chain = []
-    base_iv = 14.5 # approx India VIX level
-    r = 0.065 # risk-free rate 6.5%
-    days_to_expiry = 4.0 # weekly expiry estimate
-    t = days_to_expiry / 365.0
+    base_iv = 14.5
+    r = 0.065
+    t = 4.0 / 365.0
 
     for strike in strikes:
-        moneyness = (strike - spot) / spot
-        
-        # Approximate Black-Scholes pricing
         d1 = (math.log(spot / strike) + (r + 0.5 * (base_iv/100)**2) * t) / ((base_iv/100) * math.sqrt(t))
         d2 = d1 - (base_iv/100) * math.sqrt(t)
 
@@ -303,42 +489,23 @@ def _generate_simulated_option_chain(symbol: str, cfg: dict, spot: float, expiry
         ce_price = max(spot * norm_cdf(d1) - strike * math.exp(-r * t) * norm_cdf(d2), 0.05)
         pe_price = max(strike * math.exp(-r * t) * norm_cdf(-d2) - spot * norm_cdf(-d1), 0.05)
 
-        # OI distribution realistic model: high concentration at OTM round strikes
-        dist_factor = math.exp(-0.5 * (abs(strike - spot) / (5 * step))**2)
-        base_oi = int(1200000 * dist_factor + 150000)
-
-        # Round number bonus (multiples of 500 or 1000 have higher OI)
-        if strike % (step * 10) == 0:
-            base_oi = int(base_oi * 1.8)
-        elif strike % (step * 5) == 0:
-            base_oi = int(base_oi * 1.4)
-
-        # CE vs PE bias based on moneyness
-        ce_oi = int(base_oi * (1.2 if strike >= atm else 0.75))
-        pe_oi = int(base_oi * (1.2 if strike <= atm else 0.75))
-
-        # Change in OI simulation
-        ce_change_oi = int(ce_oi * 0.18 * (1.0 if strike >= atm + step else -0.35))
-        pe_change_oi = int(pe_oi * 0.22 * (1.2 if strike <= atm else -0.2))
-
-        # Volume
-        ce_vol = int(ce_oi * 0.65)
-        pe_vol = int(pe_oi * 0.58)
-
         chain.append({
             "strike": strike,
             "ce_ltp": round(ce_price, 2),
-            "ce_oi": ce_oi,
-            "ce_change_oi": ce_change_oi,
-            "ce_volume": ce_vol,
-            "ce_iv": round(base_iv + (abs(strike - spot) / spot) * 10, 2),
+            "ce_bid": round(ce_price * 0.995, 2),
+            "ce_ask": round(ce_price * 1.005, 2),
+            "ce_oi": 1500000,
+            "ce_change_oi": 50000,
+            "ce_volume": 120000,
+            "ce_iv": base_iv,
             "ce_delta": round(norm_cdf(d1), 2),
             "pe_ltp": round(pe_price, 2),
-            "pe_oi": pe_oi,
-            "pe_change_oi": pe_change_oi,
-            "pe_volume": pe_vol,
-            "pe_iv": round(base_iv + (abs(strike - spot) / spot) * 10, 2),
+            "pe_bid": round(pe_price * 0.995, 2),
+            "pe_ask": round(pe_price * 1.005, 2),
+            "pe_oi": 1600000,
+            "pe_change_oi": -40000,
+            "pe_volume": 110000,
+            "pe_iv": base_iv,
             "pe_delta": round(norm_cdf(d1) - 1.0, 2),
         })
-
     return chain

@@ -1,6 +1,6 @@
 # 📊 Options Desk — Institutional-Grade Options Analytics & Paper Trading Journal
 
-A high-performance, real-time Options Analytical Terminal and Automated Paper Trading Journal designed for Indian benchmark indices (**NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX**) powered by live FYERS API market data.
+A high-performance, real-time Options Analytical Terminal and Automated Paper Trading Journal designed for Indian benchmark indices (**NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX**) powered by live FYERS API v3 market data.
 
 ---
 
@@ -17,31 +17,36 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
 ---
 
 ### 2. ⚡ Automated Signal Tracker & Paper Trading Journal
-* **Selective Option Buying Flow:** Triggers high-probability CE / PE trade plans (Entry, SL, T1, T2, R:R) only when setup quality exceeds the threshold.
-* **🛡️ P1 — Trailing Stop-Loss to Cost on Target 1:** Stop-Loss is automatically trailed to `Entry + ₹1.0` buffer once Target 1 is achieved (`TSL_HIT`). Winning trades never turn into losses.
-* **🎯 P4 — Partial 50% Profit Booking:** Locks in 50% realized gains at Target 1, while allowing the remaining 50% to ride risk-free toward Target 2 (`TARGET_2_HIT` / `🛡️ T1 BOOKED & TSL`).
-* **⏱️ P3 — Dynamic Stagnation Time-Stop:** Automatically closes stagnant positions (25 mins morning / 12 mins afternoon) if the trade fails to progress toward Target 1, protecting buyers from Theta decay.
+* **Selective Option Buying Flow:** Triggers directional CE / PE trade plans (Entry, SL, T1, T2, R:R) upon multi-factor confirmation (Bias Score ≥ 60%, level breakout/breakdown, momentum, real bid/ask, and 2 consecutive cycle confirmations). Setup quality score (0–100) is tracked in telemetry.
+* **🛡️ Dynamic Trailing Stop-Loss (TSL):**
+  * When profit reaches +10% or 50% to Target 1: Stop-Loss ratchets to `Entry + 1 pt` (Guaranteed Breakeven).
+  * When profit reaches +20% or 80% to Target 1: Stop-Loss locks in +10% gain (`Entry × 1.10`).
+  * When Target 1 is reached: Status updates to `TARGET_1_HIT` and Stop-Loss ratchets to `Entry + 0.5 × (Target 1 - Entry)`.
+  * Beyond Target 1: Stop-Loss ratchets dynamically: `Target 1 + 0.5 × (Highest - Target 1)`.
+* **🎯 50% Partial Profit Booking:** Locks in 50% realized gains at Target 1, while allowing the remaining 50% to ride risk-free toward Target 2 (`TARGET_2_HIT` / `🛡️ T1 BOOKED & TSL`).
+* **⏱️ Dynamic Stagnation Time-Stop (`TIME_STOP_EXIT`):** Automatically closes stagnant positions (30 mins before 13:00 / 15 mins after 13:00 IST) if the trade fails to progress toward Target 1, protecting buyers from Theta decay.
 * **⏰ Strict 14:00 (2:00 PM) Cutoff:** Disables fresh option buying in the late afternoon session to eliminate late-day theta crush and squaring-off whipsaws.
-* **🔒 Anti-Whipsaw Cooldown:** Enforces a 15-minute lockout per contract after exit to prevent rapid duplicate re-entries.
-* **🛡️ SL Slippage Guard:** Bounds Stop-Loss execution to the planned SL level (with max 2% realistic slippage), avoiding artificial losses caused by poll lag.
+* **🔒 Anti-Whipsaw Cooldown:** Enforces a 15-minute lockout per index after exit to prevent revenge-trading.
+* **🛡️ Real Bid Fills & Slippage Guard:** Entries fill strictly at live Ask prices and exits at live Bid prices, ensuring 100% realistic execution logs without mid-market distortion.
 
 ---
 
-### 3. 🔍 Visual OI Activity & Institutional Positioning
-* **Directional Trend Badges:**
-  * **Call Writing:** `🔻 Ceiling (Resistance)` — Institutional sellers capping market upside.
-  * **Put Writing:** `🔺 Floor (Support)` — Institutional sellers building downside base.
-  * **Call Unwinding:** `↗️ Clearing` — Short covering rally, unlocking upward room.
-  * **Put Unwinding:** `↘️ Cracking` — Long unwinding, increasing downside risk.
-* **⚡ Institutional Dominance Meter:** Dual-color live progress bar indicating overall institutional stance (`🔴 Bears Dominating 83% Call Writing` vs `🟢 Bulls Dominating`).
-* **Big OI Movements:** Institutional flow sorted by `|ΔOI|` with proportional background magnitude bars, `▲ +OI` / `▼ -OI` volume indicators, and plain-English intent tags (`🔻 Resistance Build`, `🔺 Support Build`, `↗️ Short Covering`, `↘️ Support Cracking`).
-* **Interactive Tooltips:** Micro-tooltips explaining the trading implications of every tile on hover.
+### 3. 🤖 Autonomous Post-Trade Diagnostic Agent
+* **Automated Audit Reviews:** Every closed trade is analyzed tick-by-tick upon exit and categorized into 7 mutually exclusive diagnostic classifications:
+  1. `CLEAN_WIN` (Smooth move to targets with minimal drawdown)
+  2. `WRONG_DIRECTION` (Failed immediately, MFE ≤ 0.05R)
+  3. `RIGHT_THEN_REVERSED` (Made +0.5R or 50% to T1, then reversed)
+  4. `STOPPED_BY_NOISE` (Hit SL, but price later recovered to T1 within 30 min)
+  5. `THETA_STAGNATION` (Eroded by time decay over >45 min)
+  6. `EARLY_EXIT` (Exited early while trade ran 1.5x+ further)
+  7. `DATA_QUALITY_ISSUE` (Anomalous quotes/spreads)
+* **Strategy Health Scoring & Replay:** Performs counterfactual tick replays and parameter optimization once $\ge 30$ trade samples are collected.
 
 ---
 
 ### 4. 📈 High-Density Option Chain & OI Trend
 * **OI Trend Table:** Focused view of ATM ± 8 strikes with ITM/OTM color coding, strike-by-strike delta, and writing/unwinding labels.
-* **Full Interactive Option Chain:** Complete real-time strike chain with Calls and Puts metrics, live LTP, IV, Volume, and OI changes.
+* **Full Interactive Option Chain:** Complete real-time strike chain with Calls and Puts metrics, live LTP, IV, Volume, and OI changes powered in sub-150ms latency by FYERS API v3.
 
 ---
 
@@ -49,8 +54,10 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
 
 * **Backend:** Python 3.11+, Flask Blueprints, SQLite (WAL mode).
 * **Frontend:** Vanilla JavaScript (ES6+), Vanilla CSS with custom properties & design tokens.
-* **Data Provider:** FYERS REST API v3 with background polling scheduler (every 3 minutes) & real-time cache.
+* **Data Provider:** FYERS API v3 with single-call native option chain endpoint & real-time cache.
 * **Design Philosophy:** Minimalistic, high-density, accessible dark/gold palette with icon-first visual hierarchy.
+
+Detailed architecture specifications and flow diagrams are available in [ARCHITECTURE.md](file:///e:/Stock%20Market%20Top%20Stocks/Options-Desk/ARCHITECTURE.md).
 
 ```
 Options-Desk/
@@ -60,21 +67,26 @@ Options-Desk/
 │   │   ├── __init__.py
 │   │   └── options_desk.py         # Desk API endpoints & page routes
 │   └── services/
-│       ├── fyers_auth.py           # FYERS authentication & token manager
-│       ├── fyers_options_service.py# Live option chain fetching & Greeks
+│       ├── fyers_auth.py           # FYERS headless automated TOTP authentication
+│       ├── fyers_options_service.py# Live option chain & FYERS spot data
 │       ├── options_engine.py       # Market Bias, Levels & Scoring Engine
-│       ├── options_scheduler.py    # Background automated polling worker
-│       └── options_signal_service.py# Trade lifecycle, P&L, TSL & Journal DB
-├── config/                         # Configuration settings
+│       ├── options_scheduler.py    # Background automated polling worker with exclusive lock
+│       ├── options_signal_service.py# Trade lifecycle, P&L, TSL & Journal DB
+│       ├── trade_analyzer_agent.py # Automated post-trade diagnostic audit agent
+│       └── options_replay_backtest.py# Tick-level backtesting & walk-forward optimization
+├── config/                         # Configuration settings (.env)
 ├── static/
 │   ├── css/
 │   │   └── options_desk.css        # Responsive, compact design system
 │   └── js/
-│       └── options_desk.js         # Reactive DOM controller & Charting
+│       └── options_desk.js         # Reactive DOM controller & live charts
 ├── templates/
 │   ├── base.html                   # Global HTML5 layout
 │   └── options_desk.html           # Options Terminal workspace
-├── instance/                       # SQLite persistent databases
+├── instance/                       # SQLite persistent databases & token cache
+├── ARCHITECTURE.md                 # System Architecture & Technical Specifications
+├── UBUNTU_DEPLOYMENT_GUIDE.txt     # Complete 24/7 Linux Server Deployment Guide
+├── requirements.txt                # Python dependencies
 ├── run.py                          # Application entry point
 └── README.md                       # Project documentation
 ```
@@ -85,7 +97,7 @@ Options-Desk/
 
 ### 1. Prerequisites
 * Python 3.10 or higher
-* FYERS Trading Account with API access
+* FYERS Account with API v3 access & TOTP enabled
 
 ### 2. Installation
 ```bash
@@ -101,22 +113,43 @@ python -m venv venv
 source venv/bin/activate
 
 # Install dependencies
-pip install flask requests python-dotenv
+pip install -r requirements.txt
 ```
 
 ### 3. FYERS Configuration
-Create or configure your FYERS credentials in your environment or configuration files:
-* `APP_ID`: Your FYERS App ID
-* `SECRET_KEY`: Your FYERS App Secret
-* `REDIRECT_URI`: Registered redirect URL
+Configure your FYERS credentials in `config/.env`:
+```env
+PORT=5001
+FLASK_DEBUG=false
+SECRET_KEY=your_secure_secret_key
 
-### 4. Running the Application
+FYERS_ID=XC04484
+PIN=your_4_digit_pin
+APP_ID=MXPA3JHTVP
+APP_TYPE=100
+APP_SECRET=your_fyers_app_secret
+TOTP_KEY=your_totp_secret_key
+REDIRECT_URI=http://127.0.0.1:5001/
+```
+
+### 4. Running Locally
 ```bash
 python run.py
 ```
 Open your browser and navigate to:
 ```
-http://localhost:5000/options-desk
+http://localhost:5001/options-desk
+```
+
+---
+
+## 🐧 Ubuntu Server 24/7 Deployment
+
+For detailed production instructions using `systemd` and `gunicorn`, see [UBUNTU_DEPLOYMENT_GUIDE.txt](file:///e:/Stock%20Market%20Top%20Stocks/Options-Desk/UBUNTU_DEPLOYMENT_GUIDE.txt).
+
+```bash
+# Start 24/7 production service with Gunicorn
+gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5001 --timeout 120 run:app
 ```
 
 ---
@@ -126,10 +159,10 @@ http://localhost:5000/options-desk
 | Badge | Status | Explanation |
 | :--- | :--- | :--- |
 | `🎯 TARGET 2 HIT` | `TARGET_2_HIT` | Both Target 1 and Target 2 reached (100% full profit booked). |
-| `🛡️ T1 BOOKED & TSL` | `TSL_HIT` | 50% locked at Target 1, remaining 50% exited at Break-Even on pullback. |
+| `🛡️ T1 BOOKED & TSL` | `TSL_HIT` | 50% locked at Target 1, remaining 50% exited at Trailed SL on pullback. |
 | `🎯 TARGET 1 HIT` | `TARGET_1_HIT` | Target 1 reached, 50% profit realized, SL trailed to cost. |
-| `⏱ TIME STOP` | `TIME_STOP_EXIT` | Exited due to sideways stagnation to avoid Theta decay. |
-| `🛑 SL HIT` | `SL_HIT` | Stop-Loss triggered (bounded to max 2% slippage). |
+| `⏱ TIME STOP` | `TIME_STOP_EXIT` | Exited due to sideways stagnation to protect from Theta decay. |
+| `🛑 SL HIT` | `STOP_LOSS_HIT` | Stop-Loss triggered (bounded to real Bid price). |
 | `⏱ EOD CLOSED` | `EOD_CLOSED` | Session close square-off at 15:20 IST. |
 | `✋ SQUARED OFF` | `MANUALLY_CLOSED` | Trader manually squared off the position. |
 

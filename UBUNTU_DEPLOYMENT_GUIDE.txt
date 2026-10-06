@@ -1,0 +1,151 @@
+================================================================================
+OPTIONS DESK — UBUNTU SERVER DEPLOYMENT GUIDE (24/7 PRODUCTION SETUP)
+================================================================================
+
+This guide provides step-by-step instructions to deploy Options Desk on an Ubuntu 
+Linux server (20.04 / 22.04 / 24.04 LTS) with 24/7 systemd auto-restart, 
+exclusive process locking, persistent SQLite database, and optional Nginx reverse proxy.
+
+--------------------------------------------------------------------------------
+1. SERVER PREPARATION & TIMEZONE SETUP
+--------------------------------------------------------------------------------
+Connect to your server via SSH:
+    ssh user@your-server-ip
+
+Update packages and install Python 3, virtual environment, and system utilities:
+    sudo apt update && sudo apt upgrade -y
+    sudo apt install -y python3 python3-pip python3-venv git tzdata
+
+Set server timezone to Indian Standard Time (Asia/Kolkata):
+    sudo timedatectl set-timezone Asia/Kolkata
+    timedatectl
+
+--------------------------------------------------------------------------------
+2. CODEBASE CLONE & FOLDER PERMISSIONS
+--------------------------------------------------------------------------------
+Create deployment folder and clone repository:
+    sudo mkdir -p /var/www/options-desk
+    sudo chown -R $USER:$USER /var/www/options-desk
+    cd /var/www/options-desk
+
+    git clone https://github.com/chirag1981/options-desk.git .
+
+--------------------------------------------------------------------------------
+3. PYTHON VIRTUAL ENVIRONMENT & DEPENDENCY INSTALLATION
+--------------------------------------------------------------------------------
+Create and activate virtual environment:
+    python3 -m venv venv
+    source venv/bin/activate
+
+Install required packages:
+    pip install --upgrade pip
+    pip install -r requirements.txt
+
+--------------------------------------------------------------------------------
+4. ENVIRONMENT CONFIGURATION (.env)
+--------------------------------------------------------------------------------
+Create your production environment file:
+    mkdir -p config
+    nano config/.env
+
+Paste your production credentials into config/.env:
+--------------------------------------------------------------------------------
+PORT=5001
+FLASK_DEBUG=false
+SECRET_KEY=generate_a_random_32_character_secret_key
+
+# FYERS Credentials (Zero-Click Automated TOTP Login)
+FYERS_ID=XC04484
+PIN=your_4_digit_pin
+APP_ID=MXPA3JHTVP
+APP_TYPE=100
+APP_SECRET=your_fyers_app_secret
+TOTP_KEY=your_totp_secret_key
+REDIRECT_URI=http://127.0.0.1:5001/
+--------------------------------------------------------------------------------
+Save and exit: Press Ctrl+O, Enter, then Ctrl+X.
+
+--------------------------------------------------------------------------------
+5. SYSTEMD SERVICE CONFIGURATION (24/7 AUTO-START ON BOOT)
+--------------------------------------------------------------------------------
+Create a systemd unit file:
+    sudo nano /etc/systemd/system/options-desk.service
+
+Paste the following service definition:
+--------------------------------------------------------------------------------
+[Unit]
+Description=Options Desk Trading System
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/var/www/options-desk
+Environment="PATH=/var/www/options-desk/venv/bin"
+EnvironmentFile=/var/www/options-desk/config/.env
+ExecStart=/var/www/options-desk/venv/bin/gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5001 --timeout 120 run:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+--------------------------------------------------------------------------------
+*Note: Replace 'ubuntu' with your server username if different.
+*Important: Always keep --workers 1 with multi-threading (--threads 4) so the 
+background options scheduler and exclusive process lock run uniquely.
+
+Enable and start the service:
+    sudo systemctl daemon-reload
+    sudo systemctl enable options-desk
+    sudo systemctl start options-desk
+
+Check service status:
+    sudo systemctl status options-desk
+
+--------------------------------------------------------------------------------
+6. NGINX REVERSE PROXY SETUP (OPTIONAL FOR DOMAIN / PORT 80 ACCESS)
+--------------------------------------------------------------------------------
+Install Nginx:
+    sudo apt install -y nginx
+
+Create site configuration:
+    sudo nano /etc/nginx/sites-available/options-desk
+
+Paste:
+--------------------------------------------------------------------------------
+server {
+    listen 80;
+    server_name your_domain_or_server_ip;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}
+--------------------------------------------------------------------------------
+Enable the site and reload Nginx:
+    sudo ln -s /etc/nginx/sites-available/options-desk /etc/nginx/sites-enabled/
+    sudo nginx -t
+    sudo systemctl restart nginx
+
+--------------------------------------------------------------------------------
+7. COMMON OPERATIONAL COMMANDS
+--------------------------------------------------------------------------------
+View live application logs:
+    sudo journalctl -u options-desk -f
+
+Restart application:
+    sudo systemctl restart options-desk
+
+Stop application:
+    sudo systemctl stop options-desk
+
+Check SQLite database integrity:
+    python3 -c "import sqlite3; conn = sqlite3.connect('instance/options_signals.db'); print(conn.execute('PRAGMA integrity_check').fetchall())"
+
+Export CSV trade journal:
+    curl -o journal.csv http://127.0.0.1:5001/api/options-desk/signals/export-csv
+================================================================================
