@@ -145,7 +145,7 @@ http://localhost:5001/options-desk
 
 ## 🐧 Ubuntu Server 24/7 Deployment
 
-For detailed production instructions using `systemd` and `gunicorn`, see [UBUNTU_DEPLOYMENT_GUIDE.txt](file:///e:/Stock%20Market%20Top%20Stocks/Options-Desk/UBUNTU_DEPLOYMENT_GUIDE.txt).
+For complete step-by-step production instructions with systemd and Gunicorn, see the [Color-Coded Ubuntu Deployment Guide](file:///e:/Stock%20Market%20Top%20Stocks/Options-Desk/UBUNTU_DEPLOYMENT_GUIDE.md) or [Plain-Text Version](file:///e:/Stock%20Market%20Top%20Stocks/Options-Desk/UBUNTU_DEPLOYMENT_GUIDE.txt).
 
 ```bash
 # Start 24/7 production service with Gunicorn
