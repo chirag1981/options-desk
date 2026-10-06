@@ -1,60 +1,94 @@
 ================================================================================
-OPTIONS DESK — UBUNTU SERVER DEPLOYMENT GUIDE (24/7 PRODUCTION SETUP)
+OPTIONS DESK — UBUNTU SERVER PRODUCTION DEPLOYMENT & UPDATE GUIDE (24/7 SETUP)
 ================================================================================
 
-This guide provides step-by-step instructions to deploy Options Desk on an Ubuntu 
-Linux server (20.04 / 22.04 / 24.04 LTS) with 24/7 systemd auto-restart, 
-exclusive process locking, persistent SQLite database, and optional Nginx reverse proxy.
+This document provides complete instructions for running Options Desk on Ubuntu 
+Linux (20.04 / 22.04 / 24.04 LTS). It covers both updating an existing server 
+installation via git pull, and setting up a brand-new VPS from scratch.
 
---------------------------------------------------------------------------------
-1. SERVER PREPARATION & TIMEZONE SETUP
---------------------------------------------------------------------------------
-Connect to your server via SSH:
-    ssh user@your-server-ip
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. FAST TRACK: UPDATING AN EXISTING SERVER (DIRECT GIT PULL)
+2. FRESH SERVER SETUP: STEP-BY-STEP INSTALLATION
+3. SYSTEMD SERVICE CONFIGURATION (24/7 AUTO-START ON BOOT)
+4. NGINX REVERSE PROXY & FREE SSL (HTTPS) SETUP
+5. ENVIRONMENT CONFIGURATION (.env REFERENCE)
+6. MONITORING, LOGS & OPERATIONAL COMMANDS
+7. TROUBLESHOOTING & COMMON ISSUES
 
-Update packages and install Python 3, virtual environment, and system utilities:
+================================================================================
+1. FAST TRACK: UPDATING AN EXISTING SERVER (DIRECT GIT PULL)
+================================================================================
+If Options Desk is already cloned on your server, run these commands:
+
+Step 1: Go to your project directory
+    cd /var/www/options-desk   # (or your custom directory)
+
+Step 2: Pull the latest updates from master
+    git pull origin master
+
+Step 3: Activate your virtualenv and install new dependencies
+    source venv/bin/activate
+    pip install -U pip
+    pip install -r requirements.txt
+
+Step 4: Verify config/.env (ensure FYERS credentials and PORT=5001 are present)
+    nano config/.env
+
+Step 5: Restart the background service
+    sudo systemctl restart options-desk
+
+Step 6: Confirm service status and view live logs
+    sudo systemctl status options-desk
+    sudo journalctl -u options-desk -f -n 50
+
+================================================================================
+2. FRESH SERVER SETUP: STEP-BY-STEP INSTALLATION
+================================================================================
+For a brand new Ubuntu VPS / Server:
+
+Step 1: Connect via SSH
+    ssh root@your_server_ip
+    # (or ssh ubuntu@your_server_ip)
+
+Step 2: Update system packages and install prerequisites
     sudo apt update && sudo apt upgrade -y
-    sudo apt install -y python3 python3-pip python3-venv git tzdata
+    sudo apt install -y python3 python3-pip python3-venv git tzdata curl ufw
 
-Set server timezone to Indian Standard Time (Asia/Kolkata):
+Step 3: Set server timezone to Indian Standard Time (Asia/Kolkata)
+    *CRITICAL: Required for accurate market hours, expiry, and theta calculations.*
     sudo timedatectl set-timezone Asia/Kolkata
     timedatectl
 
---------------------------------------------------------------------------------
-2. CODEBASE CLONE & FOLDER PERMISSIONS
---------------------------------------------------------------------------------
-Create deployment folder and clone repository:
+Step 4: Create deployment directory & set ownership
     sudo mkdir -p /var/www/options-desk
     sudo chown -R $USER:$USER /var/www/options-desk
     cd /var/www/options-desk
 
+Step 5: Clone the repository
     git clone https://github.com/chirag1981/options-desk.git .
 
---------------------------------------------------------------------------------
-3. PYTHON VIRTUAL ENVIRONMENT & DEPENDENCY INSTALLATION
---------------------------------------------------------------------------------
-Create and activate virtual environment:
+Step 6: Create Python 3 virtual environment
     python3 -m venv venv
     source venv/bin/activate
-
-Install required packages:
     pip install --upgrade pip
     pip install -r requirements.txt
 
---------------------------------------------------------------------------------
-4. ENVIRONMENT CONFIGURATION (.env)
---------------------------------------------------------------------------------
-Create your production environment file:
+================================================================================
+3. ENVIRONMENT CONFIGURATION (config/.env)
+================================================================================
+Create your private production configuration file:
     mkdir -p config
     nano config/.env
 
-Paste your production credentials into config/.env:
+Copy and paste the template below with your real credentials:
 --------------------------------------------------------------------------------
 PORT=5001
 FLASK_DEBUG=false
-SECRET_KEY=generate_a_random_32_character_secret_key
+SECRET_KEY=generate_a_random_32_character_string_here
 
-# FYERS Credentials (Zero-Click Automated TOTP Login)
+# FYERS API v3 Credentials (Automated Zero-Click TOTP Authentication)
 FYERS_ID=XC04484
 PIN=your_4_digit_pin
 APP_ID=MXPA3JHTVP
@@ -65,56 +99,78 @@ REDIRECT_URI=http://127.0.0.1:5001/
 --------------------------------------------------------------------------------
 Save and exit: Press Ctrl+O, Enter, then Ctrl+X.
 
---------------------------------------------------------------------------------
-5. SYSTEMD SERVICE CONFIGURATION (24/7 AUTO-START ON BOOT)
---------------------------------------------------------------------------------
-Create a systemd unit file:
+Ensure safe permissions on config/.env:
+    chmod 600 config/.env
+
+================================================================================
+4. SYSTEMD SERVICE CONFIGURATION (24/7 AUTO-START ON BOOT)
+================================================================================
+A systemd daemon guarantees that Options Desk runs continuously, restarts 
+automatically if interrupted, and starts upon server reboots.
+
+Create the service file:
     sudo nano /etc/systemd/system/options-desk.service
 
-Paste the following service definition:
+Paste the following configuration:
 --------------------------------------------------------------------------------
 [Unit]
-Description=Options Desk Trading System
+Description=Options Desk Trading System (Gunicorn + FYERS API v3)
 After=network.target
 
 [Service]
 User=ubuntu
+Group=ubuntu
 WorkingDirectory=/var/www/options-desk
 Environment="PATH=/var/www/options-desk/venv/bin"
 EnvironmentFile=/var/www/options-desk/config/.env
-ExecStart=/var/www/options-desk/venv/bin/gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5001 --timeout 120 run:app
+
+# Gunicorn Execution:
+# IMPORTANT: Use 1 worker with 4 threads (--workers 1 --threads 4).
+# This prevents race conditions and ensures the background scheduler lock is unique.
+ExecStart=/var/www/options-desk/venv/bin/gunicorn \
+    --workers 1 \
+    --threads 4 \
+    --worker-class gthread \
+    --bind 0.0.0.0:5001 \
+    --timeout 120 \
+    --access-logfile /var/www/options-desk/access.log \
+    --error-logfile /var/www/options-desk/error.log \
+    run:app
+
 Restart=always
 RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
 --------------------------------------------------------------------------------
-*Note: Replace 'ubuntu' with your server username if different.
-*Important: Always keep --workers 1 with multi-threading (--threads 4) so the 
-background options scheduler and exclusive process lock run uniquely.
+*Note: If your server username is not 'ubuntu', change User= and Group= to your username.*
 
-Enable and start the service:
+Reload systemd, enable, and start the service:
     sudo systemctl daemon-reload
     sudo systemctl enable options-desk
     sudo systemctl start options-desk
 
-Check service status:
+Verify the service is active (running):
     sudo systemctl status options-desk
 
---------------------------------------------------------------------------------
-6. NGINX REVERSE PROXY SETUP (OPTIONAL FOR DOMAIN / PORT 80 ACCESS)
---------------------------------------------------------------------------------
-Install Nginx:
-    sudo apt install -y nginx
+================================================================================
+5. NGINX REVERSE PROXY & FREE SSL (HTTPS) SETUP
+================================================================================
+To access the Options Desk UI securely over standard port 80/443:
 
-Create site configuration:
+Step 1: Install Nginx & Certbot
+    sudo apt install -y nginx certbot python3-certbot-nginx
+
+Step 2: Create Nginx server block
     sudo nano /etc/nginx/sites-available/options-desk
 
 Paste:
 --------------------------------------------------------------------------------
 server {
     listen 80;
-    server_name your_domain_or_server_ip;
+    server_name your_domain.com;   # Or your server IP
 
     location / {
         proxy_pass http://127.0.0.1:5001;
@@ -122,30 +178,85 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 120s;
         proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+
+        # WebSocket / Long-Polling support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 --------------------------------------------------------------------------------
-Enable the site and reload Nginx:
+
+Step 3: Enable site and test configuration
     sudo ln -s /etc/nginx/sites-available/options-desk /etc/nginx/sites-enabled/
     sudo nginx -t
     sudo systemctl restart nginx
 
---------------------------------------------------------------------------------
-7. COMMON OPERATIONAL COMMANDS
---------------------------------------------------------------------------------
-View live application logs:
+Step 4: Enable Firewall (UFW)
+    sudo ufw allow OpenSSH
+    sudo ufw allow 'Nginx Full'
+    sudo ufw --force enable
+
+Step 5: (Optional) Install Free SSL with Let's Encrypt
+    sudo certbot --nginx -d your_domain.com
+
+================================================================================
+6. MONITORING, LOGS & OPERATIONAL COMMANDS
+================================================================================
+
+* Follow live application logs:
     sudo journalctl -u options-desk -f
 
-Restart application:
+* View the last 100 log lines:
+    sudo journalctl -u options-desk -n 100 --no-pager
+
+* Restart application after changes:
     sudo systemctl restart options-desk
 
-Stop application:
+* Stop application:
     sudo systemctl stop options-desk
 
-Check SQLite database integrity:
-    python3 -c "import sqlite3; conn = sqlite3.connect('instance/options_signals.db'); print(conn.execute('PRAGMA integrity_check').fetchall())"
+* Start application:
+    sudo systemctl start options-desk
 
-Export CSV trade journal:
-    curl -o journal.csv http://127.0.0.1:5001/api/options-desk/signals/export-csv
+* Check SQLite database integrity:
+    cd /var/www/options-desk
+    venv/bin/python -c "import sqlite3; conn = sqlite3.connect('instance/options_signals.db'); print('DB Integrity:', conn.execute('PRAGMA integrity_check').fetchall())"
+
+* Run full test suite on server:
+    cd /var/www/options-desk
+    venv/bin/pytest
+
+* Download CSV trade journal backup via curl:
+    curl -o my_trade_journal.csv http://127.0.0.1:5001/api/options-desk/signals/export-csv
+
+================================================================================
+7. TROUBLESHOOTING & COMMON ISSUES
+================================================================================
+
+Issue 1: "Address already in use: 5001"
+Fix: Check what process is using port 5001:
+    sudo lsof -i :5001
+    sudo fuser -k 5001/tcp
+    sudo systemctl restart options-desk
+
+Issue 2: "Authentication Error / Invalid Token"
+Fix: FYERS TOTP key or PIN in config/.env might be wrong.
+1. Check credentials in config/.env.
+2. Delete cached token:
+    rm instance/fyers_token.json
+3. Restart:
+    sudo systemctl restart options-desk
+
+Issue 3: "Timezone mismatch / Stale scheduler times"
+Fix: Ensure Ubuntu timezone is set to Asia/Kolkata:
+    sudo timedatectl set-timezone Asia/Kolkata
+
+Issue 4: Permission errors on SQLite database (instance/)
+Fix: Ensure your service user owns the instance folder:
+    sudo chown -R $USER:$USER /var/www/options-desk/instance
 ================================================================================
