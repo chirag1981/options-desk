@@ -169,17 +169,26 @@ def update_symbol_pullback_recovery(
     is_bearish: bool,
     custom_history: list[float] | None = None,
     update_state: bool = False,
-) -> str:
+    momentum_signal: str = "NEUTRAL",
+    price_signal: str = "NEUTRAL",
+) -> dict:
     """
-    Evaluates whether the current market movement represents a PULLBACK_RECOVERY
-    or a NORMAL_CONTINUATION.
-    - Pullback in Bullish: price creates a local high, dips down (pullback), and now recovers above the dip.
-    - Pullback in Bearish: price creates a local low, bounces up (pullback), and now recovers below the bounce.
-    - Pullback itself is not traded; entry triggers only upon recovery in the trend direction.
+    Evaluates whether the current market movement represents a valid PULLBACK_RECOVERY,
+    a FRESH_HIGH_NO_PULLBACK, a FRESH_LOW_NO_PULLBACK, or a PULLBACK_IN_PROGRESS.
+    
+    Anti-Chase Guard:
+    - In a bullish trend: If price is at a fresh peak/high without a preceding pullback dip,
+      entry is blocked (FRESH_HIGH_NO_PULLBACK).
+    - In a bearish trend: If price is at a fresh trough/low without a preceding rebound,
+      entry is blocked (FRESH_LOW_NO_PULLBACK).
+    - Recovery requires:
+        1. Meaningful pullback / rebound detected.
+        2. Price actively turning back in the trend direction (spot moving off trough/bounce).
+        3. Momentum and Price confirmed in the trend direction.
     """
     sym = (symbol or "DEFAULT").upper()
     with _PRICE_HISTORY_LOCK:
-        if custom_history is not None and len(custom_history) > 0:
+        if custom_history is not None:
             hist = list(custom_history)
         else:
             if sym not in _SYMBOL_PRICE_HISTORY:
@@ -187,28 +196,113 @@ def update_symbol_pullback_recovery(
             hist = _SYMBOL_PRICE_HISTORY[sym]
             if update_state or not hist:
                 hist.append(spot)
-                if len(hist) > 12:
+                if len(hist) > 15:
                     hist.pop(0)
+
+        pullback_occurred = False
+        recovery_confirmed = False
+        anti_chase = "BLOCK"
+        setup_type = "NORMAL_CONTINUATION"
+        reason = ""
 
         if len(hist) >= 3:
             if is_bullish:
-                peak = max(hist[:-1])
+                peak = max(hist)
                 peak_idx = hist.index(peak)
-                post_peak = hist[peak_idx:-1] if peak_idx < len(hist) - 1 else hist[:-1]
-                if post_peak:
+                # Check if current spot is at fresh high with no preceding dip after a peak
+                if peak_idx == len(hist) - 1:
+                    pullback_occurred = False
+                    recovery_confirmed = False
+                    anti_chase = "BLOCK"
+                    setup_type = "FRESH_HIGH_NO_PULLBACK"
+                    reason = "FRESH_HIGH_NO_PULLBACK"
+                else:
+                    post_peak = hist[peak_idx:]
                     trough = min(post_peak)
-                    if trough < peak and spot > trough:
-                        return "PULLBACK_RECOVERY"
-            elif is_bearish:
-                trough = min(hist[:-1])
-                trough_idx = hist.index(trough)
-                post_trough = hist[trough_idx:-1] if trough_idx < len(hist) - 1 else hist[:-1]
-                if post_trough:
-                    bounce = max(post_trough)
-                    if bounce > trough and spot < bounce:
-                        return "PULLBACK_RECOVERY"
+                    trough_idx = hist.index(trough, peak_idx)
+                    
+                    if trough < peak:
+                        pullback_occurred = True
+                    
+                    is_moving_up = (spot > trough and (trough_idx < len(hist) - 1 and spot >= hist[-2]))
+                    if (pullback_occurred and is_moving_up and 
+                        momentum_signal == "BULLISH" and price_signal == "BULLISH"):
+                        recovery_confirmed = True
+                        anti_chase = "PASS"
+                        setup_type = "PULLBACK_RECOVERY"
+                        reason = "PULLBACK_RECOVERY"
+                    else:
+                        recovery_confirmed = False
+                        anti_chase = "BLOCK"
+                        if not pullback_occurred:
+                            setup_type = "FRESH_HIGH_NO_PULLBACK"
+                            reason = "FRESH_HIGH_NO_PULLBACK"
+                        else:
+                            setup_type = "PULLBACK_IN_PROGRESS"
+                            reason = "PULLBACK_IN_PROGRESS"
 
-        return "NORMAL_CONTINUATION"
+            elif is_bearish:
+                trough = min(hist)
+                trough_idx = hist.index(trough)
+                if trough_idx == len(hist) - 1:
+                    pullback_occurred = False
+                    recovery_confirmed = False
+                    anti_chase = "BLOCK"
+                    setup_type = "FRESH_LOW_NO_PULLBACK"
+                    reason = "FRESH_LOW_NO_PULLBACK"
+                else:
+                    post_trough = hist[trough_idx:]
+                    bounce = max(post_trough)
+                    bounce_idx = hist.index(bounce, trough_idx)
+                    
+                    if bounce > trough:
+                        pullback_occurred = True
+                    
+                    is_moving_down = (spot < bounce and (bounce_idx < len(hist) - 1 and spot <= hist[-2]))
+                    if (pullback_occurred and is_moving_down and 
+                        momentum_signal == "BEARISH" and price_signal == "BEARISH"):
+                        recovery_confirmed = True
+                        anti_chase = "PASS"
+                        setup_type = "PULLBACK_RECOVERY"
+                        reason = "PULLBACK_RECOVERY"
+                    else:
+                        recovery_confirmed = False
+                        anti_chase = "BLOCK"
+                        if not pullback_occurred:
+                            setup_type = "FRESH_LOW_NO_PULLBACK"
+                            reason = "FRESH_LOW_NO_PULLBACK"
+                        else:
+                            setup_type = "PULLBACK_IN_PROGRESS"
+                            reason = "PULLBACK_IN_PROGRESS"
+            else:
+                setup_type = "NORMAL_CONTINUATION"
+                anti_chase = "PASS"
+        else:
+            if custom_history is not None:
+                if is_bullish:
+                    setup_type = "FRESH_HIGH_NO_PULLBACK"
+                    reason = "FRESH_HIGH_NO_PULLBACK"
+                    anti_chase = "BLOCK"
+                elif is_bearish:
+                    setup_type = "FRESH_LOW_NO_PULLBACK"
+                    reason = "FRESH_LOW_NO_PULLBACK"
+                    anti_chase = "BLOCK"
+                else:
+                    setup_type = "NORMAL_CONTINUATION"
+                    anti_chase = "PASS"
+            else:
+                pullback_occurred = True
+                recovery_confirmed = True
+                anti_chase = "PASS"
+                setup_type = "PULLBACK_RECOVERY"
+
+        return {
+            "setup_type": setup_type,
+            "pullback_occurred": pullback_occurred,
+            "recovery_confirmed": recovery_confirmed,
+            "anti_chase": anti_chase,
+            "reason": reason,
+        }
 
 
 def get_symbol_oi_thresholds(symbol: str) -> dict:
@@ -819,9 +913,15 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     # Pullback & Recovery Detection
     custom_price_hist = market_data.get("price_history")
-    setup_type = update_symbol_pullback_recovery(
-        symbol, spot, is_bullish_dir, is_bearish_dir, custom_history=custom_price_hist, update_state=update_state
+    pullback_info = update_symbol_pullback_recovery(
+        symbol, spot, is_bullish_dir, is_bearish_dir,
+        custom_history=custom_price_hist, update_state=update_state,
+        momentum_signal=momentum_signal, price_signal=price_signal
     )
+    setup_type = pullback_info["setup_type"]
+    pullback_occurred = pullback_info["pullback_occurred"]
+    recovery_confirmed = pullback_info["recovery_confirmed"]
+    anti_chase_status = pullback_info["anti_chase"]
 
     # 8. Preferred Option Contract Selection (ATM or ITM-1)
     ce_candidates = [r for r in enriched_chain if r["strike"] in (atm_strike, atm_strike - step)]
@@ -982,15 +1082,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         focus_title = "WAIT"
         focus_reason = "ACTIVE TRADE EXISTS"
     elif is_bullish_dir:
-        if ce_trade_plan is not None:
-            decision = "BUY CE"
-            setup_score = max(ce_score, 80)
-            active_checklist = ce_checklist
-            active_trade_plan = ce_trade_plan
-            active_pillar_flags = ce_pillar_flags
-            focus_title = "BUY CE"
-            focus_reason = f"Bullish setup ({setup_type}) confirmed with {bull_confirm_count}/3 confirmations (OI, Volume, PCR)."
-        else:
+        if ce_trade_plan is None:
             decision = "WAIT"
             setup_score = ce_score
             active_checklist = ce_checklist
@@ -998,8 +1090,40 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: CE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif not pullback_occurred or not recovery_confirmed:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "FRESH_HIGH_NO_PULLBACK" if not pullback_occurred else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+        else:
+            decision = "BUY CE"
+            setup_score = max(ce_score, 80)
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "BUY CE"
+            focus_reason = f"Bullish setup ({setup_type}) confirmed with {bull_confirm_count}/3 confirmations (OI, Volume, PCR)."
     elif is_bearish_dir:
-        if pe_trade_plan is not None:
+        if pe_trade_plan is None:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif not pullback_occurred or not recovery_confirmed:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "FRESH_LOW_NO_PULLBACK" if not pullback_occurred else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+        else:
             decision = "BUY PE"
             setup_score = max(pe_score, 80)
             active_checklist = pe_checklist
@@ -1007,11 +1131,6 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "BUY PE"
             focus_reason = f"Bearish setup ({setup_type}) confirmed with {bear_confirm_count}/3 confirmations (OI, Volume, PCR)."
-        else:
-            decision = "WAIT"
-            setup_score = pe_score
-            active_checklist = pe_checklist
-            active_trade_plan = {}
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
@@ -1030,34 +1149,51 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             focus_reason = "Market direction or momentum unclear. Preserve capital."
 
     # -------------------------------------------------------------
-    # STRUCTURED STRATEGY LOGGING (Item 10)
+    # STRUCTURED STRATEGY LOGGING (Item 10 / Section 15)
     # -------------------------------------------------------------
     market_bias_str = "BULLISH" if is_bullish_dir else ("BEARISH" if is_bearish_dir else "NEUTRAL")
     confirm_display = f"{bull_confirm_count if is_bullish_dir else (bear_confirm_count if is_bearish_dir else max(bull_confirm_count, bear_confirm_count))}/3"
 
+    pullback_str = "YES" if pullback_occurred else "NO"
+    recovery_str = "YES" if recovery_confirmed else "NO"
+
     if has_active_trade:
         log.info(
             f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
-            f"Market Bias : {market_bias_str}\n"
-            f"Setup       : {setup_type}\n"
-            f"Active Trade: YES\n"
+            f"Trend       : {market_bias_str}\n"
+            f"Pullback    : {pullback_str}\n"
+            f"Recovery    : {recovery_str}\n\n"
+            f"Active Trade: YES\n\n"
             f"Decision    : WAIT\n"
-            f"Reason      : ACTIVE TRADE EXISTS"
+            f"Reason      : ACTIVE_TRADE_EXISTS\n"
+        )
+    elif anti_chase_status == "BLOCK" and (is_bullish_dir or is_bearish_dir):
+        log.info(
+            f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
+            f"Trend       : {market_bias_str}\n"
+            f"Pullback    : {pullback_str}\n"
+            f"Recovery    : {recovery_str}\n"
+            f"Anti-Chase  : BLOCK\n\n"
+            f"Decision    : WAIT\n"
+            f"Reason      : {focus_reason}\n"
         )
     else:
         log.info(
             f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
-            f"Price      : {price_signal}\n"
-            f"Momentum   : {momentum_signal}\n"
-            f"OI         : {oi_signal}\n"
-            f"Volume     : {volume_signal}\n"
-            f"PCR        : {pcr_signal}\n\n"
+            f"Price       : {price_signal}\n"
+            f"Momentum    : {momentum_signal}\n"
+            f"OI          : {oi_signal}\n"
+            f"Volume      : {volume_signal}\n"
+            f"PCR         : {pcr_signal}\n\n"
             f"Confirmation: {confirm_display}\n"
-            f"Market Bias : {market_bias_str}\n"
-            f"Setup       : {setup_type}\n"
-            f"Active Trade: {active_trade_str}\n"
+            f"Trend       : {market_bias_str}\n\n"
+            f"Pullback    : {pullback_str}\n"
+            f"Recovery    : {recovery_str}\n"
+            f"Resistance  : NEAR_R1 ({r1})\n"
+            f"Anti-Chase  : {anti_chase_status}\n\n"
+            f"Active Trade: {active_trade_str}\n\n"
             f"Decision    : {decision}\n"
-            + (f"Reason      : {focus_reason}" if decision == "WAIT" else "")
+            + (f"Reason      : {focus_reason}\n" if decision == "WAIT" else "")
         )
 
     # 11. OI Trend Focus & Trending OI (ATM +/- 5 strikes: 5 up, 5 down, 11 strikes total)
