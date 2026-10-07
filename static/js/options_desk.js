@@ -652,7 +652,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderTrendingOiTable(trendingTimeseries, atmStrike, spotPrice) {
         if (!trendingPulseTbody) return;
         if (!trendingTimeseries || !trendingTimeseries.rows || trendingTimeseries.rows.length === 0) {
-            trendingPulseTbody.innerHTML = `<tr><td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
+            trendingPulseTbody.innerHTML = `<tr><td colspan="14" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
             return;
         }
 
@@ -707,6 +707,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
+            // Compact & formatted values
+            const compactCeChg = formatCompactOi(r.ce_change_oi);
+            const fullCeChg = formatIndianNumber(r.ce_change_oi);
+            const compactPeChg = formatCompactOi(r.pe_change_oi);
+            const fullPeChg = formatIndianNumber(r.pe_change_oi);
+            const compactDiffOi = formatCompactOi(r.diff_oi);
+            const fullDiffOi = formatIndianNumber(Math.abs(r.diff_oi));
+            const compactChngDir = formatCompactOi(r.chng_in_direction);
+            const fullChngDir = formatIndianNumber(Math.abs(r.chng_in_direction));
+            const sentClass = r.sentiment === 'Bullish' ? 'badge badge-sentiment-bullish' : (r.sentiment === 'Bearish' ? 'badge badge-sentiment-bearish' : 'badge badge-sentiment-neutral');
+
             // Diff in OI class
             const diffClass = r.diff_oi >= 0 ? "val-pos" : "val-neg";
             const diffSign = r.diff_oi >= 0 ? "+" : "";
@@ -754,12 +765,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             `;
 
+            const ltpVal = typeof r.ltp === "number" ? r.ltp.toFixed(2) : (r.ltp || "--");
+            const dirPctVal = typeof r.direction_chng_pct === "number" ? r.direction_chng_pct.toFixed(2) : (r.direction_chng_pct || "0.00");
+            const netPcrVal = typeof r.net_pcr === "number" ? r.net_pcr.toFixed(2) : (r.net_pcr || "--");
+
             tr.innerHTML = `
                 <td class="text-center font-mono">
-                    <strong style="font-size:0.75rem;">${r.time}</strong>
-                    <span class="sub-date">${r.date}</span>
+                    <strong style="font-size:0.75rem;">${r.time || "--"}</strong>
+                    <span class="sub-date">${r.date || ""}</span>
                 </td>
-                <td class="text-right font-mono">₹${r.ltp.toFixed(2)}</td>
+                <td class="text-right font-mono">₹${ltpVal}</td>
                 <td class="text-center">${dlbHtml}</td>
                 <td class="text-right font-mono" title="${fullCeChg} contracts">${compactCeChg}</td>
                 <td class="text-right font-mono" title="${fullPeChg} contracts">${compactPeChg}</td>
@@ -767,11 +782,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td class="text-center">${strengthHtml}</td>
                 <td class="text-center">${dirArrowHtml}</td>
                 <td class="text-right font-mono ${chngDirClass}" title="${chngDirSign}${fullChngDir} contracts">${compactChngDir}</td>
-                <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${r.direction_chng_pct.toFixed(2)}%</td>
-                <td class="text-center font-mono"><strong>${r.net_pcr.toFixed(2)}</strong></td>
+                <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${dirPctVal}%</td>
+                <td class="text-center font-mono"><strong>${netPcrVal}</strong></td>
                 <td class="text-center">${dayHlDiffHtml}</td>
                 <td class="text-center">${buildupHtml}</td>
-                <td class="text-center"><span class="${sentClass}">${r.sentiment}</span></td>
+                <td class="text-center"><span class="${sentClass}">${r.sentiment || "--"}</span></td>
             `;
 
             trendingPulseTbody.appendChild(tr);
