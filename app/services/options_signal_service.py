@@ -1168,7 +1168,16 @@ def get_trending_oi_timeseries(
 
         # 3. Direction of Change & Chng In Direction
         if prev_point is not None:
+            prev_ltp = float(prev_point["spot_price"])
+            prev_ce = int(prev_point["ce_change_oi"])
+            prev_pe = int(prev_point["pe_change_oi"])
             prev_diff = int(prev_point["diff_oi"])
+
+            delta_price = round(ltp - prev_ltp, 2)
+            delta_ce = int(pt["ce_change_oi"]) - prev_ce
+            delta_pe = int(pt["pe_change_oi"]) - prev_pe
+            delta_net_diff = diff_oi - prev_diff
+
             chng_in_direction = diff_oi - prev_diff
             if chng_in_direction >= 0:
                 direction_arrow = "↑"
@@ -1179,11 +1188,81 @@ def get_trending_oi_timeseries(
             
             denom = max(abs(prev_diff), 1)
             direction_chng_pct = round((chng_in_direction / denom) * 100.0, 2)
+
+            # Leg Actions
+            if delta_ce > 10000:
+                ce_action = "CE Writing"
+            elif delta_ce < -10000:
+                ce_action = "CE Short Covering"
+            else:
+                ce_action = "CE Neutral"
+
+            if delta_pe > 10000:
+                pe_action = "PE Writing"
+            elif delta_pe < -10000:
+                pe_action = "PE Unwinding"
+            else:
+                pe_action = "PE Neutral"
+
+            # 4-State Institutional Regime
+            if delta_price > 0.05:
+                if delta_ce < -10000 or (delta_net_diff > 0 and delta_pe <= 0):
+                    buildup_type = "SHORT_COVERING"
+                    buildup_label = "Short Covering"
+                    buildup_class = "buildup-short-covering"
+                elif delta_net_diff >= 0 or delta_pe > 0:
+                    buildup_type = "LONG_BUILDUP"
+                    buildup_label = "Long Build-up"
+                    buildup_class = "buildup-long"
+                else:
+                    buildup_type = "SHORT_COVERING"
+                    buildup_label = "Short Covering"
+                    buildup_class = "buildup-short-covering"
+            elif delta_price < -0.05:
+                if delta_pe < -10000 or (delta_net_diff < 0 and delta_ce <= 0):
+                    buildup_type = "LONG_UNWINDING"
+                    buildup_label = "Long Unwinding"
+                    buildup_class = "buildup-unwinding"
+                elif delta_net_diff <= 0 or delta_ce > 0:
+                    buildup_type = "SHORT_BUILDUP"
+                    buildup_label = "Short Build-up"
+                    buildup_class = "buildup-short"
+                else:
+                    buildup_type = "LONG_UNWINDING"
+                    buildup_label = "Long Unwinding"
+                    buildup_class = "buildup-unwinding"
+            else:
+                if delta_net_diff > 50000:
+                    buildup_type = "BULLISH_SUPPORT"
+                    buildup_label = "PE Support Build"
+                    buildup_class = "buildup-long"
+                elif delta_net_diff < -50000:
+                    buildup_type = "BEARISH_RESIST"
+                    buildup_label = "CE Resist Build"
+                    buildup_class = "buildup-short"
+                else:
+                    buildup_type = "CONSOLIDATION"
+                    buildup_label = "Consolidation"
+                    buildup_class = "buildup-neutral"
         else:
             chng_in_direction = diff_oi
             direction_arrow = "↑" if diff_oi >= 0 else "↓"
             direction_color = "green" if diff_oi >= 0 else "red"
             direction_chng_pct = 0.0
+            ce_action = "CE Neutral"
+            pe_action = "PE Neutral"
+            if diff_oi > 0:
+                buildup_type = "LONG_BUILDUP"
+                buildup_label = "Long Build-up"
+                buildup_class = "buildup-long"
+            elif diff_oi < 0:
+                buildup_type = "SHORT_BUILDUP"
+                buildup_label = "Short Build-up"
+                buildup_class = "buildup-short"
+            else:
+                buildup_type = "NEUTRAL"
+                buildup_label = "Neutral"
+                buildup_class = "buildup-neutral"
 
         prev_point = pt
 
@@ -1224,6 +1303,12 @@ def get_trending_oi_timeseries(
             "net_pcr": round(float(pt["net_pcr"]), 2),
             "day_hl_diff_oi": day_hl_diff_oi,
             "sentiment": pt["sentiment"],
+            "buildup_type": buildup_type,
+            "buildup_label": buildup_label,
+            "buildup_class": buildup_class,
+            "ce_action": ce_action,
+            "pe_action": pe_action,
+            "sub_activity": f"{ce_action} • {pe_action}",
         }
         processed_rows.append(row)
 

@@ -742,20 +742,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 dayHlDiffHtml = `<span class="badge-diff-break-high">Day High Break</span>`;
             }
 
-            // Sentiment badge
-            let sentClass = "badge-sentiment-neutral";
-            if (r.sentiment === "Bullish") sentClass = "badge-sentiment-bullish";
-            else if (r.sentiment === "Bearish") sentClass = "badge-sentiment-bearish";
+            // Build-up Badge & Sub-activity
+            const buildupClass = r.buildup_class || "buildup-neutral";
+            const buildupLabel = r.buildup_label || "Neutral";
+            const subActText = r.sub_activity || "";
 
-            const fullCeChg = formatIndianNumber(r.ce_change_oi);
-            const fullPeChg = formatIndianNumber(r.pe_change_oi);
-            const fullDiffOi = formatIndianNumber(r.diff_oi);
-            const fullChngDir = formatIndianNumber(r.chng_in_direction);
-
-            const compactCeChg = formatCompactOi(r.ce_change_oi);
-            const compactPeChg = formatCompactOi(r.pe_change_oi);
-            const compactDiffOi = formatCompactOi(r.diff_oi);
-            const compactChngDir = formatCompactOi(r.chng_in_direction);
+            const buildupHtml = `
+                <div class="buildup-cell-wrap" title="${subActText}">
+                    <span class="badge-buildup ${buildupClass}">${buildupLabel}</span>
+                    ${subActText ? `<span class="buildup-sub-action">${subActText}</span>` : ''}
+                </div>
+            `;
 
             tr.innerHTML = `
                 <td class="text-center font-mono">
@@ -773,6 +770,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${r.direction_chng_pct.toFixed(2)}%</td>
                 <td class="text-center font-mono"><strong>${r.net_pcr.toFixed(2)}</strong></td>
                 <td class="text-center">${dayHlDiffHtml}</td>
+                <td class="text-center">${buildupHtml}</td>
                 <td class="text-center"><span class="${sentClass}">${r.sentiment}</span></td>
             `;
 

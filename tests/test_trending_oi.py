@@ -143,13 +143,14 @@ def test_get_trending_oi_timeseries_structure_and_columns():
     assert "selected_strikes" in ts
     assert len(ts["selected_strikes"]) == 11
 
-    # Verify first row contains all 14 fields
+    # Verify first row contains all fields including institutional build-up & leg activities
     row0 = ts["rows"][0]
     required_fields = [
         "date", "time", "ltp", "day_hl_break", "ce_change_oi", "pe_change_oi",
         "diff_oi", "strength_pct", "strength_dots", "strength_class",
         "direction_arrow", "direction_color", "chng_in_direction",
-        "direction_chng_pct", "net_pcr", "day_hl_diff_oi", "sentiment"
+        "direction_chng_pct", "net_pcr", "day_hl_diff_oi", "sentiment",
+        "buildup_type", "buildup_label", "buildup_class", "ce_action", "pe_action", "sub_activity"
     ]
     for field in required_fields:
         assert field in row0, f"Missing field: {field}"
@@ -161,8 +162,18 @@ def test_get_trending_oi_timeseries_structure_and_columns():
         assert t0 >= t1, f"Expected descending order: {t0} >= {t1}"
 
 
+def test_buildup_classification_regimes():
+    """5. Tests institutional 4-state build-up classification on sample time series."""
+    ts = get_trending_oi_timeseries("NIFTY", interval_minutes=5, spot_price=22600.0, strike_step=50.0)
+    for r in ts["rows"]:
+        assert r["buildup_type"] in ("LONG_BUILDUP", "SHORT_COVERING", "SHORT_BUILDUP", "LONG_UNWINDING", "BULLISH_SUPPORT", "BEARISH_RESIST", "CONSOLIDATION", "NEUTRAL")
+        assert len(r["buildup_label"]) > 0
+        assert "buildup-" in r["buildup_class"]
+        assert len(r["sub_activity"]) > 0
+
+
 def test_api_trending_oi_endpoint(client):
-    """5. Tests GET /api/options-desk/trending-oi endpoint."""
+    """6. Tests GET /api/options-desk/trending-oi endpoint."""
     # Test default interval is 5 minutes when not passed
     resp_def = client.get("/api/options-desk/trending-oi?symbol=NIFTY")
     assert resp_def.status_code == 200
@@ -179,3 +190,4 @@ def test_api_trending_oi_endpoint(client):
     assert data["data"]["symbol"] == "NIFTY"
     assert data["data"]["interval_minutes"] == 15
     assert len(data["data"]["rows"]) > 0
+    assert "buildup_label" in data["data"]["rows"][0]
