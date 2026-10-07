@@ -82,12 +82,8 @@ def _lock_holder_child(lock_id, db_dir, db_path, start_event, stop_event, result
 # ==============================================================================
 
 def test_item_1_circular_lot_sizes():
-    """Validates that INDEX_CONFIGS matches NSE/BSE dated circulars."""
+    """Validates that INDEX_CONFIGS matches NSE dated circulars for NIFTY."""
     assert INDEX_CONFIGS["NIFTY"]["lot_size"] == 65
-    assert INDEX_CONFIGS["BANKNIFTY"]["lot_size"] == 30
-    assert INDEX_CONFIGS["FINNIFTY"]["lot_size"] == 60
-    assert INDEX_CONFIGS["MIDCPNIFTY"]["lot_size"] == 120
-    assert INDEX_CONFIGS["SENSEX"]["lot_size"] == 20
     assert validate_index_configs_against_circulars() is True
 
 

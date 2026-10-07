@@ -43,6 +43,9 @@ ENGINE_CONFIG = {
     "MARKET_SESSION_START_MINS": 555, # 09:15 IST
     "MARKET_SESSION_END_MINS": 930,   # 15:30 IST
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": 2,
+    "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
+    "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
+    "MAX_DAILY_TRADES": 3,               # Maximum completed/entered trades allowed per trading day
     "OI_THRESHOLDS": {
         "DEFAULT": {
             "ACTIVITY": 40000,
@@ -55,30 +58,6 @@ ENGINE_CONFIG = {
             "WRITING": 30000,
             "UNWINDING": 50000,
             "BIG_MOVEMENT": 75000,
-        },
-        "BANKNIFTY": {
-            "ACTIVITY": 25000,
-            "WRITING": 20000,
-            "UNWINDING": 35000,
-            "BIG_MOVEMENT": 50000,
-        },
-        "FINNIFTY": {
-            "ACTIVITY": 20000,
-            "WRITING": 15000,
-            "UNWINDING": 25000,
-            "BIG_MOVEMENT": 40000,
-        },
-        "MIDCPNIFTY": {
-            "ACTIVITY": 30000,
-            "WRITING": 25000,
-            "UNWINDING": 40000,
-            "BIG_MOVEMENT": 60000,
-        },
-        "SENSEX": {
-            "ACTIVITY": 15000,
-            "WRITING": 10000,
-            "UNWINDING": 20000,
-            "BIG_MOVEMENT": 30000,
         },
     }
 }
@@ -1308,10 +1287,32 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         strike = int(opt_row["strike"])
         moneyness = "ATM" if strike == atm_strike else ("ITM-1" if (strike == atm_strike - step if is_ce else strike == atm_strike + step) else "OTM")
 
-        risk_per_contract = max(round(fill_entry_price * 0.20, 1), 5.0)
-        sl_price = round(max(fill_entry_price - risk_per_contract, 0.05), 1)
-        t1_price = round(fill_entry_price + (risk_per_contract * 1.5), 1)
-        t2_price = round(fill_entry_price + (risk_per_contract * 2.5), 1)
+        # Technical Invalidation & Maximum Option Premium Risk Management
+        delta = abs(float(opt_row.get("ce_delta" if is_ce else "pe_delta", 0.5) or 0.5))
+        if delta < 0.15 or delta > 0.95:
+            delta = 0.50
+
+        if is_ce:
+            spot_risk_pts = max(spot - spot_invalidation, 0.0) if spot and spot_invalidation else 0.0
+        else:
+            spot_risk_pts = max(spot_invalidation - spot, 0.0) if spot and spot_invalidation else 0.0
+
+        tech_option_risk = round(spot_risk_pts * delta, 1) if spot_risk_pts > 0 else None
+        max_risk_cap = float(ENGINE_CONFIG.get("NIFTY_MAX_OPTION_RISK_POINTS", 8.0))
+        min_risk_floor = float(ENGINE_CONFIG.get("NIFTY_MIN_OPTION_RISK_POINTS", 3.0))
+
+        if tech_option_risk is not None and tech_option_risk > 0:
+            risk_per_contract = min(tech_option_risk, max_risk_cap)
+        else:
+            risk_per_contract = max_risk_cap
+
+        risk_per_contract = max(risk_per_contract, min_risk_floor)
+        risk_per_contract = min(risk_per_contract, round(fill_entry_price * 0.5, 1))
+        risk_per_contract = round(risk_per_contract, 1)
+
+        sl_price = round(max(fill_entry_price - risk_per_contract, 0.05), 2)
+        t1_price = round(fill_entry_price + (risk_per_contract * 1.5), 2)
+        t2_price = round(fill_entry_price + (risk_per_contract * 2.5), 2)
         rr_str = "1 : 2.0"
 
         return {
@@ -1341,13 +1342,23 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     ce_trade_plan = calculate_trade_levels(best_ce, is_ce=True, spot_invalidation=s1, spot_target=r2)
     pe_trade_plan = calculate_trade_levels(best_pe, is_ce=False, spot_invalidation=r1, spot_target=s2)
 
-    # 10. Check One Active Trade Per Symbol Constraint
+    # 10. Check Daily Trade Limit & One Active Trade Per Symbol Constraint
     if has_active_trade is None:
         try:
             from app.services.options_signal_service import has_active_signal_for_symbol
             has_active_trade = has_active_signal_for_symbol(symbol)
         except Exception:
             has_active_trade = False
+
+    daily_trade_count = market_data.get("daily_trade_count")
+    if daily_trade_count is None:
+        try:
+            from app.services.options_signal_service import get_daily_trade_count
+            daily_trade_count = get_daily_trade_count(symbol)
+        except Exception:
+            daily_trade_count = 0
+
+    max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 3)
 
     active_trade_str = "YES" if has_active_trade else "NO"
 
@@ -1433,6 +1444,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_pillar_flags = ce_pillar_flags if is_bullish_dir else pe_pillar_flags
         focus_title = "WAIT"
         focus_reason = "ACTIVE TRADE EXISTS"
+    elif daily_trade_count >= max_daily_trades:
+        decision = "WAIT"
+        setup_score = max(ce_score, pe_score)
+        active_checklist = ce_checklist if (is_bullish_dir or ce_score >= pe_score) else pe_checklist
+        active_trade_plan = (ce_trade_plan if (is_bullish_dir or ce_score >= pe_score) else pe_trade_plan) or {}
+        active_pillar_flags = ce_pillar_flags if (is_bullish_dir or ce_score >= pe_score) else pe_pillar_flags
+        focus_title = "WAIT"
+        focus_reason = "MAX_DAILY_TRADES_REACHED"
     elif is_bullish_dir:
         if ce_trade_plan is None:
             decision = "WAIT"
@@ -1532,52 +1551,38 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             focus_reason = "Market direction or momentum unclear. Preserve capital."
 
     # -------------------------------------------------------------
-    # STRUCTURED STRATEGY LOGGING (Item 10 / Section 15)
+    # STRUCTURED STRATEGY LOGGING (Item 12: Explicit Strategy Telemetry)
     # -------------------------------------------------------------
     market_bias_str = "BULLISH" if is_bullish_dir else ("BEARISH" if is_bearish_dir else "NEUTRAL")
     confirm_display = f"{bull_confirm_count if is_bullish_dir else (bear_confirm_count if is_bearish_dir else max(bull_confirm_count, bear_confirm_count))}/3"
 
     pullback_str = "YES" if pullback_occurred else "NO"
     recovery_str = "YES" if recovery_confirmed else "NO"
+    expansion_str = "YES" if expansion_confirmed else "NO"
+    antichase_str = "PASS" if anti_chase_status == "ALLOW" else "BLOCK"
+    window_str = "PASS" if (in_trade_window and iv_safe) else "FAIL"
+    bidask_str = "VALID" if (active_trade_plan and active_trade_plan.get("bid_at_entry") is not None) else "INVALID/MISSING"
+    spread_str = f"{active_trade_plan.get('spread_paid', 0.0)} pts ({active_trade_plan.get('bid_ask_spread_pct', 0.0)}%)" if active_trade_plan else "N/A"
 
-    if has_active_trade:
-        log.info(
-            f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
-            f"Trend       : {market_bias_str}\n"
-            f"Pullback    : {pullback_str}\n"
-            f"Recovery    : {recovery_str}\n\n"
-            f"Active Trade: YES\n\n"
-            f"Decision    : WAIT\n"
-            f"Reason      : ACTIVE_TRADE_EXISTS\n"
-        )
-    elif anti_chase_status == "BLOCK" and (is_bullish_dir or is_bearish_dir):
-        log.info(
-            f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
-            f"Trend       : {market_bias_str}\n"
-            f"Pullback    : {pullback_str}\n"
-            f"Recovery    : {recovery_str}\n"
-            f"Anti-Chase  : BLOCK\n\n"
-            f"Decision    : WAIT\n"
-            f"Reason      : {focus_reason}\n"
-        )
-    else:
-        log.info(
-            f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
-            f"Price       : {price_signal}\n"
-            f"Momentum    : {momentum_signal}\n"
-            f"OI          : {oi_signal}\n"
-            f"Volume      : {volume_signal}\n"
-            f"PCR         : {pcr_signal}\n\n"
-            f"Confirmation: {confirm_display}\n"
-            f"Trend       : {market_bias_str}\n\n"
-            f"Pullback    : {pullback_str}\n"
-            f"Recovery    : {recovery_str}\n"
-            f"Resistance  : NEAR_R1 ({r1})\n"
-            f"Anti-Chase  : {anti_chase_status}\n\n"
-            f"Active Trade: {active_trade_str}\n\n"
-            f"Decision    : {decision}\n"
-            + (f"Reason      : {focus_reason}\n" if decision == "WAIT" else "")
-        )
+    log.info(
+        f"\n[OPTIONS DESK EVALUATION - {symbol}]\n"
+        f"Price       : {price_signal}\n"
+        f"Momentum    : {momentum_signal}\n"
+        f"OI          : {oi_signal}\n"
+        f"Volume      : {volume_signal}\n"
+        f"PCR         : {pcr_signal}\n\n"
+        f"Confirmation: {confirm_display}\n\n"
+        f"Pullback    : {pullback_str}\n"
+        f"Recovery    : {recovery_str}\n"
+        f"Expansion   : {expansion_str}\n"
+        f"Anti-Chase  : {antichase_str}\n\n"
+        f"Active Trade: {active_trade_str}\n"
+        f"Window      : {window_str}\n"
+        f"Bid/Ask     : {bidask_str}\n"
+        f"Spread      : {spread_str}\n\n"
+        f"Decision    : {decision}\n"
+        f"Reason      : {focus_reason}\n"
+    )
 
     # 11. OI Trend Focus & Trending OI (ATM +/- 5 strikes: 5 up, 5 down, 11 strikes total)
     trend_strikes = [r for r in enriched_chain if abs(r["strike"] - atm_strike) <= (step * 5)]

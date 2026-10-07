@@ -191,6 +191,21 @@ body.desk-body {
     box-shadow: 0 0 0 2px var(--gold-glow);
 }
 
+.desk-static-pill {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: var(--font-sans);
+    letter-spacing: 0.03em;
+    user-select: none;
+}
+
 .header-meta {
     display: flex;
     align-items: center;

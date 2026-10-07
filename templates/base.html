@@ -45,13 +45,11 @@
             <!-- Controls: Underlying + Expiry -->
             <div class="header-controls">
                 <div class="control-item">
-                    <label for="symbol-select" class="control-label">UNDERLYING</label>
-                    <select id="symbol-select" class="desk-select" aria-label="Select Underlying Index">
-                        {% for item in indices %}
-                        <option value="{{ item.symbol }}" {% if item.symbol==default_symbol %}selected{% endif %}>{{
-                            item.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <span class="control-label">UNDERLYING</span>
+                    <div class="desk-static-pill" id="symbol-display" title="Active Instrument: NIFTY 50">
+                        <span>NIFTY 50</span>
+                    </div>
+                    <input type="hidden" id="symbol-select" value="NIFTY">
                 </div>
 
                 <div class="control-item">

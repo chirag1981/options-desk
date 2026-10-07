@@ -1464,18 +1464,51 @@ def get_active_signal_for_symbol(symbol: str) -> dict | None:
         return None
 
 
-def record_signal(signal_data: dict, is_paper_trade: bool = False, lots: int = 1) -> dict | None:
+def get_daily_trade_count(symbol: str = "NIFTY", trade_date: str | None = None) -> int:
     """
-    Atomically records a new signal into the journal.
+    Returns the count of entered/completed trades for the given symbol on trade_date (YYYY-MM-DD).
+    Does not count deleted or rejected signals.
+    """
+    if not symbol:
+        return 0
+    if not trade_date:
+        trade_date = datetime.now(IST).strftime("%Y-%m-%d")
+    try:
+        with _get_db() as conn:
+            row = conn.execute("""
+                SELECT count(1) FROM signals
+                WHERE symbol = ? 
+                  AND date(created_at) = ?
+                  AND is_deleted = 0
+            """, (symbol.upper(), trade_date)).fetchone()
+            return int(row[0]) if row else 0
+    except Exception as e:
+        log.warning(f"Error getting daily trade count for {symbol}: {e}")
+        return 0
+
+
+def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1) -> dict | None:
+    """
+    Atomically records a new signal into the journal (PAPER TRADING ONLY).
     GUARANTEES: At most one open signal (ACTIVE or TARGET_1_HIT) per index symbol.
-    - Applies to BOTH paper trades and live signals.
+    - Enforces MAX_DAILY_TRADES safety limit per trading session.
+    - Runs in simulated/paper trading mode (no real broker order execution).
     - Prevents flip trades (e.g. PE while CE is open).
     - Enforces 15-minute cooldown following a closed trade.
-    - Rejects signals with missing or fabricated bid/ask quotes (no entry*0.99).
+    - Rejects signals with missing or fabricated bid/ask quotes.
     - Sets immutable initial_stop_loss column once at signal creation.
     - Handles sqlite3.IntegrityError as a clean suppression.
     """
     symbol = signal_data.get("symbol", "NIFTY").upper()
+
+    # Safety check: enforce max daily trades limit
+    from app.services.options_engine import ENGINE_CONFIG
+    max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 3)
+    today_count = get_daily_trade_count(symbol)
+    if today_count >= max_daily_trades:
+        log.warning(f"Blocked signal for {symbol}: MAX_DAILY_TRADES ({max_daily_trades}) reached for today ({today_count} trades).")
+        return None
+
     signal_type = signal_data.get("type") or signal_data.get("signal_type", "CE")
     strike = float(signal_data.get("strike", 0.0))
     contract_name = signal_data.get("contract_name") or f"{int(strike)} {signal_type}"
@@ -1611,7 +1644,7 @@ def record_signal(signal_data: dict, is_paper_trade: bool = False, lots: int = 1
             ))
             conn.execute("COMMIT")
             new_id = cursor.lastrowid
-            log.info(f"Recorded new signal #{new_id}: {symbol} {contract_name} @ Ask {entry_price} (Bid: {bid_at_entry}, Spread: {spread_paid} pts, Initial SL: {initial_stop_loss})")
+            log.info(f"[PAPER_TRADE_ONLY] Recorded new signal #{new_id}: {symbol} {contract_name} @ Ask {entry_price} (Bid: {bid_at_entry}, Spread: {spread_paid} pts, Initial SL: {initial_stop_loss})")
             return get_signal_by_id(new_id)
 
         except sqlite3.IntegrityError as e:
@@ -1826,8 +1859,8 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # -------------------------------------------------------------
         # Exits Evaluation (Exits filled at BID)
         # -------------------------------------------------------------
-        initial_sl_calc = round(entry * 0.8, 2)
-        has_trailed = (trailed_sl > initial_sl_calc + 0.5) or (curr_status == "TARGET_1_HIT")
+        initial_sl_calc = float(sig.get("initial_stop_loss") or sl)
+        has_trailed = (trailed_sl > initial_sl_calc + 0.1) or (curr_status == "TARGET_1_HIT")
         terminal_exit_reached = False
 
         # Whole-lot partial exit logic:

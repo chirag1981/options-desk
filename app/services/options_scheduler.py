@@ -255,7 +255,7 @@ def _refresh_worker():
             market_data_cache = {}
 
             try:
-                for sym in ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]:
+                for sym in list(INDEX_CONFIGS.keys()):
                     if _stop_scheduler.is_set():
                         break
                     time.sleep(0.3)  # Gentle pacing to avoid burst rate spikes
@@ -426,7 +426,9 @@ def _refresh_worker():
                                 "entry_latency_sec": entry_latency_sec,
                                 "reason": f"{opt_buying.get('reason', '')} [{evidence_tag}]"
                             }
-                            record_signal(sig_payload, is_paper_trade=False)
+                            # Explicit Paper Trade Signal Recording (No broker order execution)
+                            log.info(f"[PAPER_TRADE_ONLY] Dispatching paper signal for {sym} {trade_plan.get('contract_name')}")
+                            record_signal(sig_payload, is_paper_trade=True)
                             reset_pending_entry_confirmation(sym)
                     except Exception as e:
                         log.warning(f"Background refresh for {sym} failed: {e}")

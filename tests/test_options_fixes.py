@@ -170,16 +170,13 @@ class TestOptionsEngineFixes(unittest.TestCase):
         self.assertIsNone(calculate_implied_volatility(0.0, spot, strike, t, "CE"))
 
     def test_dynamic_upcoming_expiries(self):
-        """Test dynamic generation of upcoming expiries for different symbols."""
+        """Test dynamic generation of upcoming expiries for NIFTY."""
         from app.services.fyers_options_service import get_upcoming_expiries
 
         nifty_exp = get_upcoming_expiries("NIFTY")
         self.assertGreaterEqual(len(nifty_exp), 4)
         for exp in nifty_exp:
             self.assertRegex(exp, r"^\d{2}-[A-Z]{3}-\d{4}$")
-
-        sensex_exp = get_upcoming_expiries("SENSEX")
-        self.assertGreaterEqual(len(sensex_exp), 4)
 
     def test_key_levels_distinct_channel_bracket_on_atm_straddle_collision(self):
         """Test that R1 and S1 form a distinct channel bracket (R1 > S1) when ATM has max CE & PE OI."""

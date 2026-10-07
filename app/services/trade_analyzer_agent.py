@@ -44,7 +44,7 @@ def validate_index_configs_against_circulars() -> bool:
     have valid positive lot sizes and strike steps defined in the single dated source of truth.
     """
     all_valid = True
-    required_indices = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]
+    required_indices = list(INDEX_CONFIGS.keys())
     for sym in required_indices:
         cfg = INDEX_CONFIGS.get(sym)
         if not cfg:
@@ -139,8 +139,19 @@ def review_closed_trade(signal_id: int) -> dict | None:
     if sig.get("bid_at_entry") is None or sig.get("ask_at_entry") is None:
         data_quality_flags.append("MISSING_BID_ASK_QUOTES")
 
-    # Note: SHORT_DURATION is flagged but not treated as a hard disqualifier
-    is_hard_data_quality_issue = any(f != "SHORT_DURATION" for f in data_quality_flags)
+    has_inferred_initial_sl = False
+    if sig.get("data_quality_json"):
+        try:
+            dq = json.loads(sig["data_quality_json"]) if isinstance(sig["data_quality_json"], str) else sig["data_quality_json"]
+            if isinstance(dq, dict) and (dq.get("inferred_initial_sl") or dq.get("flag") == "INFERRED_INITIAL_SL"):
+                has_inferred_initial_sl = True
+        except Exception:
+            pass
+    if has_inferred_initial_sl:
+        data_quality_flags.append("INFERRED_INITIAL_STOP_LOSS")
+
+    # Note: SHORT_DURATION and INFERRED_INITIAL_STOP_LOSS are flagged but not treated as hard invalidations
+    is_hard_data_quality_issue = any(f not in ("SHORT_DURATION", "INFERRED_INITIAL_STOP_LOSS") for f in data_quality_flags)
 
     # 3. Whole-Lot Transaction Costs & R-Multiple
     status = (sig.get("status") or "").upper()
