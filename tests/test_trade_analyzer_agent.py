@@ -142,11 +142,11 @@ class TestTradeAnalyzerAgent(unittest.TestCase):
         self.assertEqual(dir_pillar["evaluated_trades"], 3)
 
     def test_data_quality_filter_exclusions(self):
-        """Edge Case 5: Strict exclusions for zero IV, fabricated 100/50 quote, and invalid exit. Short duration is flagged but kept (item 8)."""
+        """Edge Case 5: Hard exclusions for fabricated 100/50 quotes and invalid exits. Missing/zero IV and short duration are soft-flagged but retained in core sample."""
         bad_trades = [
             # Short duration (< 3.0 min) - flagged but retained to avoid survivorship bias
             dict(self.base_trade, id=1, duration_mins=1.5),
-            # Missing / zero IV
+            # Missing / zero IV - soft-flagged and retained as CORE_VALID
             dict(self.base_trade, id=2, iv_at_entry=0.0),
             dict(self.base_trade, id=3, iv_at_entry=None),
             # Fabricated default quote (100.0 or 50.0)
@@ -161,10 +161,15 @@ class TestTradeAnalyzerAgent(unittest.TestCase):
         ]
 
         valid, quality = _filter_data_quality(bad_trades)
-        self.assertEqual(len(valid), 2)
-        self.assertEqual(quality["excluded_count"], 6)
+        # Trades 1, 2, 3, 8 are CORE_VALID (4 trades)
+        self.assertEqual(len(valid), 4)
+        self.assertEqual(quality["core_valid_trades"], 4)
+        self.assertEqual(quality["iv_valid_trades"], 2)  # Trade 1 & Trade 8
+        self.assertEqual(quality["iv_missing_count"], 2)  # Trade 2 & Trade 3
+        self.assertEqual(quality["excluded_count"], 4)  # Trades 4, 5, 6, 7
+        self.assertEqual(quality["core_excluded_count"], 4)
         self.assertEqual(quality["exclusion_reasons"]["SHORT_DURATION_FLAGGED"], 1)
-        self.assertEqual(quality["exclusion_reasons"]["MISSING_ZERO_IV"], 2)
+        self.assertEqual(quality["exclusion_reasons"]["MISSING_ZERO_IV_FLAGGED"], 2)
         self.assertEqual(quality["exclusion_reasons"]["FABRICATED_OR_OUTLIER_ENTRY"], 3)
         self.assertEqual(quality["exclusion_reasons"]["STALE_OR_INVALID_EXIT"], 1)
 

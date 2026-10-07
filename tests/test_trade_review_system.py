@@ -263,18 +263,34 @@ class TestTradeReviewSystem(unittest.TestCase):
         self.assertEqual(review["classification"], "EARLY_EXIT")
 
     def test_classification_data_quality_issue(self):
-        """Trades with zero IV or missing quotes receive DATA_QUALITY_ISSUE classification."""
+        """Trades with fabricated entries or invalid exits receive DATA_QUALITY_ISSUE classification."""
         sig_id = self._insert_test_signal(
             status="SL_HIT",
             exit_reason="SL_HIT",
-            entry_price=100.0,
+            entry_price=0.02,  # Invalid/fabricated entry quote <= 0.05
+            ask_at_entry=0.02,
             exit_price=85.0,
-            iv_at_entry=0.0,  # Zero IV
             duration_mins=2.0,  # Short duration
         )
         review = review_closed_trade(sig_id)
         self.assertEqual(review["classification"], "DATA_QUALITY_ISSUE")
         self.assertTrue(review["is_data_quality_flagged"])
+
+    def test_zero_iv_trade_receives_normal_classification(self):
+        """Trades with missing or zero IV receive standard classification, not DATA_QUALITY_ISSUE."""
+        sig_id = self._insert_test_signal(
+            status="SL_HIT",
+            exit_reason="SL_HIT",
+            entry_price=166.40,
+            exit_price=157.85,
+            stop_loss=158.40,
+            iv_at_entry=0.0,
+            duration_mins=5.0,
+        )
+        review = review_closed_trade(sig_id)
+        self.assertNotEqual(review["classification"], "DATA_QUALITY_ISSUE")
+        self.assertFalse(review["is_data_quality_flagged"])
+        self.assertIn("MISSING_OR_ZERO_IV", json.loads(review["data_quality_flags_json"]))
 
     def test_counterfactual_math_and_summary(self):
         """Counterfactual calculations evaluate alternative SL, targets, and time stop."""

@@ -150,8 +150,8 @@ def review_closed_trade(signal_id: int) -> dict | None:
     if has_inferred_initial_sl:
         data_quality_flags.append("INFERRED_INITIAL_STOP_LOSS")
 
-    # Note: SHORT_DURATION and INFERRED_INITIAL_STOP_LOSS are flagged but not treated as hard invalidations
-    is_hard_data_quality_issue = any(f not in ("SHORT_DURATION", "INFERRED_INITIAL_STOP_LOSS") for f in data_quality_flags)
+    # Note: SHORT_DURATION, MISSING_OR_ZERO_IV, MISSING_BID_ASK_QUOTES, and INFERRED_INITIAL_STOP_LOSS are soft flags, not hard invalidations
+    is_hard_data_quality_issue = any(f in ("INVALID_OR_FABRICATED_ENTRY_PRICE", "INVALID_EXIT_PRICE") for f in data_quality_flags)
 
     # 3. Whole-Lot Transaction Costs & R-Multiple
     status = (sig.get("status") or "").upper()
@@ -251,7 +251,7 @@ def review_closed_trade(signal_id: int) -> dict | None:
     score = int(sig.get("setup_score") or 0)
     if 75 <= score <= 78:
         marginal_gates.append(f"Setup Score at minimum boundary ({score}/100)")
-    if iv and (float(iv) < 11.0 or float(iv) > 24.0):
+    if iv is not None and float(iv) > 0.01 and (float(iv) < 11.0 or float(iv) > 24.0):
         marginal_gates.append(f"IV near boundary ({float(iv):.1f}%)")
 
     # Time of Day
@@ -268,8 +268,8 @@ def review_closed_trade(signal_id: int) -> dict | None:
         tod_str = "UNKNOWN"
 
     # IV Regime
-    iv_f = float(iv) if (iv and float(iv) > 0) else 0.0
-    if iv_f <= 0: iv_regime = "MISSING"
+    iv_f = float(iv) if (iv is not None and float(iv) > 0.01) else None
+    if iv_f is None: iv_regime = "UNAVAILABLE"
     elif iv_f < 13.0: iv_regime = "LOW (<13%)"
     elif iv_f <= 20.0: iv_regime = "NORMAL (13-20%)"
     elif iv_f <= 26.0: iv_regime = "ELEVATED (20-26%)"
@@ -290,10 +290,11 @@ def review_closed_trade(signal_id: int) -> dict | None:
 
     # 8. Plain-Language Summary
     spread_drag = float(sig.get("spread_paid") or 0.0) * lot_size * lots
+    iv_display = f"{iv_f:.1f}%" if iv_f is not None else "UNAVAILABLE"
     summary_lines = [
         f"Trade #{signal_id} ({symbol} {contract_name}) completed with {classification} ({r_multiple:+.2f}R | {net_pts:+.1f} pts | ₹{net_inr:+,.2f} net).",
         f"Holding duration: {dur_mins:.1f}m | MFE: +{mfe_pts:.1f} pts ({mfe_capture_pct:.0f}% captured) | MAE: -{mae_pts:.1f} pts ({mae_vs_stop_pct:.0f}% of SL).",
-        f"Entry executed in {tod_str} with {len(passed_pillars)}/6 pillars confirmed (IV: {iv_f:.1f}% | DTE: {dte if dte is not None else 'N/A'}).",
+        f"Entry executed in {tod_str} with {len(passed_pillars)}/6 pillars confirmed (IV: {iv_display} | DTE: {dte if dte is not None else 'N/A'}).",
         f"Friction drag: ₹{costs['total_costs_inr']:.2f} statutory fees + ₹{spread_drag:.2f} spread paid.",
         f"Primary Cause: {classification.replace('_', ' ').title()} — {'Price action followed setup structure cleanly.' if net_pts > 0 else 'Market structure reversed before reaching targets.'}"
     ]
@@ -795,7 +796,11 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
             "total_signals_raw": total_raw_count,
             "closed_trades_raw": closed_raw_count,
             "valid_closed_trades": n_valid,
+            "core_valid_trades": n_valid,
+            "iv_valid_trades": data_quality.get("iv_valid_trades", n_valid),
+            "iv_missing_count": data_quality.get("iv_missing_count", 0),
             "excluded_trades": data_quality["excluded_count"],
+            "core_excluded_count": data_quality["excluded_count"],
             "active_trades": len(active_trades),
             "win_count": win_count,
             "loss_count": loss_count,
@@ -853,6 +858,7 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
     - Excludes hygiene/cleanup actions (DUPLICATE_CLEANUP, STALE_EXIT, EXPIRED) from trading performance.
     - Flags SHORT_DURATION (< 3 min) but keeps them in aggregate stats to avoid survivorship bias.
     - Excludes fabricated or unfillable quotes.
+    - Soft-flags MISSING_ZERO_IV: trades remain CORE_VALID in main diagnostics sample.
     """
     valid = []
     hygiene_excluded = []
@@ -860,13 +866,15 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
         "SHORT_DURATION_FLAGGED": 0,
         "HYGIENE_CLEANUP_OR_EXPIRED": 0,
         "FABRICATED_OR_OUTLIER_ENTRY": 0,
+        "MISSING_ZERO_IV_FLAGGED": 0,
         "MISSING_ZERO_IV": 0,
         "STALE_OR_INVALID_EXIT": 0,
     }
 
     excluded_hygiene_reasons = ("DUPLICATE_CLEANUP", "STALE_EXIT", "CONTRACT_EXPIRED", "EXPIRED")
 
-    for t in raw_trades:
+    for raw_t in raw_trades:
+        t = dict(raw_t)
         duration = float(t.get("duration_mins") or 0.0)
         entry_price = float(t.get("entry_price") or 0.0)
         exit_price = float(t.get("exit_price") or 0.0)
@@ -880,24 +888,39 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
         if entry_price <= 0.05 or entry_price in (100.0, 50.0) or entry_price > 50000.0:
             exclusions["FABRICATED_OR_OUTLIER_ENTRY"] += 1
             continue
-        if iv is None or float(iv) <= 0.01:
-            exclusions["MISSING_ZERO_IV"] += 1
-            continue
         if exit_price <= 0.05:
             exclusions["STALE_OR_INVALID_EXIT"] += 1
             continue
 
+        # Soft flag for missing / zero IV: trade remains CORE_VALID
+        if iv is None or float(iv) <= 0.01:
+            exclusions["MISSING_ZERO_IV_FLAGGED"] += 1
+            exclusions["MISSING_ZERO_IV"] += 1
+            t["iv_status"] = "MISSING"
+            t["iv_valid"] = False
+        else:
+            t["iv_status"] = "VALID"
+            t["iv_valid"] = True
+
         if duration < 3.0:
             exclusions["SHORT_DURATION_FLAGGED"] += 1
 
+        t["core_valid"] = True
         valid.append(t)
 
-    total_excluded = exclusions["HYGIENE_CLEANUP_OR_EXPIRED"] + exclusions["FABRICATED_OR_OUTLIER_ENTRY"] + exclusions["MISSING_ZERO_IV"] + exclusions["STALE_OR_INVALID_EXIT"]
+    total_excluded = exclusions["HYGIENE_CLEANUP_OR_EXPIRED"] + exclusions["FABRICATED_OR_OUTLIER_ENTRY"] + exclusions["STALE_OR_INVALID_EXIT"]
+    iv_valid_count = sum(1 for t in valid if t.get("iv_valid"))
+    iv_missing_count = sum(1 for t in valid if not t.get("iv_valid"))
 
     summary = {
         "total_raw": len(raw_trades),
+        "total_raw_trades": len(raw_trades),
         "valid_count": len(valid),
+        "core_valid_trades": len(valid),
+        "iv_valid_trades": iv_valid_count,
+        "iv_missing_count": iv_missing_count,
         "excluded_count": total_excluded,
+        "core_excluded_count": total_excluded,
         "hygiene_excluded_count": len(hygiene_excluded),
         "exclusion_reasons": exclusions,
         "filter_passed": total_excluded == 0,
@@ -1068,7 +1091,7 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
 
     results = []
 
-    if len(d_logs) >= 30:
+    if fallback_trades is None and len(d_logs) >= 30:
         # Measure from decision_log forward outcomes with side sign-adjustment & day clustering
         raw_p_values = []
         raw_items = []
@@ -1328,17 +1351,28 @@ def _analyze_moneyness(trades: list[dict], baseline_r: float = 0.0) -> list[dict
 
 def _analyze_iv_regimes(trades: list[dict], baseline_r: float = 0.0) -> list[dict]:
     regimes = {
-        "LOW (<13%)": {"min": 0, "max": 13.0, "trades": []},
+        "LOW (<13%)": {"min": 0.01, "max": 13.0, "trades": []},
         "NORMAL (13-20%)": {"min": 13.0, "max": 20.0, "trades": []},
         "ELEVATED (20-26%)": {"min": 20.0, "max": 26.0, "trades": []},
         "HIGH (>26%)": {"min": 26.0, "max": 999.0, "trades": []},
+        "UNAVAILABLE": {"min": -999.0, "max": 0.01, "trades": []},
     }
     for t in trades:
-        iv = float(t.get("iv_at_entry") or 0.0)
-        for r in regimes.values():
-            if r["min"] <= iv < r["max"]:
-                r["trades"].append(t)
-                break
+        iv = t.get("iv_at_entry")
+        if iv is None or float(iv) <= 0.01:
+            regimes["UNAVAILABLE"]["trades"].append(t)
+        else:
+            iv_f = float(iv)
+            matched = False
+            for r_name, r in regimes.items():
+                if r_name == "UNAVAILABLE":
+                    continue
+                if r["min"] <= iv_f < r["max"]:
+                    r["trades"].append(t)
+                    matched = True
+                    break
+            if not matched:
+                regimes["UNAVAILABLE"]["trades"].append(t)
     return _build_dimension_stats(regimes, "regime", "IV Regime", baseline_r, trades)
 
 
@@ -1682,8 +1716,34 @@ def _build_empty_diagnostic_report() -> dict:
         "mode": "OBSERVE_AND_RECOMMEND_ONLY",
         "advisory_notice": "All recommendations are strictly advisory and require human approval before altering live engine parameters.",
         "data_limitation_notice": "MFE and MAE metrics are captured via periodic polling cycles and may understate intra-interval price excursions.",
-        "data_quality": {"total_raw": 0, "valid_count": 0, "excluded_count": 0, "exclusion_reasons": {}, "filter_passed": True},
-        "sample_size": {"total_signals_raw": 0, "closed_trades_raw": 0, "valid_closed_trades": 0, "excluded_trades": 0, "active_trades": 0, "win_count": 0, "loss_count": 0, "win_rate_pct": 0.0, "sample_sufficient": False},
+        "data_quality": {
+            "total_raw": 0,
+            "total_raw_trades": 0,
+            "valid_count": 0,
+            "core_valid_trades": 0,
+            "iv_valid_trades": 0,
+            "iv_missing_count": 0,
+            "excluded_count": 0,
+            "core_excluded_count": 0,
+            "hygiene_excluded_count": 0,
+            "exclusion_reasons": {},
+            "filter_passed": True
+        },
+        "sample_size": {
+            "total_signals_raw": 0,
+            "closed_trades_raw": 0,
+            "valid_closed_trades": 0,
+            "core_valid_trades": 0,
+            "iv_valid_trades": 0,
+            "iv_missing_count": 0,
+            "excluded_trades": 0,
+            "core_excluded_count": 0,
+            "active_trades": 0,
+            "win_count": 0,
+            "loss_count": 0,
+            "win_rate_pct": 0.0,
+            "sample_sufficient": False
+        },
         "overall_performance": {"expectancy_r": 0.0, "profit_factor": 1.0, "total_net_inr": 0.0, "strategy_health_score": 50},
         "setup_pillars": [],
         "loser_taxonomy": {"total_losers": 0},

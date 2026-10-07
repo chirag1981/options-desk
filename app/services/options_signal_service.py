@@ -1552,9 +1552,32 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
 
     pcr_at_entry = float(signal_data.get("pcr", 1.0) or signal_data.get("pcr_at_entry", 1.0))
     bias_at_entry = str(signal_data.get("bias", "NEUTRAL") or signal_data.get("bias_at_entry", "NEUTRAL")).upper()
-    iv_at_entry = float(signal_data.get("atm_iv", 0.0) or signal_data.get("iv_at_entry", 0.0))
+    
+    # Preserve raw iv_at_entry observation
+    raw_iv = signal_data.get("iv_at_entry")
+    if raw_iv is not None:
+        try:
+            iv_at_entry = float(raw_iv)
+        except (ValueError, TypeError):
+            iv_at_entry = 0.0
+    else:
+        iv_at_entry = 0.0
 
-    iv_missing = 1 if (iv_at_entry <= 0.01 or signal_data.get("iv_missing")) else 0
+    # Best-effort ATM IV recovery when incoming IV <= 0.01 without overwriting raw observation
+    recovered_atm_iv = None
+    recovered_iv_source = "UNAVAILABLE"
+    if iv_at_entry <= 0.01:
+        atm_iv_candidate = signal_data.get("atm_iv") or (signal_data.get("raw_values") or {}).get("atm_iv")
+        if atm_iv_candidate is not None:
+            try:
+                candidate_val = float(atm_iv_candidate)
+                if candidate_val > 0.01:
+                    recovered_atm_iv = candidate_val
+                    recovered_iv_source = "ATM_CHAIN"
+            except (ValueError, TypeError):
+                pass
+
+    iv_missing = 1 if iv_at_entry <= 0.01 else 0
     entry_latency_sec = signal_data.get("entry_latency_sec")
     if entry_latency_sec is not None:
         entry_latency_sec = float(entry_latency_sec)
@@ -1564,6 +1587,13 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
     dq_dict = dict(signal_data.get("data_quality", {}))
     if iv_missing:
         dq_dict["iv_missing"] = True
+        dq_dict["iv_status"] = "MISSING"
+        dq_dict["recovered_atm_iv"] = recovered_atm_iv
+        dq_dict["recovered_iv_source"] = recovered_iv_source
+    else:
+        dq_dict["iv_status"] = "VALID"
+        dq_dict["recovered_atm_iv"] = None
+        dq_dict["recovered_iv_source"] = "ACTUAL_CONTRACT_IV"
     data_quality_json = json.dumps(dq_dict)
 
     cfg = INDEX_CONFIGS.get(symbol, INDEX_CONFIGS["NIFTY"])
