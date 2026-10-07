@@ -1439,14 +1439,21 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const lots = parseInt(paperLotsInput ? paperLotsInput.value : "1", 10) || 1;
+            const entryPrice = parseFloat(tradePlan.entry_price || tradePlan.ask_at_entry || 0);
+            const bidPrice = parseFloat(tradePlan.bid_at_entry !== undefined ? tradePlan.bid_at_entry : (entryPrice - (tradePlan.spread_paid || 0.5)));
+            const askPrice = parseFloat(tradePlan.ask_at_entry !== undefined ? tradePlan.ask_at_entry : entryPrice);
+
             const payload = {
                 symbol: state.symbol,
-                type: tradePlan.type || optBuying.decision || "CE",
+                type: tradePlan.type || (optBuying.decision && optBuying.decision.includes("PE") ? "PE" : "CE"),
                 contract_name: tradePlan.contract_name,
                 strike: tradePlan.strike,
                 expiry: tradePlan.expiry,
                 spot_price: bias.spot_price,
-                entry_price: tradePlan.entry_price,
+                entry_price: entryPrice,
+                bid_at_entry: bidPrice,
+                ask_at_entry: askPrice,
+                spread_paid: tradePlan.spread_paid || (askPrice - bidPrice),
                 stop_loss: tradePlan.stop_loss,
                 target_1: tradePlan.target_1,
                 target_2: tradePlan.target_2,
@@ -1454,10 +1461,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 setup_score: optBuying.setup_score || 0,
                 reason: optBuying.reason || "Manual Paper Trade Setup",
                 lots: lots,
-                pcr: bias.pcr || state.lastData.pcr || 1.0,
+                pcr: bias.pcr || (state.lastData && state.lastData.pcr) || 1.0,
                 bias: bias.bias || "NEUTRAL",
-                atm_iv: state.lastData.atm_iv || 0.0,
+                atm_iv: (state.lastData && state.lastData.atm_iv) || 0.0,
                 moneyness: tradePlan.moneyness || "ATM",
+                pillar_flags: optBuying.pillar_flags || {},
+                raw_values: optBuying.raw_values || {},
+                data_quality: optBuying.data_quality || {},
             };
 
             try {

@@ -1515,7 +1515,7 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
     expiry = signal_data.get("expiry", "")
     spot_at_entry = float(signal_data.get("spot_price") or signal_data.get("spot_at_entry", 0.0))
 
-    # Reject signals with missing or fabricated quotes (No invented entry*0.99)
+    # Reject signals with missing or fabricated quotes (Fail closed on missing bid/ask)
     raw_bid = signal_data.get("bid_at_entry")
     raw_ask = signal_data.get("ask_at_entry") or signal_data.get("entry_price")
 
