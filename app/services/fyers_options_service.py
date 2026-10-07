@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from app.services.fyers_auth import (
     get_fyers_index_spot,
+    get_fyers_index_ohlc_details,
     get_fyers_model,
     get_fyers_token,
     FYERS_INDEX_SYMBOLS,
@@ -440,6 +441,18 @@ def fetch_option_chain_data(
             data_status = "DATA_UNAVAILABLE"
             source = "FYERS_UNAVAILABLE"
 
+    # Fetch full OHLC quote details if available
+    ohlc = None
+    try:
+        ohlc = get_fyers_index_ohlc_details(symbol)
+    except Exception:
+        pass
+
+    open_price = ohlc.get("open_price", spot_price) if ohlc else spot_price
+    high_price = ohlc.get("high_price", spot_price) if ohlc else spot_price
+    low_price = ohlc.get("low_price", spot_price) if ohlc else spot_price
+    prev_close = ohlc.get("prev_close", round(spot_price / (1.0 + spot_chg / 100.0), 2) if spot_chg != -100 else spot_price) if ohlc else round(spot_price / (1.0 + spot_chg / 100.0), 2)
+
     atm_strike = round(spot_price / cfg["strike_step"]) * cfg["strike_step"]
 
     result = {
@@ -447,6 +460,10 @@ def fetch_option_chain_data(
         "name": cfg["name"],
         "spot_price": round(spot_price, 2),
         "spot_change_pct": round(spot_chg, 2),
+        "open_price": round(open_price, 2),
+        "high_price": round(high_price, 2),
+        "low_price": round(low_price, 2),
+        "prev_close": round(prev_close, 2),
         "atm_strike": atm_strike,
         "strike_step": cfg["strike_step"],
         "lot_size": cfg["lot_size"],

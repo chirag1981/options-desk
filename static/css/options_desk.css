@@ -455,13 +455,42 @@ body.desk-body {
     background: currentColor;
 }
 
+.bias-strike-box {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-sm);
+    margin: 0.15rem 0;
+}
+
+.bias-strike-label {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--gold-primary);
+    text-transform: uppercase;
+}
+
+.bias-strike-pill {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--gold-dark);
+    background: var(--gold-light);
+    border: 1px solid var(--gold-primary);
+    padding: 0.15rem 0.65rem;
+    border-radius: var(--radius-sm);
+}
+
 .bias-meta-row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
 }
 
-.confidence-pill, .score-pill {
+.confidence-pill {
     font-size: 0.68rem;
     font-family: var(--font-mono);
     font-weight: 600;
@@ -470,6 +499,17 @@ body.desk-body {
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
+}
+
+.score-pill {
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: var(--radius-sm);
+    background: var(--gold-light);
+    border: 1px solid var(--border-subtle);
+    color: var(--gold-dark);
 }
 
 .bias-time-badge {

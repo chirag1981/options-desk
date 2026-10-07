@@ -62,7 +62,7 @@ def get_options_desk_data():
             interval_minutes=interval_m,
             current_chain=analysis.get("detailed_chain", []),
             spot_price=float(analysis.get("market_bias", {}).get("spot_price", 0.0)),
-            strike_step=float(analysis.get("key_levels", {}).get("strike_step", 50.0)),
+            strike_step=float(analysis.get("meta", {}).get("strike_step") or 50.0),
         )
         analysis["trending_oi_timeseries"] = timeseries
 
@@ -99,7 +99,7 @@ def get_trending_oi():
             interval_minutes=interval_m,
             current_chain=analysis.get("detailed_chain", []),
             spot_price=float(analysis.get("market_bias", {}).get("spot_price", 0.0)),
-            strike_step=float(analysis.get("key_levels", {}).get("strike_step", 50.0)),
+            strike_step=float(analysis.get("meta", {}).get("strike_step") or 50.0),
         )
         return jsonify({"success": True, "data": timeseries})
     except Exception as e:

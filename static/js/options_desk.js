@@ -37,8 +37,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const cardMarketBias = document.getElementById("card-market-bias");
     const biasBadge = document.getElementById("bias-badge");
     const biasText = document.getElementById("bias-text");
+    const biasStrikePill = document.getElementById("bias-strike-pill");
     const confidencePill = document.getElementById("confidence-pill");
     const scorePill = document.getElementById("score-pill");
+    const scorePillVal = document.getElementById("score-pill-val");
     const biasLastChanged = document.getElementById("bias-last-changed");
     const whyBiasList = document.getElementById("why-bias-list");
 
@@ -274,20 +276,29 @@ document.addEventListener("DOMContentLoaded", () => {
         if (lastUpdatedDisplay) lastUpdatedDisplay.textContent = meta.last_updated || "--:--:--";
 
         // 2. Card 1: Market Bias
-        const biasType = (bias.bias || "NEUTRAL").toUpperCase();
-        if (biasText) biasText.textContent = biasType;
+        const morning = data.morning_bias || {};
+        const biasType = (morning.badge || morning.direction || bias.bias || "NEUTRAL").toUpperCase();
+        const badgeClass = morning.badge_class || (bias.bias || "neutral").toLowerCase();
+        
+        if (biasText) biasText.textContent = morning.badge || biasType;
         
         if (cardMarketBias) {
-            cardMarketBias.className = `desk-card card-bias bias-${biasType.toLowerCase()}`;
+            cardMarketBias.className = `desk-card card-bias bias-${badgeClass}`;
         }
         if (biasBadge) {
-            biasBadge.className = `bias-badge-large ${biasType.toLowerCase()}`;
+            biasBadge.className = `bias-badge-large ${badgeClass}`;
+        }
+        if (biasStrikePill) {
+            const activeContract = (morning.suggested_contract && morning.suggested_contract !== "--")
+                ? morning.suggested_contract
+                : ((data.option_buying && data.option_buying.selected_option && data.option_buying.selected_option !== "--") ? data.option_buying.selected_option : "--");
+            biasStrikePill.textContent = activeContract;
         }
         if (confidencePill) {
-            confidencePill.textContent = `Confidence: ${bias.confidence || "MEDIUM"}`;
+            confidencePill.textContent = `Confidence: ${morning.confidence || bias.confidence || "MEDIUM"}`;
         }
-        if (scorePill) {
-            scorePill.textContent = `Bull: ${bias.bullish_score}% | Bear: ${bias.bearish_score}%`;
+        if (scorePillVal) {
+            scorePillVal.textContent = morning.score !== undefined ? morning.score : (bias.bullish_score || 0);
         }
         if (biasLastChanged) {
             biasLastChanged.textContent = bias.last_changed || "--:--";
@@ -296,7 +307,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Render Explainability Reasons
         if (whyBiasList) {
             whyBiasList.innerHTML = "";
-            const reasons = bias.why_reasons || [];
+            const reasons = (morning.why_reasons && morning.why_reasons.length > 0) ? morning.why_reasons : (bias.why_reasons || []);
             if (reasons.length === 0) {
                 whyBiasList.innerHTML = `<li>Balanced option chain without dominant skew.</li>`;
             } else {

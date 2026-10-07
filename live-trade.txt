@@ -1,0 +1,1 @@
+ i want live desk for nifty only with mraket order. for live trading only my target is to do 2-3 trades only. if i got 4-8 percentage in any trade it should stop trading for the day. for nifty sl should always be 3-5 points. just implement these rule and do not make it live. for live trading i want separate page with active trade logs

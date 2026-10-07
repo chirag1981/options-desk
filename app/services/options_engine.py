@@ -171,20 +171,25 @@ def update_symbol_pullback_recovery(
     update_state: bool = False,
     momentum_signal: str = "NEUTRAL",
     price_signal: str = "NEUTRAL",
+    volume_signal: str = "NEUTRAL",
+    spot_chg: float = 0.0,
+    strike_step: float = 50.0,
 ) -> dict:
     """
     Evaluates whether the current market movement represents a valid PULLBACK_RECOVERY,
-    a FRESH_HIGH_NO_PULLBACK, a FRESH_LOW_NO_PULLBACK, or a PULLBACK_IN_PROGRESS.
+    a FRESH_HIGH_NO_PULLBACK, a FRESH_LOW_NO_PULLBACK, a LOW_EXPANSION_OR_CHOP condition,
+    or a PULLBACK_IN_PROGRESS.
     
-    Anti-Chase Guard:
+    Anti-Chase Guard & Market Expansion:
     - In a bullish trend: If price is at a fresh peak/high without a preceding pullback dip,
       entry is blocked (FRESH_HIGH_NO_PULLBACK).
     - In a bearish trend: If price is at a fresh trough/low without a preceding rebound,
       entry is blocked (FRESH_LOW_NO_PULLBACK).
     - Recovery requires:
         1. Meaningful pullback / rebound detected.
-        2. Price actively turning back in the trend direction (spot moving off trough/bounce).
-        3. Momentum and Price confirmed in the trend direction.
+        2. Price actively turning back in the trend direction with follow-through (not just spot > trough).
+        3. Market Expansion confirmed (not compressed/choppy range or frequent direction reversals).
+        4. Momentum and Price confirmed in the trend direction.
     """
     sym = (symbol or "DEFAULT").upper()
     with _PRICE_HISTORY_LOCK:
@@ -201,9 +206,45 @@ def update_symbol_pullback_recovery(
 
         pullback_occurred = False
         recovery_confirmed = False
+        expansion_confirmed = True
+        is_choppy = False
         anti_chase = "BLOCK"
         setup_type = "NORMAL_CONTINUATION"
         reason = ""
+
+        # Evaluate Chop and Market Expansion on price history
+        if len(hist) >= 3:
+            range_pts = max(hist) - min(hist)
+            avg_spot = sum(hist) / len(hist) if hist else spot
+            range_pct = (range_pts / avg_spot * 100) if avg_spot > 0 else 0.0
+            mom_threshold = ENGINE_CONFIG.get("MOMENTUM_CHANGE_THRESHOLD", 0.05)
+
+            # Reversals / oscillation
+            deltas = [hist[i] - hist[i - 1] for i in range(1, len(hist))]
+            non_zero_deltas = [d for d in deltas if abs(d) >= 1e-4]
+            sign_flips = sum(1 for i in range(1, len(non_zero_deltas)) if (non_zero_deltas[i] > 0) != (non_zero_deltas[i - 1] > 0))
+
+            # Narrow range / compressed price action with weak momentum
+            if (range_pct < 0.04 or range_pts < min(1.5, strike_step * 0.03)) and abs(spot_chg) < mom_threshold:
+                is_choppy = True
+                expansion_confirmed = False
+
+            # Frequent direction reversals (alternating chop)
+            if len(non_zero_deltas) >= 3:
+                if sign_flips >= len(non_zero_deltas) - 1 and (abs(spot_chg) < mom_threshold * 2 or range_pct < 0.08):
+                    is_choppy = True
+                    expansion_confirmed = False
+                elif sign_flips >= 3 and abs(hist[-1] - hist[0]) < (range_pts * 0.3):
+                    is_choppy = True
+                    expansion_confirmed = False
+
+            # Weak momentum
+            if abs(spot_chg) < mom_threshold:
+                expansion_confirmed = False
+
+            if is_choppy:
+                setup_type = "LOW_EXPANSION_OR_CHOP"
+                reason = "LOW_EXPANSION_OR_CHOP"
 
         if len(hist) >= 3:
             if is_bullish:
@@ -224,19 +265,35 @@ def update_symbol_pullback_recovery(
                     if trough < peak:
                         pullback_occurred = True
                     
+                    # Meaningful pullback and recovery with follow-through
                     is_moving_up = (spot > trough and (trough_idx < len(hist) - 1 and spot >= hist[-2]))
-                    if (pullback_occurred and is_moving_up and 
-                        momentum_signal == "BULLISH" and price_signal == "BULLISH"):
-                        recovery_confirmed = True
-                        anti_chase = "PASS"
-                        setup_type = "PULLBACK_RECOVERY"
-                        reason = "PULLBACK_RECOVERY"
+                    has_follow_through = (
+                        is_moving_up
+                        and (spot - trough) >= min(0.5, (peak - trough) * 0.15)
+                        and momentum_signal == "BULLISH"
+                        and price_signal == "BULLISH"
+                    )
+
+                    if pullback_occurred and has_follow_through:
+                        if is_choppy or not expansion_confirmed:
+                            recovery_confirmed = False
+                            anti_chase = "BLOCK"
+                            setup_type = "LOW_EXPANSION_OR_CHOP"
+                            reason = "LOW_EXPANSION_OR_CHOP"
+                        else:
+                            recovery_confirmed = True
+                            anti_chase = "PASS"
+                            setup_type = "PULLBACK_RECOVERY"
+                            reason = "PULLBACK_RECOVERY"
                     else:
                         recovery_confirmed = False
                         anti_chase = "BLOCK"
                         if not pullback_occurred:
                             setup_type = "FRESH_HIGH_NO_PULLBACK"
                             reason = "FRESH_HIGH_NO_PULLBACK"
+                        elif is_choppy:
+                            setup_type = "LOW_EXPANSION_OR_CHOP"
+                            reason = "LOW_EXPANSION_OR_CHOP"
                         else:
                             setup_type = "PULLBACK_IN_PROGRESS"
                             reason = "PULLBACK_IN_PROGRESS"
@@ -258,25 +315,46 @@ def update_symbol_pullback_recovery(
                     if bounce > trough:
                         pullback_occurred = True
                     
+                    # Meaningful rebound and downward recovery with follow-through
                     is_moving_down = (spot < bounce and (bounce_idx < len(hist) - 1 and spot <= hist[-2]))
-                    if (pullback_occurred and is_moving_down and 
-                        momentum_signal == "BEARISH" and price_signal == "BEARISH"):
-                        recovery_confirmed = True
-                        anti_chase = "PASS"
-                        setup_type = "PULLBACK_RECOVERY"
-                        reason = "PULLBACK_RECOVERY"
+                    has_follow_through = (
+                        is_moving_down
+                        and (bounce - spot) >= min(0.5, (bounce - trough) * 0.15)
+                        and momentum_signal == "BEARISH"
+                        and price_signal == "BEARISH"
+                    )
+
+                    if pullback_occurred and has_follow_through:
+                        if is_choppy or not expansion_confirmed:
+                            recovery_confirmed = False
+                            anti_chase = "BLOCK"
+                            setup_type = "LOW_EXPANSION_OR_CHOP"
+                            reason = "LOW_EXPANSION_OR_CHOP"
+                        else:
+                            recovery_confirmed = True
+                            anti_chase = "PASS"
+                            setup_type = "PULLBACK_RECOVERY"
+                            reason = "PULLBACK_RECOVERY"
                     else:
                         recovery_confirmed = False
                         anti_chase = "BLOCK"
                         if not pullback_occurred:
                             setup_type = "FRESH_LOW_NO_PULLBACK"
                             reason = "FRESH_LOW_NO_PULLBACK"
+                        elif is_choppy:
+                            setup_type = "LOW_EXPANSION_OR_CHOP"
+                            reason = "LOW_EXPANSION_OR_CHOP"
                         else:
                             setup_type = "PULLBACK_IN_PROGRESS"
                             reason = "PULLBACK_IN_PROGRESS"
             else:
-                setup_type = "NORMAL_CONTINUATION"
-                anti_chase = "PASS"
+                if is_choppy:
+                    setup_type = "LOW_EXPANSION_OR_CHOP"
+                    reason = "LOW_EXPANSION_OR_CHOP"
+                    anti_chase = "BLOCK"
+                else:
+                    setup_type = "NORMAL_CONTINUATION"
+                    anti_chase = "PASS"
         else:
             if custom_history is not None:
                 if is_bullish:
@@ -293,6 +371,8 @@ def update_symbol_pullback_recovery(
             else:
                 pullback_occurred = True
                 recovery_confirmed = True
+                expansion_confirmed = (momentum_signal in ("BULLISH", "BEARISH"))
+                is_choppy = not expansion_confirmed
                 anti_chase = "PASS"
                 setup_type = "PULLBACK_RECOVERY"
 
@@ -300,6 +380,8 @@ def update_symbol_pullback_recovery(
             "setup_type": setup_type,
             "pullback_occurred": pullback_occurred,
             "recovery_confirmed": recovery_confirmed,
+            "expansion_confirmed": expansion_confirmed,
+            "is_choppy": is_choppy,
             "anti_chase": anti_chase,
             "reason": reason,
         }
@@ -490,6 +572,214 @@ def compute_trending_oi_metrics(
     }
 
 
+def compute_morning_trade_bias(
+    market_data: dict,
+    spot: float,
+    step: float,
+    atm_strike: float,
+    pcr: float,
+    bullish_score: float,
+    bearish_score: float,
+    r1: float,
+    s1: float,
+    enriched_chain: list[dict] | None = None,
+) -> dict:
+    """
+    Computes deterministic Morning Trade Bias and actionable directions based on:
+    1. Previous Day Data (PDH, PDL, PDC)
+    2. Central Pivot Range (CPR: Pivot, TC, BC) & Standard Pivots (R1, S1, R2, S2)
+    3. Opening Gap analysis (Gap Up, Gap Down, Flat relative to PDC)
+    4. Current Spot position vs PDH / PDL / CPR boundaries
+    5. Morning Option Flow (PCR, ATM writing skew)
+    """
+    symbol = market_data.get("symbol", "NIFTY").upper()
+    spot_chg = float(market_data.get("spot_change_pct", 0.0))
+
+    # Extract or estimate Previous Day OHLC
+    pdc = float(market_data.get("prev_close") or market_data.get("prev_close_price") or 0.0)
+    if pdc <= 0:
+        pdc = round(spot / (1.0 + (spot_chg / 100.0)), 2) if spot > 0 and (1.0 + (spot_chg / 100.0)) > 0 else spot
+
+    open_price = float(market_data.get("open_price") or market_data.get("open") or 0.0)
+    if open_price <= 0:
+        open_price = round(pdc * (1.0 + (spot_chg / 100.0)), 2) if pdc > 0 else spot
+
+    pdh = float(market_data.get("prev_high") or market_data.get("pdh") or 0.0)
+    if pdh <= 0:
+        pdh = max(round(pdc + step * 1.5, 2), round(r1, 2)) if pdc > 0 else spot + step
+
+    pdl = float(market_data.get("prev_low") or market_data.get("pdl") or 0.0)
+    if pdl <= 0:
+        pdl = min(round(pdc - step * 1.5, 2), round(s1, 2)) if pdc > 0 else spot - step
+
+    # Ensure valid ordering
+    if pdh < pdl:
+        pdh, pdl = pdl, pdh
+    if pdh == pdl:
+        pdh += step
+        pdl -= step
+
+    # 1. Calculate Central Pivot Range (CPR)
+    pivot = round((pdh + pdl + pdc) / 3.0, 2)
+    bc = round((pdh + pdl) / 2.0, 2)
+    tc = round((pivot - bc) + pivot, 2)
+    cpr_top = round(max(tc, bc), 2)
+    cpr_bottom = round(min(tc, bc), 2)
+    cpr_width = round(abs(tc - bc), 2)
+    cpr_width_pct = round((cpr_width / pivot) * 100.0, 2) if pivot > 0 else 0.0
+
+    if cpr_width_pct <= 0.25:
+        cpr_type = "NARROW (TRENDING BIAS)"
+    elif cpr_width_pct >= 0.55:
+        cpr_type = "WIDE (RANGEBOUND / REVERSAL BIAS)"
+    else:
+        cpr_type = "AVERAGE"
+
+    # Classical Pivots
+    cpr_r1 = round(2 * pivot - pdl, 2)
+    cpr_s1 = round(2 * pivot - pdh, 2)
+    cpr_r2 = round(pivot + (pdh - pdl), 2)
+    cpr_s2 = round(pivot - (pdh - pdl), 2)
+
+    # 2. Opening Gap Analysis
+    gap_pts = round(open_price - pdc, 2)
+    gap_pct = round((gap_pts / pdc) * 100.0, 2) if pdc > 0 else 0.0
+    if gap_pct >= 0.15:
+        gap_type = "GAP UP"
+    elif gap_pct <= -0.15:
+        gap_type = "GAP DOWN"
+    else:
+        gap_type = "FLAT OPEN"
+
+    # 3. Decision Matrix
+    is_above_pdh = spot >= (pdh - (step * 0.1))
+    is_above_cpr = spot >= cpr_top
+    is_below_pdl = spot <= (pdl + (step * 0.1))
+    is_below_cpr = spot <= cpr_bottom
+
+    why_reasons = []
+
+    if is_above_pdh or (is_above_cpr and (spot_chg >= 0.10 or bullish_score >= 60.0) and pcr >= 0.95) or (is_above_cpr and spot_chg >= 0.25):
+        direction = "BULLISH"
+        action = "BUY CE"
+        badge = "BULLISH (BUY CE)"
+        badge_class = "bullish"
+        suggested_strike = atm_strike if spot <= atm_strike + (step * 0.3) else atm_strike + step
+        suggested_contract = f"{symbol} {int(suggested_strike)} CE"
+
+        if is_above_pdh:
+            setup_title = "PDH Breakout & Bullish Expansion"
+            trigger_str = f"Buy CE on 5m candle close above PDH (₹{pdh:.1f})"
+            target_1 = round(max(cpr_r1, spot + step), 1)
+            target_2 = round(max(cpr_r2, target_1 + step), 1)
+            sl_level = round(max(cpr_top, pdh - step), 1)
+            confidence = "HIGH" if (pcr >= 1.15 and spot_chg >= 0.25) else "MEDIUM"
+            score = min(95, max(75, int(bullish_score)))
+            why_reasons.append(f"Spot (₹{spot:.1f}) is trading above Previous Day High (₹{pdh:.1f}) in breakout territory.")
+        else:
+            setup_title = "Above CPR Bullish Continuation"
+            trigger_str = f"Buy CE on pullback to CPR Top (₹{cpr_top:.1f}) holding with bounce"
+            target_1 = round(pdh, 1)
+            target_2 = round(max(cpr_r1, pdh + step), 1)
+            sl_level = round(cpr_bottom, 1)
+            confidence = "MEDIUM"
+            score = min(90, max(70, int(bullish_score)))
+            why_reasons.append(f"Spot is holding above Central Pivot Range Top (₹{cpr_top:.1f}).")
+
+        why_reasons.append(f"{gap_type} ({gap_pct:+.2f}%) with {spot_chg:+.2f}% intraday momentum.")
+        why_reasons.append(f"Put writing dominance (PCR {pcr:.2f}) offering underlying support.")
+
+    elif is_below_pdl or (is_below_cpr and (spot_chg <= -0.10 or bearish_score >= 60.0) and pcr <= 1.05) or (is_below_cpr and spot_chg <= -0.25):
+        direction = "BEARISH"
+        action = "BUY PE"
+        badge = "BEARISH (BUY PE)"
+        badge_class = "bearish"
+        suggested_strike = atm_strike if spot >= atm_strike - (step * 0.3) else atm_strike - step
+        suggested_contract = f"{symbol} {int(suggested_strike)} PE"
+
+        if is_below_pdl:
+            setup_title = "PDL Breakdown & Bearish Slide"
+            trigger_str = f"Buy PE on 5m candle close below PDL (₹{pdl:.1f})"
+            target_1 = round(min(cpr_s1, spot - step), 1)
+            target_2 = round(min(cpr_s2, target_1 - step), 1)
+            sl_level = round(min(cpr_bottom, pdl + step), 1)
+            confidence = "HIGH" if (pcr <= 0.85 and spot_chg <= -0.25) else "MEDIUM"
+            score = min(95, max(75, int(bearish_score)))
+            why_reasons.append(f"Spot (₹{spot:.1f}) is trading below Previous Day Low (₹{pdl:.1f}) in breakdown territory.")
+        else:
+            setup_title = "Below CPR Bearish Rejection"
+            trigger_str = f"Buy PE on pullback to CPR Bottom (₹{cpr_bottom:.1f}) facing rejection"
+            target_1 = round(pdl, 1)
+            target_2 = round(min(cpr_s1, pdl - step), 1)
+            sl_level = round(cpr_top, 1)
+            confidence = "MEDIUM"
+            score = min(90, max(70, int(bearish_score)))
+            why_reasons.append(f"Spot is trading below Central Pivot Range Bottom (₹{cpr_bottom:.1f}).")
+
+        why_reasons.append(f"{gap_type} ({gap_pct:+.2f}%) with {spot_chg:+.2f}% downward momentum.")
+        why_reasons.append(f"Call writing resistance (PCR {pcr:.2f}) capping upside attempts.")
+
+    else:
+        direction = "NEUTRAL"
+        action = "WAIT"
+        badge = "RANGEBOUND (WAIT)"
+        badge_class = "neutral"
+        suggested_contract = "--"
+        setup_title = "Inside Previous Day Value / CPR Chop"
+        trigger_str = f"Wait for 15m Opening Range breakout above PDH (₹{pdh:.1f}) or breakdown below PDL (₹{pdl:.1f})"
+        target_1 = round(pdh, 1)
+        target_2 = round(pdl, 1)
+        sl_level = round(pivot, 1)
+        confidence = "LOW"
+        score = 45
+        why_reasons.append(f"Spot is fluctuating inside Previous Day Range (PDL: ₹{pdl:.1f} to PDH: ₹{pdh:.1f}).")
+        why_reasons.append(f"Price inside CPR zone (₹{cpr_bottom:.1f} - ₹{cpr_top:.1f}) indicating consolidation.")
+        why_reasons.append(f"Neutral Option Flow (PCR: {pcr:.2f}) - No clear institutional writing edge.")
+
+    # Calculate approximate Risk-to-Reward ratio
+    risk_pts = max(abs(spot - sl_level), step * 0.4)
+    reward_pts = max(abs(target_1 - spot), step * 0.8)
+    rr_ratio = round(reward_pts / risk_pts, 1) if risk_pts > 0 else 2.0
+    rr_ratio = max(1.5, min(3.5, rr_ratio))
+
+    return {
+        "direction": direction,
+        "action": action,
+        "badge": badge,
+        "badge_class": badge_class,
+        "confidence": confidence,
+        "score": score,
+        "setup_title": setup_title,
+        "suggested_contract": suggested_contract,
+        "reference_data": {
+            "pdh": pdh,
+            "pdl": pdl,
+            "pdc": pdc,
+            "open": open_price,
+            "pivot": pivot,
+            "cpr_top": cpr_top,
+            "cpr_bottom": cpr_bottom,
+            "cpr_type": cpr_type,
+            "cpr_width": cpr_width,
+            "gap_type": gap_type,
+            "gap_pts": gap_pts,
+            "gap_pct": gap_pct,
+            "r1": cpr_r1,
+            "s1": cpr_s1,
+            "r2": cpr_r2,
+            "s2": cpr_s2,
+        },
+        "execution_plan": {
+            "trigger": trigger_str,
+            "stop_loss": sl_level,
+            "target_1": target_1,
+            "target_2": target_2,
+            "risk_reward": f"1 : {rr_ratio:.1f}",
+        },
+        "why_reasons": why_reasons,
+    }
+
+
 def analyze_option_desk(market_data: dict, update_state: bool = False, has_active_trade: bool | None = None) -> dict:
     """
     Comprehensive Options Analytical Engine with Selective Option Buying Decision Flow:
@@ -562,6 +852,42 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                 "iv_time": {"iv_favorable": False, "time_favorable": False, "iv_condition": "UNAVAILABLE", "time_status": "DATA_UNAVAILABLE"},
                 "raw_values": {"spot": spot, "spot_change_pct": spot_chg, "bullish_score": 0, "bearish_score": 0, "pcr": 1.0, "total_ce_vol": 0, "total_pe_vol": 0, "total_ce_oi": 0, "total_pe_oi": 0, "breakout_level": 0, "breakdown_level": 0, "atm_iv": None, "iv_percentile": None, "vix": vix, "dte": None, "bid_ask_spread_pct": 0.0, "spread_paid": 0.0},
                 "data_quality": {"valid": False, "status": "DATA_UNAVAILABLE", "reason": "FYERS market data unavailable"},
+            },
+            "morning_bias": {
+                "direction": "NEUTRAL",
+                "action": "WAIT",
+                "badge": "RANGEBOUND (WAIT)",
+                "badge_class": "neutral",
+                "confidence": "LOW",
+                "score": 0,
+                "setup_title": "Market Data Unavailable",
+                "suggested_contract": "--",
+                "reference_data": {
+                    "pdh": spot + step,
+                    "pdl": spot - step,
+                    "pdc": spot,
+                    "open": spot,
+                    "pivot": spot,
+                    "cpr_top": spot + (step * 0.2),
+                    "cpr_bottom": spot - (step * 0.2),
+                    "cpr_type": "AVERAGE",
+                    "cpr_width": step * 0.4,
+                    "gap_type": "FLAT OPEN",
+                    "gap_pts": 0.0,
+                    "gap_pct": 0.0,
+                    "r1": spot + step,
+                    "s1": spot - step,
+                    "r2": spot + 2 * step,
+                    "s2": spot - 2 * step,
+                },
+                "execution_plan": {
+                    "trigger": "Awaiting live market data connection",
+                    "stop_loss": spot - step,
+                    "target_1": spot + step,
+                    "target_2": spot + 2 * step,
+                    "risk_reward": "1 : 2.0",
+                },
+                "why_reasons": ["Market data currently unavailable from FYERS. Fail-closed discipline active."],
             },
             "oi_activity_summary": {"call_writing_strike": 0, "put_writing_strike": 0, "call_unwinding_strike": "None", "put_unwinding_strike": "None", "pcr": 1.0, "total_ce_oi": "0", "total_pe_oi": "0", "total_ce_change_oi": "0", "total_pe_change_oi": "0"},
             "pcr": {"pcr_ratio": 1.0, "pcr_chg": 0.0},
@@ -837,6 +1163,29 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     if s2 > s1:
         s1, s2 = s2, s1
 
+    # Ensure R1 and S1 form a distinct, non-zero channel bracket (R1 > S1)
+    if r1 <= s1:
+        if spot < r1:
+            # Spot is below collision strike: collision strike acts as Resistance (R1)
+            lower_pe_strikes = [r for r in sorted_sup if r["strike"] < r1]
+            s1 = lower_pe_strikes[0]["strike"] if lower_pe_strikes else (r1 - step)
+            s2_candidates = [r for r in lower_pe_strikes if r["strike"] < s1]
+            s2 = s2_candidates[0]["strike"] if s2_candidates else (s1 - step)
+        else:
+            # Spot is at or above collision strike: collision strike acts as Support (S1)
+            upper_ce_strikes = [r for r in sorted_res if r["strike"] > s1]
+            r1 = upper_ce_strikes[0]["strike"] if upper_ce_strikes else (s1 + step)
+            r2_candidates = [r for r in upper_ce_strikes if r["strike"] > r1]
+            r2 = r2_candidates[0]["strike"] if r2_candidates else (r1 + step)
+
+    # Double check ordering guarantees
+    if r2 <= r1:
+        upper_r2 = [r["strike"] for r in sorted_res if r["strike"] > r1]
+        r2 = upper_r2[0] if upper_r2 else (r1 + step)
+    if s2 >= s1:
+        lower_s2 = [r["strike"] for r in sorted_sup if r["strike"] < s1]
+        s2 = lower_s2[0] if lower_s2 else (s1 - step)
+
     breakout_level = r1
     breakdown_level = s1
 
@@ -916,11 +1265,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     pullback_info = update_symbol_pullback_recovery(
         symbol, spot, is_bullish_dir, is_bearish_dir,
         custom_history=custom_price_hist, update_state=update_state,
-        momentum_signal=momentum_signal, price_signal=price_signal
+        momentum_signal=momentum_signal, price_signal=price_signal,
+        volume_signal=volume_signal, spot_chg=spot_chg, strike_step=step
     )
     setup_type = pullback_info["setup_type"]
     pullback_occurred = pullback_info["pullback_occurred"]
     recovery_confirmed = pullback_info["recovery_confirmed"]
+    expansion_confirmed = pullback_info.get("expansion_confirmed", True)
+    is_choppy = pullback_info.get("is_choppy", False)
     anti_chase_status = pullback_info["anti_chase"]
 
     # 8. Preferred Option Contract Selection (ATM or ITM-1)
@@ -1090,14 +1442,30 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: CE contract quote missing, zero LTP, or bid/ask spread invalid."
-        elif not pullback_occurred or not recovery_confirmed:
+        elif not pullback_occurred:
             decision = "WAIT"
             setup_score = ce_score
             active_checklist = ce_checklist
             active_trade_plan = ce_trade_plan or {}
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
-            focus_reason = "FRESH_HIGH_NO_PULLBACK" if not pullback_occurred else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+            focus_reason = "FRESH_HIGH_NO_PULLBACK"
+        elif not recovery_confirmed:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "LOW_EXPANSION_OR_CHOP" if (is_choppy or not expansion_confirmed) else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+        elif is_choppy or not expansion_confirmed:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "LOW_EXPANSION_OR_CHOP"
         else:
             decision = "BUY CE"
             setup_score = max(ce_score, 80)
@@ -1115,14 +1483,30 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
-        elif not pullback_occurred or not recovery_confirmed:
+        elif not pullback_occurred:
             decision = "WAIT"
             setup_score = pe_score
             active_checklist = pe_checklist
             active_trade_plan = pe_trade_plan or {}
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
-            focus_reason = "FRESH_LOW_NO_PULLBACK" if not pullback_occurred else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+            focus_reason = "FRESH_LOW_NO_PULLBACK"
+        elif not recovery_confirmed:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "LOW_EXPANSION_OR_CHOP" if (is_choppy or not expansion_confirmed) else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
+        elif is_choppy or not expansion_confirmed:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "LOW_EXPANSION_OR_CHOP"
         else:
             decision = "BUY PE"
             setup_score = max(pe_score, 80)
@@ -1131,9 +1515,6 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "BUY PE"
             focus_reason = f"Bearish setup ({setup_type}) confirmed with {bear_confirm_count}/3 confirmations (OI, Volume, PCR)."
-            active_pillar_flags = pe_pillar_flags
-            focus_title = "WAIT"
-            focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
     else:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
@@ -1141,7 +1522,9 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_trade_plan = (ce_trade_plan if ce_score >= pe_score else pe_trade_plan) or {}
         active_pillar_flags = ce_pillar_flags if ce_score >= pe_score else pe_pillar_flags
         focus_title = "WAIT"
-        if price_signal == "BULLISH" and momentum_signal == "BULLISH":
+        if is_choppy or not expansion_confirmed:
+            focus_reason = "LOW_EXPANSION_OR_CHOP"
+        elif price_signal == "BULLISH" and momentum_signal == "BULLISH":
             focus_reason = f"Bullish confirmation gate failed: Only {bull_confirm_count}/3 confirmations (OI, Volume, PCR) support Bullish direction."
         elif price_signal == "BEARISH" and momentum_signal == "BEARISH":
             focus_reason = f"Bearish confirmation gate failed: Only {bear_confirm_count}/3 confirmations (OI, Volume, PCR) support Bearish direction."
@@ -1265,7 +1648,21 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         "data_status": data_status,
     }
 
+    morning_bias = compute_morning_trade_bias(
+        market_data=market_data,
+        spot=spot,
+        step=step,
+        atm_strike=atm_strike,
+        pcr=pcr,
+        bullish_score=bullish_score,
+        bearish_score=bearish_score,
+        r1=r1,
+        s1=s1,
+        enriched_chain=enriched_chain,
+    )
+
     return {
+        "morning_bias": morning_bias,
         "market_bias": {
             "bias": market_bias_str if market_bias_str in ("BULLISH", "BEARISH") else final_bias,
             "confidence": confidence,

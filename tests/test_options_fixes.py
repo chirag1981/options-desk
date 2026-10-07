@@ -181,13 +181,32 @@ class TestOptionsEngineFixes(unittest.TestCase):
         sensex_exp = get_upcoming_expiries("SENSEX")
         self.assertGreaterEqual(len(sensex_exp), 4)
 
-    def test_telemetry_retention_cleanup(self):
-        """Test that cleanup_old_telemetry removes outdated records safely."""
-        from app.services.options_signal_service import cleanup_old_telemetry
-
-        res = cleanup_old_telemetry(retention_days=30)
-        self.assertIn("ticks_deleted", res)
-        self.assertIn("decisions_deleted", res)
+    def test_key_levels_distinct_channel_bracket_on_atm_straddle_collision(self):
+        """Test that R1 and S1 form a distinct channel bracket (R1 > S1) when ATM has max CE & PE OI."""
+        # Spot at 22690.45, ATM 22700, max CE OI and max PE OI both at 22700
+        chain = [
+            {"strike": 22600, "ce_oi": 50000, "pe_oi": 150000, "ce_change_oi": 1000, "pe_change_oi": 50000, "ce_ltp": 120.0, "pe_ltp": 25.0, "ce_volume": 10000, "pe_volume": 30000, "ce_iv": 14.0, "pe_iv": 14.0},
+            {"strike": 22700, "ce_oi": 300000, "pe_oi": 300000, "ce_change_oi": 80000, "pe_change_oi": 80000, "ce_ltp": 50.0, "pe_ltp": 60.0, "ce_volume": 50000, "pe_volume": 50000, "ce_iv": 14.0, "pe_iv": 14.0},
+            {"strike": 22800, "ce_oi": 200000, "pe_oi": 30000, "ce_change_oi": 60000, "pe_change_oi": 1000, "ce_ltp": 15.0, "pe_ltp": 140.0, "ce_volume": 30000, "pe_volume": 5000, "ce_iv": 14.0, "pe_iv": 14.0},
+        ]
+        market_data = {
+            "symbol": "NIFTY",
+            "spot_price": 22690.45,
+            "spot_change_pct": -0.15,
+            "chain": chain,
+            "strike_step": 100,
+            "prev_close": 22720.0,
+            "open_price": 22710.0,
+            "prev_high": 22780.0,
+            "prev_low": 22620.0,
+            "data_status": "LIVE",
+        }
+        res = analyze_option_desk(market_data, update_state=False)
+        levels = res["key_levels"]
+        self.assertGreater(levels["resistance_1"], levels["support_1"])
+        self.assertEqual(levels["resistance_1"], 22700.0)
+        self.assertEqual(levels["support_1"], 22600.0)
+        self.assertEqual(levels["resistance_2"], 22800.0)
 
 
 if __name__ == "__main__":

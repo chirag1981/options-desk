@@ -242,6 +242,48 @@ def get_fyers_index_spot(symbol: str = "NIFTY") -> tuple[float, float, str] | No
     return None
 
 
+def get_fyers_index_ohlc_details(symbol: str = "NIFTY") -> dict | None:
+    """
+    Fetches real-time spot price, day change %, open, high, low, and prev_close from FYERS quotes API.
+    """
+    sym = symbol.upper()
+    fy_sym = FYERS_INDEX_SYMBOLS.get(sym)
+    if not fy_sym:
+        return None
+
+    fyers = get_fyers_model()
+    if not fyers:
+        return None
+
+    try:
+        data = {"symbols": fy_sym}
+        resp = fyers.quotes(data=data)
+        if resp.get("s") == "ok":
+            d_list = resp.get("d", [])
+            if d_list:
+                item = d_list[0].get("v", {})
+                ltp = float(item.get("lp", 0.0) or 0.0)
+                chg_pct = float(item.get("chp", 0.0) or 0.0)
+                open_p = float(item.get("open_price", 0.0) or 0.0)
+                high_p = float(item.get("high_price", 0.0) or 0.0)
+                low_p = float(item.get("low_price", 0.0) or 0.0)
+                prev_close = float(item.get("prev_close_price", 0.0) or 0.0)
+                if ltp > 0:
+                    return {
+                        "spot_price": ltp,
+                        "spot_change_pct": chg_pct,
+                        "open_price": open_p if open_p > 0 else ltp,
+                        "high_price": high_p if high_p > 0 else ltp,
+                        "low_price": low_p if low_p > 0 else ltp,
+                        "prev_close": prev_close if prev_close > 0 else (round(ltp / (1.0 + chg_pct / 100.0), 2) if chg_pct != -100 else ltp),
+                        "status": "LIVE"
+                    }
+    except Exception as e:
+        log.warning(f"FYERS spot quote error for {symbol}: {e}")
+    return None
+
+
+
 def get_fyers_option_ltp(symbol: str, strike: float, signal_type: str, expiry: str | None = None) -> float | None:
     """
     Fetches live LTP for a specific options contract from FYERS option chain / quotes API.
