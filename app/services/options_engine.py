@@ -1732,8 +1732,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         "oi_activity_summary": {
             "call_writing_strike": call_writing_strikes[0] if call_writing_strikes else r1,
             "put_writing_strike": put_writing_strikes[0] if put_writing_strikes else s1,
-            "call_unwinding_strike": call_unwinding_strikes[0] if call_unwinding_strikes else "None",
-            "put_unwinding_strike": put_unwinding_strikes[0] if put_unwinding_strikes else "None",
+            "call_unwinding_strike": call_unwinding_strikes[0] if call_unwinding_strikes else None,
+            "put_unwinding_strike": put_unwinding_strikes[0] if put_unwinding_strikes else None,
             "pcr": pcr,
             "total_ce_oi": format_lakhs(total_ce_oi),
             "total_pe_oi": format_lakhs(total_pe_oi),

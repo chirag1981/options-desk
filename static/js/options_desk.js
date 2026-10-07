@@ -223,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
      * Formats number with Indian comma grouping
      */
     function formatIndianNumber(x) {
-        if (x === undefined || x === null) return "--";
+        if (x === undefined || x === null || x === "None" || x === "" || isNaN(Number(x))) return "--";
         const parts = x.toString().split(".");
         let lastThree = parts[0].substring(parts[0].length - 3);
         const otherNumbers = parts[0].substring(0, parts[0].length - 3);
