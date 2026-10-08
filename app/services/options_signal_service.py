@@ -1050,22 +1050,25 @@ def get_trending_oi_timeseries(
         if not raw_points:
             raw_points.append(live_point)
         else:
-            raw_points.append(live_point)
+            if raw_points[-1].get("time_str") == live_point["time_str"]:
+                raw_points[-1] = live_point
+            else:
+                raw_points.append(live_point)
 
-    # If fewer than 4 recorded snapshots exist for today (e.g. fresh startup, off-hours, testing),
-    # synthesize intraday progression anchored to the current point so the full table renders cleanly.
-    if len(raw_points) < 4:
-        anchor_spot = spot_price if (spot_price and spot_price > 0) else (raw_points[-1]["spot_price"] if raw_points else 24000.0)
+    # If no recorded snapshots exist at all (e.g. fresh startup, off-hours testing, or unpopulated day),
+    # synthesize intraday progression anchored to the spot price so the full table renders cleanly.
+    if not raw_points:
+        anchor_spot = spot_price if (spot_price and spot_price > 0) else 24000.0
         anchor_atm = round(anchor_spot / strike_step) * strike_step
-        anchor_ce_chg = raw_points[-1]["ce_change_oi"] if raw_points else 5500000
-        anchor_pe_chg = raw_points[-1]["pe_change_oi"] if raw_points else 3200000
+        anchor_ce_chg = 5500000
+        anchor_pe_chg = 3200000
 
         simulated_points = []
         base_d = datetime.strptime(trade_date, "%Y-%m-%d").date()
-        start_t = datetime.combine(base_d, dtime(9, 30), tzinfo=IST)
+        start_t = datetime.combine(base_d, dtime(9, 15), tzinfo=IST)
         
         end_limit = now_dt if (trade_date == now_dt.strftime("%Y-%m-%d") and now_dt > start_t) else datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
-        if end_limit < start_t:
+        if end_limit <= start_t:
             end_limit = datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
 
         curr_t = start_t
@@ -1588,7 +1591,7 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
 
     # Safety check: enforce max daily trades limit
     from app.services.options_engine import ENGINE_CONFIG
-    max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 3)
+    max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 25)
     today_count = get_daily_trade_count(symbol)
     if today_count >= max_daily_trades:
         log.warning(f"Blocked signal for {symbol}: MAX_DAILY_TRADES ({max_daily_trades}) reached for today ({today_count} trades).")

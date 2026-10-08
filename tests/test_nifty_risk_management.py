@@ -298,26 +298,31 @@ class TestNiftyRiskManagement(unittest.TestCase):
         count = get_daily_trade_count("NIFTY", today_str)
         self.assertEqual(count, 3)
 
-        # 4th trade attempt via analyze_option_desk
-        data = self._sample_chain_data(is_ce=True)
-        data["daily_trade_count"] = 3
-        res = analyze_option_desk(data, has_active_trade=False)
-        
-        self.assertEqual(res["option_buying"]["decision"], "WAIT")
-        self.assertEqual(res["option_buying"]["decision_reason"], "MAX_DAILY_TRADES_REACHED")
+        orig_limit = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 25)
+        ENGINE_CONFIG["MAX_DAILY_TRADES"] = 3
+        try:
+            # 4th trade attempt via analyze_option_desk
+            data = self._sample_chain_data(is_ce=True)
+            data["daily_trade_count"] = 3
+            res = analyze_option_desk(data, has_active_trade=False)
+            
+            self.assertEqual(res["option_buying"]["decision"], "WAIT")
+            self.assertEqual(res["option_buying"]["decision_reason"], "MAX_DAILY_TRADES_REACHED")
 
-        # Verify record_signal also blocks 4th trade
-        sig4 = record_signal({
-            "symbol": "NIFTY",
-            "type": "CE",
-            "contract_name": "22550 CE",
-            "strike": 22550.0,
-            "entry_price": 100.0,
-            "ask_at_entry": 100.0,
-            "bid_at_entry": 99.5,
-            "stop_loss": 92.0,
-        })
-        self.assertIsNone(sig4)
+            # Verify record_signal also blocks 4th trade
+            sig4 = record_signal({
+                "symbol": "NIFTY",
+                "type": "CE",
+                "contract_name": "22550 CE",
+                "strike": 22550.0,
+                "entry_price": 100.0,
+                "ask_at_entry": 100.0,
+                "bid_at_entry": 99.5,
+                "stop_loss": 92.0,
+            })
+            self.assertIsNone(sig4)
+        finally:
+            ENGINE_CONFIG["MAX_DAILY_TRADES"] = orig_limit
 
 
 if __name__ == "__main__":

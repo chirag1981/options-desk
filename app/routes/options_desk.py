@@ -11,7 +11,10 @@ from app.services.fyers_options_service import (
     INDEX_CONFIGS
 )
 from app.services.options_engine import analyze_option_desk
-from app.services.options_signal_service import get_trending_oi_timeseries
+from app.services.options_signal_service import (
+    get_trending_oi_timeseries,
+    record_trending_oi_snapshot,
+)
 
 options_desk_bp = Blueprint("options_desk", __name__)
 
@@ -50,6 +53,13 @@ def get_options_desk_data():
     try:
         raw_chain = fetch_option_chain_data(symbol=symbol, expiry=expiry, force_refresh=force)
         analysis = analyze_option_desk(raw_chain)
+
+        # Record Trending OI snapshot if available so time-series builds continuously
+        try:
+            if analysis and "trending_oi" in analysis:
+                record_trending_oi_snapshot(symbol, analysis)
+        except Exception:
+            pass
 
         # Attach Trending OI timeseries (ATM ± 5 strikes, default 5m intervals)
         try:
@@ -93,6 +103,13 @@ def get_trending_oi():
     try:
         raw_chain = fetch_option_chain_data(symbol=symbol)
         analysis = analyze_option_desk(raw_chain)
+
+        try:
+            if analysis and "trending_oi" in analysis:
+                record_trending_oi_snapshot(symbol, analysis)
+        except Exception:
+            pass
+
         timeseries = get_trending_oi_timeseries(
             symbol=symbol,
             trade_date=trade_date,

@@ -234,11 +234,17 @@ class TestPaperStrategyScenarios(unittest.TestCase):
 
     def test_scenario_14_daily_trade_count_at_3_no_new_signal(self):
         """Scenario 14: Daily trade count at 3 blocks new trade with MAX_DAILY_TRADES_REACHED."""
-        data = self._base_bullish_chain()
-        data["daily_trade_count"] = 3
-        res = analyze_option_desk(data, has_active_trade=False)
-        self.assertEqual(res["option_buying"]["decision"], "WAIT")
-        self.assertEqual(res["option_buying"]["decision_reason"], "MAX_DAILY_TRADES_REACHED")
+        from app.services.options_engine import ENGINE_CONFIG
+        orig_limit = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 25)
+        ENGINE_CONFIG["MAX_DAILY_TRADES"] = 3
+        try:
+            data = self._base_bullish_chain()
+            data["daily_trade_count"] = 3
+            res = analyze_option_desk(data, has_active_trade=False)
+            self.assertEqual(res["option_buying"]["decision"], "WAIT")
+            self.assertEqual(res["option_buying"]["decision_reason"], "MAX_DAILY_TRADES_REACHED")
+        finally:
+            ENGINE_CONFIG["MAX_DAILY_TRADES"] = orig_limit
 
 
 if __name__ == "__main__":

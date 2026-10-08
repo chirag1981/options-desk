@@ -13,6 +13,7 @@ Data Integrity & Statistical Standards:
 - Setup score (0-100) calculated for telemetry and logging; directional entry gated by DIRECTION_BIAS_THRESHOLD (>= 60)
 """
 
+import os
 import math
 import logging
 import threading
@@ -42,10 +43,10 @@ ENGINE_CONFIG = {
     "PRIME_WINDOW_END_MINS": 840,     # 14:00 IST
     "MARKET_SESSION_START_MINS": 555, # 09:15 IST
     "MARKET_SESSION_END_MINS": 930,   # 15:30 IST
-    "CONSECUTIVE_CONFIRMATIONS_REQUIRED": 2,
+    "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
     "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
     "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
-    "MAX_DAILY_TRADES": 3,               # Maximum completed/entered trades allowed per trading day
+    "MAX_DAILY_TRADES": int(os.environ.get("MAX_DAILY_TRADES", 25)), # Maximum completed/entered trades allowed per trading day (raised for testing)
     "OI_THRESHOLDS": {
         "DEFAULT": {
             "ACTIVITY": 40000,
