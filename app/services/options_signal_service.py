@@ -1579,6 +1579,44 @@ def get_daily_trade_count(symbol: str = "NIFTY", trade_date: str | None = None) 
         return 0
 
 
+def check_consecutive_loss_cooldown(symbol: str, now_dt: datetime | None = None) -> tuple[bool, str, int]:
+    """
+    Checks if symbol has suffered consecutive SL_HIT outcomes recently.
+    Enforces a cooling-off period (default 20 mins) to prevent overtrading during consolidation/chop traps.
+    Returns (is_in_cooldown, reason_message, remaining_seconds).
+    """
+    if not symbol:
+        return False, "", 0
+    now = now_dt or datetime.now(IST)
+    try:
+        with _get_db() as conn:
+            rows = conn.execute("""
+                SELECT id, status, exit_reason, exit_time, updated_at, created_at
+                FROM signals
+                WHERE symbol = ? AND is_deleted = 0 AND status IN ('SL_HIT', 'TSL_HIT', 'TARGET_1_HIT', 'TARGET_2_HIT', 'TIME_STOP_EXIT')
+                ORDER BY id DESC LIMIT 2
+            """, (symbol.upper(),)).fetchall()
+
+        if len(rows) < 2:
+            return False, "", 0
+
+        # Check if the last 2 closed trades were SL_HIT
+        if rows[0]["status"] == "SL_HIT" and rows[1]["status"] == "SL_HIT":
+            last_exit_str = rows[0]["exit_time"] or rows[0]["updated_at"] or rows[0]["created_at"]
+            if last_exit_str:
+                last_exit_dt = datetime.strptime(last_exit_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+                elapsed_sec = (now - last_exit_dt).total_seconds()
+                cooldown_sec = 20 * 60  # 20 minutes cooldown
+                if elapsed_sec < cooldown_sec:
+                    rem_mins = round((cooldown_sec - elapsed_sec) / 60.0, 1)
+                    reason_msg = f"CONSECUTIVE_LOSS_COOLDOWN (2 consecutive SL hits. Cooling off for {rem_mins}m to prevent chop traps)."
+                    return True, reason_msg, int(cooldown_sec - elapsed_sec)
+    except Exception as e:
+        log.warning(f"Error checking consecutive loss cooldown for {symbol}: {e}")
+
+    return False, "", 0
+
+
 def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1) -> dict | None:
     """
     Atomically records a new signal into the journal (PAPER TRADING ONLY).
@@ -1715,7 +1753,13 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
                 conn.execute("ROLLBACK")
                 return None
 
-            # 2. Check 15-Minute Cooldown from Most Recent Closed Signal
+            # 2. Check Consecutive Loss Cooldown & Rapid Cooldown
+            in_loss_cd, loss_cd_msg, _ = check_consecutive_loss_cooldown(symbol, now)
+            if in_loss_cd:
+                log.info(f"[SUPPRESSED: CONSECUTIVE_LOSS_COOLDOWN] {symbol} {contract_name} blocked — {loss_cd_msg}")
+                conn.execute("ROLLBACK")
+                return None
+
             recent = conn.execute("""
                 SELECT id, status, updated_at, exit_time, created_at
                 FROM signals 
@@ -1728,12 +1772,12 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
                 try:
                     prev_dt = datetime.strptime(ref_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
                     diff_sec = (now - prev_dt).total_seconds()
-                    if not is_paper_trade and diff_sec < 900:  # 15 minutes cooldown
+                    if not is_paper_trade and diff_sec < 900:  # 15 minutes cooldown for live
                         log.info(f"[SUPPRESSED: COOLDOWN] {symbol} {contract_name} blocked — 15m cooldown active ({diff_sec:.0f}s / 900s elapsed).")
                         conn.execute("ROLLBACK")
                         return None
-                    elif is_paper_trade and diff_sec < 5:  # Rapid click debounce
-                        log.warning(f"[SUPPRESSED: RAPID_CLICK] Duplicate submission within {diff_sec:.1f}s.")
+                    elif is_paper_trade and diff_sec < 60:  # 1-minute minimum pause between paper trades
+                        log.warning(f"[SUPPRESSED: MIN_TRADE_PAUSE] {symbol} {contract_name} blocked — 1m pause active ({diff_sec:.1f}s / 60s elapsed).")
                         conn.execute("ROLLBACK")
                         return None
                 except Exception:
@@ -1959,10 +2003,17 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # -------------------------------------------------------------
         trailed_sl = sl
 
-        if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.5):
-            trailed_sl = max(trailed_sl, round(entry + 1.0, 2))
+        # Tier 1: Early Breakeven Protection (+0.4R / +4% / +5 pts profit -> Move SL to Cost + 0.50 buffer)
+        # Immunizes option buyer against RIGHT_THEN_REVERSED reversals
+        if mfe_pct >= 4.0 or (highest - entry) >= ((t1 - entry) * 0.40) or (highest - entry) >= 5.0:
+            trailed_sl = max(trailed_sl, round(entry + 0.5, 2))
 
-        if mfe_pct >= 20.0 or (highest - entry) >= ((t1 - entry) * 0.8):
+        # Tier 2: Lock in Moderate Gains (+10% / +0.7R profit -> Move SL to Cost + 2.0 pts)
+        if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.70):
+            trailed_sl = max(trailed_sl, round(entry + 2.0, 2))
+
+        # Tier 3: Lock in Substantial Gains (+20% / +1.0R profit -> Move SL to +10%)
+        if mfe_pct >= 20.0 or (highest - entry) >= (t1 - entry):
             trailed_sl = max(trailed_sl, round(entry * 1.10, 2))
 
         t1_eval_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp

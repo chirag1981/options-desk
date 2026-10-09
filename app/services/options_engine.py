@@ -1343,7 +1343,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     ce_trade_plan = calculate_trade_levels(best_ce, is_ce=True, spot_invalidation=s1, spot_target=r2)
     pe_trade_plan = calculate_trade_levels(best_pe, is_ce=False, spot_invalidation=r1, spot_target=s2)
 
-    # 10. Check Daily Trade Limit & One Active Trade Per Symbol Constraint
+    # 10. Check Daily Trade Limit, Consecutive Loss Cooldown & Active Trade Constraint
     if has_active_trade is None:
         try:
             from app.services.options_signal_service import has_active_signal_for_symbol
@@ -1361,7 +1361,40 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 3)
 
+    in_loss_cooldown = False
+    loss_cooldown_reason = ""
+    try:
+        from app.services.options_signal_service import check_consecutive_loss_cooldown
+        in_loss_cooldown, loss_cooldown_reason, _ = check_consecutive_loss_cooldown(symbol)
+    except Exception:
+        in_loss_cooldown = False
+
     active_trade_str = "YES" if has_active_trade else "NO"
+
+    # Major Round Strike Defense (Psychological Wall Protection)
+    major_round_step = 1000.0 if symbol == "SENSEX" else 500.0
+    nearest_round_ceil = math.ceil(spot / major_round_step) * major_round_step
+    nearest_round_floor = math.floor(spot / major_round_step) * major_round_step
+
+    round_ce_blocked = False
+    round_ce_msg = ""
+    if 0 < (nearest_round_ceil - spot) <= (step * 0.40):
+        round_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_round_ceil) < 1.0]
+        if round_strike_rows:
+            round_ce_chg = int(round_strike_rows[0].get("ce_change_oi", 0) or 0)
+            if round_ce_chg > 0:
+                round_ce_blocked = True
+                round_ce_msg = f"MAJOR_ROUND_RESISTANCE_BLOCK (Directly under {int(nearest_round_ceil)} CE Wall with active Call writing)"
+
+    round_pe_blocked = False
+    round_pe_msg = ""
+    if 0 < (spot - nearest_round_floor) <= (step * 0.40):
+        round_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_round_floor) < 1.0]
+        if round_strike_rows:
+            round_pe_chg = int(round_strike_rows[0].get("pe_change_oi", 0) or 0)
+            if round_pe_chg > 0:
+                round_pe_blocked = True
+                round_pe_msg = f"MAJOR_ROUND_SUPPORT_BLOCK (Directly above {int(nearest_round_floor)} PE Wall with active Put writing)"
 
     # 11. Final Decision (BUY CE / BUY PE / WAIT)
     decision = "WAIT"
@@ -1445,6 +1478,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_pillar_flags = ce_pillar_flags if is_bullish_dir else pe_pillar_flags
         focus_title = "WAIT"
         focus_reason = "ACTIVE TRADE EXISTS"
+    elif in_loss_cooldown:
+        decision = "WAIT"
+        setup_score = max(ce_score, pe_score)
+        active_checklist = ce_checklist if (is_bullish_dir or ce_score >= pe_score) else pe_checklist
+        active_trade_plan = (ce_trade_plan if (is_bullish_dir or ce_score >= pe_score) else pe_trade_plan) or {}
+        active_pillar_flags = ce_pillar_flags if (is_bullish_dir or ce_score >= pe_score) else pe_pillar_flags
+        focus_title = "WAIT"
+        focus_reason = loss_cooldown_reason or "CONSECUTIVE_LOSS_COOLDOWN"
     elif daily_trade_count >= max_daily_trades:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
@@ -1462,6 +1503,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: CE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif round_ce_blocked:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = round_ce_msg
         elif not pullback_occurred:
             decision = "WAIT"
             setup_score = ce_score
@@ -1503,6 +1552,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif round_pe_blocked:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = round_pe_msg
         elif not pullback_occurred:
             decision = "WAIT"
             setup_score = pe_score

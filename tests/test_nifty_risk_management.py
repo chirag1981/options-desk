@@ -234,12 +234,13 @@ class TestNiftyRiskManagement(unittest.TestCase):
 
     def test_6_time_stop_still_works(self):
         """Test 6: Stagnant trade past time limit closes with TIME_STOP_EXIT."""
+        future_exp = (datetime.now(IST) + timedelta(days=7)).strftime("%d-%b-%Y")
         sig_data = {
             "symbol": "NIFTY",
             "type": "CE",
             "contract_name": "22550 CE",
             "strike": 22550.0,
-            "expiry": "08-Oct-2026",
+            "expiry": future_exp,
             "spot_price": 22550.0,
             "entry_price": 100.0,
             "ask_at_entry": 100.0,
