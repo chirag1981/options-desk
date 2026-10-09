@@ -1189,8 +1189,12 @@ def get_trending_oi_timeseries(
                 direction_arrow = "↓"
                 direction_color = "red"
             
-            denom = max(abs(prev_diff), 1)
-            direction_chng_pct = round((chng_in_direction / denom) * 100.0, 2)
+            denom_activity = abs(delta_pe) + abs(delta_ce)
+            if denom_activity > 0:
+                direction_chng_pct = round(max(-100.0, min(100.0, (chng_in_direction / denom_activity) * 100.0)), 2)
+            else:
+                denom = max(abs(prev_diff), abs(diff_oi), 10000)
+                direction_chng_pct = round(max(-100.0, min(100.0, (chng_in_direction / denom) * 100.0)), 2)
 
             # Leg Actions
             if delta_ce > 10000:

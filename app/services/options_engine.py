@@ -503,12 +503,12 @@ def compute_trending_oi_metrics(
     if total_pe_change_oi >= total_ce_change_oi:
         denom = max(total_pe_change_oi, 1)
         raw_pct = ((total_pe_change_oi - total_ce_change_oi) / denom) * 100.0
-        diff_pct = round(raw_pct)
+        diff_pct = min(100, max(0, round(raw_pct)))
         sentiment = "Bullish"
     else:
         denom = max(total_ce_change_oi, 1)
         raw_pct = -((total_ce_change_oi - total_pe_change_oi) / denom) * 100.0
-        diff_pct = round(raw_pct)
+        diff_pct = max(-100, min(0, round(raw_pct)))
         sentiment = "Bearish"
 
     abs_pct = abs(diff_pct)

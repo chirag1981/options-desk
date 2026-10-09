@@ -2454,3 +2454,145 @@ body.desk-body {
     line-height: 1;
 }
 
+/* ==============================================================================
+   TRENDING OI - Professional Clean Terminal Table
+   ============================================================================== */
+.trending-pulse-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.76rem;
+}
+
+.trending-pulse-table th {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.5px;
+    padding: 8px 10px;
+    color: var(--text-muted, #64748b);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.trending-pulse-table td {
+    padding: 7px 10px;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    font-size: 0.76rem;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-color, #1e293b);
+}
+
+.trending-pulse-table tr:hover td {
+    background: rgba(0, 0, 0, 0.025);
+}
+
+/* Clean Typography for Market Flow Values (No Boxes, Pure Numbers) */
+.oi-val {
+    font-family: var(--font-mono, monospace);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+
+.oi-val.val-bullish {
+    color: #15803d !important; /* Deep Emerald Green */
+    font-weight: 700;
+}
+
+.oi-val.val-bearish {
+    color: #b91c1c !important; /* Deep Ruby Red */
+    font-weight: 700;
+}
+
+.oi-val.val-zero {
+    color: #64748b !important; /* Slate Gray */
+    font-weight: 500;
+}
+
+.trending-pulse-table .sub-date {
+    display: block;
+    font-size: 0.58rem;
+    color: #64748b;
+    font-weight: 500;
+    line-height: 1;
+    margin-top: 1px;
+}
+
+.trending-pulse-table .buildup-sub-action {
+    font-size: 0.62rem;
+    font-family: var(--font-mono, monospace);
+    color: #64748b;
+    white-space: nowrap;
+    line-height: 1;
+}
+
+/* Day H/L Break Badges */
+.badge-dhb {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+    border: 1px solid rgba(22, 163, 74, 0.4);
+}
+
+.badge-dlb {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    background: rgba(220, 38, 38, 0.12);
+    color: #b91c1c;
+    border: 1px solid rgba(220, 38, 38, 0.4);
+}
+
+.badge-diff-break-high {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: rgba(22, 163, 74, 0.1);
+    color: #15803d;
+    border: 1px solid rgba(22, 163, 74, 0.3);
+}
+
+.badge-diff-break-low {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: rgba(220, 38, 38, 0.1);
+    color: #b91c1c;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+.dir-arrow-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.dir-arrow-pill.dir-green {
+    background: rgba(22, 163, 74, 0.15);
+    color: #15803d;
+}
+.dir-arrow-pill.dir-red {
+    background: rgba(220, 38, 38, 0.15);
+    color: #b91c1c;
+}
+
+
+

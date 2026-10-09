@@ -10,8 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
         symbol: "NIFTY",
         expiry: "",
         strikeRange: 5, // Default ATM ± 5 strikes (5 up, 5 down)
-        refreshIntervalSec: 180, // 3 mins
-        timerRemaining: 180,
+        refreshIntervalSec: 300, // 5 mins default
+        timerRemaining: 300,
         timerId: null,
         isFetching: false,
         lastData: null,
@@ -248,6 +248,37 @@ document.addEventListener("DOMContentLoaded", () => {
             return `${sign}${(abs / 1000).toFixed(1)}k`;
         }
         return `${sign}${abs}`;
+    }
+
+    /**
+     * Formats OI flow values in Professional Clean Terminal style:
+     * - legType: 'CE'   (Call: + is Bearish/Red, - is Bullish/Green)
+     *            'PE'   (Put: + is Bullish/Green, - is Bearish/Red)
+     *            'DIFF' (Net: + is Bullish/Green, - is Bearish/Red)
+     *            'DIR'  (Shift: + is Bullish/Green, - is Bearish/Red)
+     */
+    function formatOiFlowCell(x, legType = 'DIFF') {
+        if (x === undefined || x === null || isNaN(Number(x))) {
+            return `<span class="oi-val val-zero">--</span>`;
+        }
+        const num = Number(x);
+        if (num === 0) {
+            return `<span class="oi-val val-zero">0</span>`;
+        }
+        const absVal = Math.abs(num);
+        const sign = num > 0 ? "+" : "-";
+        const compactText = formatCompactOi(num);
+        const fullText = formatIndianNumber(absVal);
+
+        let isBullish = false;
+        if (legType === 'CE') {
+            isBullish = num < 0; // Call covering is green, Call writing is red
+        } else {
+            isBullish = num >= 0; // Put writing is green, Put unwinding is red
+        }
+
+        const cls = isBullish ? "val-bullish" : "val-bearish";
+        return `<span class="oi-val ${cls}" title="${sign}${fullText} contracts">${compactText}</span>`;
     }
 
     /**
@@ -708,19 +739,11 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             // Compact & formatted values
-            const compactCeChg = formatCompactOi(r.ce_change_oi);
-            const fullCeChg = formatIndianNumber(r.ce_change_oi);
-            const compactPeChg = formatCompactOi(r.pe_change_oi);
-            const fullPeChg = formatIndianNumber(r.pe_change_oi);
-            const compactDiffOi = formatCompactOi(r.diff_oi);
-            const fullDiffOi = formatIndianNumber(Math.abs(r.diff_oi));
-            const compactChngDir = formatCompactOi(r.chng_in_direction);
-            const fullChngDir = formatIndianNumber(Math.abs(r.chng_in_direction));
+            const ceChgHtml = formatOiFlowCell(r.ce_change_oi, 'CE');
+            const peChgHtml = formatOiFlowCell(r.pe_change_oi, 'PE');
+            const diffOiHtml = formatOiFlowCell(r.diff_oi, 'DIFF');
+            const chngDirHtml = formatOiFlowCell(r.chng_in_direction, 'DIR');
             const sentClass = r.sentiment === 'Bullish' ? 'badge badge-sentiment-bullish' : (r.sentiment === 'Bearish' ? 'badge badge-sentiment-bearish' : 'badge badge-sentiment-neutral');
-
-            // Diff in OI class
-            const diffClass = r.diff_oi >= 0 ? "val-pos" : "val-neg";
-            const diffSign = r.diff_oi >= 0 ? "+" : "";
 
             // Strength capsule
             const pctSign = r.strength_pct >= 0 ? "+" : "";
@@ -736,10 +759,6 @@ document.addEventListener("DOMContentLoaded", () => {
             // Direction arrow pill
             const dirClass = r.direction_color === "green" ? "dir-green" : "dir-red";
             const dirArrowHtml = `<span class="dir-arrow-pill ${dirClass}">${r.direction_arrow}</span>`;
-
-            // Chng In Direction
-            const chngDirClass = r.chng_in_direction >= 0 ? "val-pos" : "val-neg";
-            const chngDirSign = r.chng_in_direction >= 0 ? "+" : "";
 
             // Direction of Chng %
             const dirPctClass = r.direction_chng_pct >= 0 ? "val-pos" : "val-neg";
@@ -776,12 +795,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 </td>
                 <td class="text-right font-mono">₹${ltpVal}</td>
                 <td class="text-center">${dlbHtml}</td>
-                <td class="text-right font-mono" title="${fullCeChg} contracts">${compactCeChg}</td>
-                <td class="text-right font-mono" title="${fullPeChg} contracts">${compactPeChg}</td>
-                <td class="text-right font-mono ${diffClass}" title="${diffSign}${fullDiffOi} contracts"><strong>${compactDiffOi}</strong></td>
+                <td class="text-right font-mono">${ceChgHtml}</td>
+                <td class="text-right font-mono">${peChgHtml}</td>
+                <td class="text-right font-mono">${diffOiHtml}</td>
                 <td class="text-center">${strengthHtml}</td>
                 <td class="text-center">${dirArrowHtml}</td>
-                <td class="text-right font-mono ${chngDirClass}" title="${chngDirSign}${fullChngDir} contracts">${compactChngDir}</td>
+                <td class="text-right font-mono">${chngDirHtml}</td>
                 <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${dirPctVal}%</td>
                 <td class="text-center font-mono"><strong>${netPcrVal}</strong></td>
                 <td class="text-center">${dayHlDiffHtml}</td>
@@ -1789,10 +1808,13 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Trending OI Interval Selection
+    // Trending OI Interval Selection & Timer Sync
     if (trendingIntervalSelect) {
         trendingIntervalSelect.addEventListener("change", () => {
-            const intervalVal = trendingIntervalSelect.value;
+            const intervalVal = parseInt(trendingIntervalSelect.value, 10) || 5;
+            state.refreshIntervalSec = intervalVal * 60;
+            startCountdown();
+
             fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`)
                 .then(res => res.json())
                 .then(res => {
@@ -1806,6 +1828,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Initial Load & Start Timers
+    const initialInterval = parseInt(trendingIntervalSelect?.value, 10) || 5;
+    state.refreshIntervalSec = initialInterval * 60;
+    state.timerRemaining = state.refreshIntervalSec;
+
     loadOptionsDeskData(false);
     loadSignalsData();
     loadTradeAnalysis();
