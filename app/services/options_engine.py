@@ -46,6 +46,9 @@ ENGINE_CONFIG = {
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
     "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
     "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
+    "POST_EXPANSION_EXHAUSTION_FILTER": True, # Blocks buying options that have expanded > 70% and pulled back > 18% into chop
+    "POST_EXPANSION_MIN_GAIN_PCT": 70.0,      # Minimum % expansion required to flag post-expansion regime
+    "POST_EXPANSION_DROP_FROM_HIGH_PCT": 18.0,# % drop from intraday high indicating exhaustion / distribution
     "MAX_DAILY_TRADES": int(os.environ.get("MAX_DAILY_TRADES", 25)), # Maximum completed/entered trades allowed per trading day (raised for testing)
     "OI_THRESHOLDS": {
         "DEFAULT": {
@@ -1371,30 +1374,115 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     active_trade_str = "YES" if has_active_trade else "NO"
 
-    # Major Round Strike Defense (Psychological Wall Protection)
+    # Major Round Strike Defense (Psychological Wall & Century Barrier Protection)
     major_round_step = 1000.0 if symbol == "SENSEX" else 500.0
+    century_step = 500.0 if symbol == "SENSEX" else 100.0
+
     nearest_round_ceil = math.ceil(spot / major_round_step) * major_round_step
     nearest_round_floor = math.floor(spot / major_round_step) * major_round_step
+    nearest_century_ceil = math.ceil(spot / century_step) * century_step
+    nearest_century_floor = math.floor(spot / century_step) * century_step
 
     round_ce_blocked = False
     round_ce_msg = ""
-    if 0 < (nearest_round_ceil - spot) <= (step * 0.40):
+
+    # Check 1: Major Round Level (500/1000) within tighter 0.60*step buffer (30 pts on NIFTY)
+    if 0 < (nearest_round_ceil - spot) <= (step * 0.60):
         round_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_round_ceil) < 1.0]
         if round_strike_rows:
             round_ce_chg = int(round_strike_rows[0].get("ce_change_oi", 0) or 0)
-            if round_ce_chg > 0:
+            round_ce_oi = int(round_strike_rows[0].get("ce_oi", 0) or 0)
+            round_pe_oi = int(round_strike_rows[0].get("pe_oi", 0) or 0)
+            if round_ce_chg > 0 or (round_ce_oi > 0 and round_ce_oi >= round_pe_oi * 1.2):
                 round_ce_blocked = True
-                round_ce_msg = f"MAJOR_ROUND_RESISTANCE_BLOCK (Directly under {int(nearest_round_ceil)} CE Wall with active Call writing)"
+                round_ce_msg = f"MAJOR_ROUND_RESISTANCE_BLOCK (Directly under {int(nearest_round_ceil)} CE Wall with active Call writing/dominant OI)"
+
+    # Check 2: Round Century Level (100-multiple) with active Call writing within 0.50*step buffer
+    if not round_ce_blocked and 0 < (nearest_century_ceil - spot) <= (step * 0.50):
+        century_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_century_ceil) < 1.0]
+        if century_strike_rows:
+            century_ce_chg = int(century_strike_rows[0].get("ce_change_oi", 0) or 0)
+            if century_ce_chg > 0:
+                round_ce_blocked = True
+                round_ce_msg = f"MAJOR_ROUND_RESISTANCE_BLOCK (Directly under {int(nearest_century_ceil)} CE Wall with active Call writing)"
 
     round_pe_blocked = False
     round_pe_msg = ""
-    if 0 < (spot - nearest_round_floor) <= (step * 0.40):
+
+    # Check 1: Major Round Level (500/1000) within tighter 0.60*step buffer (30 pts on NIFTY)
+    if 0 < (spot - nearest_round_floor) <= (step * 0.60):
         round_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_round_floor) < 1.0]
         if round_strike_rows:
             round_pe_chg = int(round_strike_rows[0].get("pe_change_oi", 0) or 0)
-            if round_pe_chg > 0:
+            round_pe_oi = int(round_strike_rows[0].get("pe_oi", 0) or 0)
+            round_ce_oi = int(round_strike_rows[0].get("ce_oi", 0) or 0)
+            if round_pe_chg > 0 or (round_pe_oi > 0 and round_pe_oi >= round_ce_oi * 1.2):
                 round_pe_blocked = True
-                round_pe_msg = f"MAJOR_ROUND_SUPPORT_BLOCK (Directly above {int(nearest_round_floor)} PE Wall with active Put writing)"
+                round_pe_msg = f"MAJOR_ROUND_SUPPORT_BLOCK (Directly above {int(nearest_round_floor)} PE Wall with active Put writing/dominant OI)"
+
+    # Check 2: Round Century Level (100-multiple) with active Put writing within 0.50*step buffer
+    if not round_pe_blocked and 0 < (spot - nearest_century_floor) <= (step * 0.50):
+        century_strike_rows = [r for r in enriched_chain if abs(r["strike"] - nearest_century_floor) < 1.0]
+        if century_strike_rows:
+            century_pe_chg = int(century_strike_rows[0].get("pe_change_oi", 0) or 0)
+            if century_pe_chg > 0:
+                round_pe_blocked = True
+                round_pe_msg = f"MAJOR_ROUND_SUPPORT_BLOCK (Directly above {int(nearest_century_floor)} PE Wall with active Put writing)"
+
+    # Post-Expansion Exhaustion Protection (Anti-Chop / Anti-Late-Entry Protection)
+    ce_exhausted = False
+    ce_exhaustion_msg = ""
+    pe_exhausted = False
+    pe_exhaustion_msg = ""
+
+    if ENGINE_CONFIG.get("POST_EXPANSION_EXHAUSTION_FILTER", True):
+        from app.services.fyers_options_service import get_option_contract_stats
+        min_gain_pct = float(ENGINE_CONFIG.get("POST_EXPANSION_MIN_GAIN_PCT", 70.0))
+        drop_threshold_pct = float(ENGINE_CONFIG.get("POST_EXPANSION_DROP_FROM_HIGH_PCT", 18.0))
+
+        if best_ce:
+            ce_name = f"{int(best_ce.get('strike', 0))} CE"
+            ce_ltp = float(best_ce.get("ce_ltp", 0.0) or 0.0)
+            ce_chp = float(best_ce.get("ce_chp", 0.0) or 0.0)
+            ce_high = float(best_ce.get("ce_high") or best_ce.get("high_price") or 0.0)
+            ce_low = float(best_ce.get("ce_low") or best_ce.get("low_price") or 0.0)
+            ce_sym = best_ce.get("ce_symbol")
+
+            if (ce_high <= 0.0 or ce_chp == 0.0) and ce_sym:
+                stats = get_option_contract_stats(ce_sym)
+                if stats:
+                    ce_high = float(stats.get("high_price", 0.0) or 0.0)
+                    ce_low = float(stats.get("low_price", 0.0) or 0.0)
+                    ce_chp = float(stats.get("chp", ce_chp) or ce_chp)
+
+            ce_expansion_pct = ((ce_high - ce_low) / ce_low * 100) if (ce_high > 0 and ce_low > 0) else ce_chp
+            ce_drop_pct = ((ce_high - ce_ltp) / ce_high * 100) if (ce_high > 0 and ce_ltp > 0) else 0.0
+
+            if (ce_chp >= min_gain_pct or ce_expansion_pct >= min_gain_pct) and ce_drop_pct >= drop_threshold_pct:
+                ce_exhausted = True
+                ce_exhaustion_msg = f"POST_EXPANSION_EXHAUSTION_BLOCK ({ce_name} gained +{int(max(ce_chp, ce_expansion_pct))}% to high {round(ce_high, 1)}, now dragging {round(ce_drop_pct, 1)}% below peak). Avoid buying post-expansion chop."
+
+        if best_pe:
+            pe_name = f"{int(best_pe.get('strike', 0))} PE"
+            pe_ltp = float(best_pe.get("pe_ltp", 0.0) or 0.0)
+            pe_chp = float(best_pe.get("pe_chp", 0.0) or 0.0)
+            pe_high = float(best_pe.get("pe_high") or best_pe.get("high_price") or 0.0)
+            pe_low = float(best_pe.get("pe_low") or best_pe.get("low_price") or 0.0)
+            pe_sym = best_pe.get("pe_symbol")
+
+            if (pe_high <= 0.0 or pe_chp == 0.0) and pe_sym:
+                stats = get_option_contract_stats(pe_sym)
+                if stats:
+                    pe_high = float(stats.get("high_price", 0.0) or 0.0)
+                    pe_low = float(stats.get("low_price", 0.0) or 0.0)
+                    pe_chp = float(stats.get("chp", pe_chp) or pe_chp)
+
+            pe_expansion_pct = ((pe_high - pe_low) / pe_low * 100) if (pe_high > 0 and pe_low > 0) else pe_chp
+            pe_drop_pct = ((pe_high - pe_ltp) / pe_high * 100) if (pe_high > 0 and pe_ltp > 0) else 0.0
+
+            if (pe_chp >= min_gain_pct or pe_expansion_pct >= min_gain_pct) and pe_drop_pct >= drop_threshold_pct:
+                pe_exhausted = True
+                pe_exhaustion_msg = f"POST_EXPANSION_EXHAUSTION_BLOCK ({pe_name} gained +{int(max(pe_chp, pe_expansion_pct))}% to high {round(pe_high, 1)}, now dragging {round(pe_drop_pct, 1)}% below peak). Avoid buying post-expansion chop."
 
     # 11. Final Decision (BUY CE / BUY PE / WAIT)
     decision = "WAIT"
@@ -1511,6 +1599,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = round_ce_msg
+        elif ce_exhausted:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = ce_exhaustion_msg
         elif not pullback_occurred:
             decision = "WAIT"
             setup_score = ce_score
@@ -1560,6 +1656,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = round_pe_msg
+        elif pe_exhausted:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = pe_exhaustion_msg
         elif not pullback_occurred:
             decision = "WAIT"
             setup_score = pe_score

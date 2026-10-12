@@ -168,20 +168,24 @@ def get_signals():
 def record_paper_trade():
     """Records a manual paper trade or custom signal into the journal."""
     try:
-        from app.services.options_signal_service import record_signal
+        from app.services.options_signal_service import record_signal, has_active_signal_for_symbol
         data = request.get_json() or {}
         lots = int(data.get("lots", 1))
-        sig = record_signal(data, is_paper_trade=True, lots=lots)
+        sym = data.get("symbol", "NIFTY").upper()
+
+        if has_active_signal_for_symbol(sym):
+            return jsonify({
+                "success": False, 
+                "error": f"An active trade is already open for {sym}. Only 1 active trade allowed at a time."
+            }), 400
+
+        sig = record_signal(data, is_paper_trade=True, lots=lots, override_cooldown=True)
         if not sig:
-            from app.services.options_signal_service import has_active_signal_for_symbol, get_daily_trade_count
-            from app.services.options_engine import ENGINE_CONFIG
-            sym = data.get("symbol", "NIFTY").upper()
-            if has_active_signal_for_symbol(sym):
-                return jsonify({"success": False, "error": f"Active trade already open for {sym}. Only 1 active trade allowed."}), 400
-            max_daily = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 3)
-            if get_daily_trade_count(sym) >= max_daily:
-                return jsonify({"success": False, "error": f"Daily limit reached ({max_daily} trades for today)."}), 400
-            return jsonify({"success": False, "error": "Invalid trade parameters, missing price, or stop-loss."}), 400
+            return jsonify({
+                "success": False, 
+                "error": "Failed to log trade. Please verify that live option quotes are available."
+            }), 400
+
         return jsonify({"success": True, "signal": sig})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

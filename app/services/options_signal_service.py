@@ -1617,16 +1617,17 @@ def check_consecutive_loss_cooldown(symbol: str, now_dt: datetime | None = None)
     return False, "", 0
 
 
-def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1) -> dict | None:
+def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1, override_cooldown: bool = False) -> dict | None:
     """
     Atomically records a new signal into the journal (PAPER TRADING ONLY).
     GUARANTEES: At most one open signal (ACTIVE or TARGET_1_HIT) per index symbol.
-    - Enforces MAX_DAILY_TRADES safety limit per trading session.
+    - Enforces MAX_DAILY_TRADES safety limit per trading session (unless manual override).
     - Runs in simulated/paper trading mode (no real broker order execution).
     - Prevents flip trades (e.g. PE while CE is open).
-    - Enforces 15-minute cooldown following a closed trade.
+    - Enforces cooldown following a closed trade (unless manual override).
     - Rejects signals with missing or fabricated bid/ask quotes.
     - Sets immutable initial_stop_loss column once at signal creation.
+    - Automatically calculates Stop Loss, Target 1, Target 2 if missing.
     - Handles sqlite3.IntegrityError as a clean suppression.
     """
     symbol = signal_data.get("symbol", "NIFTY").upper()
@@ -1635,7 +1636,7 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
     from app.services.options_engine import ENGINE_CONFIG
     max_daily_trades = ENGINE_CONFIG.get("MAX_DAILY_TRADES", 25)
     today_count = get_daily_trade_count(symbol)
-    if today_count >= max_daily_trades:
+    if not override_cooldown and today_count >= max_daily_trades:
         log.warning(f"Blocked signal for {symbol}: MAX_DAILY_TRADES ({max_daily_trades}) reached for today ({today_count} trades).")
         return None
 
@@ -1668,14 +1669,26 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
     entry_price = ask_at_entry
     spread_paid = round(max(0.0, ask_at_entry - bid_at_entry), 2)
 
+    # Automatic calculation of Stop-Loss, Target 1, Target 2 if missing or non-positive
     stop_loss = float(signal_data.get("stop_loss", 0.0) or 0.0)
-    if stop_loss <= 0.0:
-        log.warning(f"Rejected signal record for {symbol} {contract_name}: missing or non-positive stop_loss ({stop_loss}).")
-        return None
-    initial_stop_loss = stop_loss  # Immutable baseline for R-multiple denominator
+    target_1 = float(signal_data.get("target_1", 0.0) or 0.0)
+    target_2 = float(signal_data.get("target_2", 0.0) or 0.0)
 
-    target_1 = float(signal_data.get("target_1", 0.0))
-    target_2 = float(signal_data.get("target_2", 0.0))
+    if stop_loss <= 0.0:
+        max_risk = float(ENGINE_CONFIG.get("NIFTY_MAX_OPTION_RISK_POINTS", 8.0))
+        min_risk = float(ENGINE_CONFIG.get("NIFTY_MIN_OPTION_RISK_POINTS", 3.0))
+        risk_pts = min(max_risk, max(min_risk, round(entry_price * 0.15, 1)))
+        stop_loss = round(max(0.05, entry_price - risk_pts), 2)
+        log.info(f"Auto-calculated stop_loss = {stop_loss} ({risk_pts} pts risk) for {symbol} {contract_name} @ {entry_price}")
+
+    initial_stop_loss = stop_loss  # Immutable baseline for R-multiple denominator
+    risk_pts = max(1.0, entry_price - initial_stop_loss)
+
+    if target_1 <= 0.0:
+        target_1 = round(entry_price + (risk_pts * 1.5), 2)
+    if target_2 <= 0.0:
+        target_2 = round(entry_price + (risk_pts * 2.5), 2)
+
     risk_reward = signal_data.get("risk_reward", "1:2.0")
     setup_score = int(signal_data.get("setup_score", 0))
     trigger_reason = signal_data.get("reason") or signal_data.get("trigger_reason", "")
@@ -1754,11 +1767,12 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
                 return None
 
             # 2. Check Consecutive Loss Cooldown & Rapid Cooldown
-            in_loss_cd, loss_cd_msg, _ = check_consecutive_loss_cooldown(symbol, now)
-            if in_loss_cd:
-                log.info(f"[SUPPRESSED: CONSECUTIVE_LOSS_COOLDOWN] {symbol} {contract_name} blocked — {loss_cd_msg}")
-                conn.execute("ROLLBACK")
-                return None
+            if not override_cooldown:
+                in_loss_cd, loss_cd_msg, _ = check_consecutive_loss_cooldown(symbol, now)
+                if in_loss_cd:
+                    log.info(f"[SUPPRESSED: CONSECUTIVE_LOSS_COOLDOWN] {symbol} {contract_name} blocked — {loss_cd_msg}")
+                    conn.execute("ROLLBACK")
+                    return None
 
             recent = conn.execute("""
                 SELECT id, status, updated_at, exit_time, created_at
@@ -1767,7 +1781,7 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1)
                 ORDER BY id DESC LIMIT 1
             """, (symbol,)).fetchone()
 
-            if recent:
+            if recent and not override_cooldown:
                 ref_time_str = recent["exit_time"] or recent["updated_at"] or recent["created_at"]
                 try:
                     prev_dt = datetime.strptime(ref_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
@@ -2002,18 +2016,37 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # Progressive Dynamic Trailing Stop Loss
         # -------------------------------------------------------------
         trailed_sl = sl
+        initial_sl_calc = float(sig.get("initial_stop_loss") or sl)
+        initial_risk_pts = max(1.0, entry - initial_sl_calc) if entry > initial_sl_calc else max(1.0, entry * 0.15)
+        r_multiple = round(mfe_pts / initial_risk_pts, 3) if initial_risk_pts > 0 else 0.0
 
-        # Tier 1: Early Breakeven Protection (+0.4R / +4% / +5 pts profit -> Move SL to Cost + 0.50 buffer)
-        # Immunizes option buyer against RIGHT_THEN_REVERSED reversals
-        if mfe_pct >= 4.0 or (highest - entry) >= ((t1 - entry) * 0.40) or (highest - entry) >= 5.0:
+        # Stepped Ratchet Trail (3-for-1 Ratchet):
+        # For every +3.0 pts favorable movement, ratchet SL upward by +1.0 pt from initial SL
+        # Steadily trims downside risk on minor momentum expansion without choking on noise
+        if mfe_pts >= 3.0:
+            ratchet_steps = int(mfe_pts // 3.0)
+            ratchet_sl = round(initial_sl_calc + (ratchet_steps * 1.0), 2)
+            trailed_sl = max(trailed_sl, ratchet_sl)
+
+        # Automated Trailing Break-Even (TSL_BE_0_8_R):
+        # Immunizes option buyer against RIGHT_THEN_REVERSED reversals once excursion reaches >= +0.75R / +0.8R
+        # or early excursion (+4% / +0.40 of (T1 - entry) / +5 pts profit).
+        # Move SL to Cost + 0.50 buffer to secure break-even against slippage and statutory costs.
+        if (
+            r_multiple >= 0.75
+            or (highest - entry) >= (initial_risk_pts * 0.75)
+            or mfe_pct >= 4.0
+            or (highest - entry) >= ((t1 - entry) * 0.40)
+            or (highest - entry) >= 5.0
+        ):
             trailed_sl = max(trailed_sl, round(entry + 0.5, 2))
 
-        # Tier 2: Lock in Moderate Gains (+10% / +0.7R profit -> Move SL to Cost + 2.0 pts)
-        if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.70):
+        # Tier 2: Lock in Moderate Gains (+10% / +1.0R profit / 70% to T1 -> Move SL to Cost + 2.0 pts)
+        if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.70) or r_multiple >= 1.0:
             trailed_sl = max(trailed_sl, round(entry + 2.0, 2))
 
-        # Tier 3: Lock in Substantial Gains (+20% / +1.0R profit -> Move SL to +10%)
-        if mfe_pct >= 20.0 or (highest - entry) >= (t1 - entry):
+        # Tier 3: Lock in Substantial Gains (+20% / +1.5R profit / at T1 -> Move SL to +10%)
+        if mfe_pct >= 20.0 or (highest - entry) >= (t1 - entry) or r_multiple >= 1.5:
             trailed_sl = max(trailed_sl, round(entry * 1.10, 2))
 
         t1_eval_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp
@@ -2032,7 +2065,6 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # -------------------------------------------------------------
         # Exits Evaluation (Exits filled at BID)
         # -------------------------------------------------------------
-        initial_sl_calc = float(sig.get("initial_stop_loss") or sl)
         has_trailed = (trailed_sl > initial_sl_calc + 0.1) or (curr_status == "TARGET_1_HIT")
         terminal_exit_reached = False
 

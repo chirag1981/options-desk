@@ -358,6 +358,11 @@ def fetch_option_chain_data(
                     pe_chg_oi = int(pe.get("oich", 0) or 0)
                     pe_vol = int(pe.get("volume", 0) or 0)
 
+                    ce_chp = float(ce.get("ltpchp", 0.0) or 0.0)
+                    pe_chp = float(pe.get("ltpchp", 0.0) or 0.0)
+                    ce_sym = ce.get("symbol")
+                    pe_sym = pe.get("symbol")
+
                     # Compute IV & Delta
                     ce_calc_price = (ce_bid + ce_ask) / 2.0 if (ce_bid > 0 and ce_ask > 0) else ce_ltp
                     pe_calc_price = (pe_bid + pe_ask) / 2.0 if (pe_bid > 0 and pe_ask > 0) else pe_ltp
@@ -378,6 +383,8 @@ def fetch_option_chain_data(
                         "ce_volume": ce_vol,
                         "ce_iv": ce_iv,
                         "ce_delta": ce_delta,
+                        "ce_symbol": ce_sym,
+                        "ce_chp": ce_chp,
                         "pe_ltp": round(pe_ltp, 2),
                         "pe_bid": round(pe_bid, 2) if pe_bid > 0 else None,
                         "pe_ask": round(pe_ask, 2) if pe_ask > 0 else None,
@@ -386,6 +393,8 @@ def fetch_option_chain_data(
                         "pe_volume": pe_vol,
                         "pe_iv": pe_iv,
                         "pe_delta": pe_delta,
+                        "pe_symbol": pe_sym,
+                        "pe_chp": pe_chp,
                     })
 
                 if chain_records:
@@ -491,5 +500,52 @@ def _generate_option_chain_records(symbol: str, cfg: dict, spot: float, expiry: 
             "pe_volume": 110000,
             "pe_iv": base_iv,
             "pe_delta": round(norm_cdf(d1) - 1.0, 2),
+            "ce_symbol": None,
+            "ce_chp": 0.0,
+            "pe_symbol": None,
+            "pe_chp": 0.0,
         })
     return chain
+
+
+_OPTION_STATS_CACHE: dict[str, dict] = {}
+_OPTION_STATS_LOCK = threading.Lock()
+
+def get_option_contract_stats(fyers_symbol: str) -> dict | None:
+    """
+    Fetches real-time intraday quote statistics (high_price, low_price, open_price, chp)
+    from FYERS for an option contract. Cached for 30s to minimize API overhead.
+    """
+    if not fyers_symbol:
+        return None
+
+    now = datetime.now(IST)
+    with _OPTION_STATS_LOCK:
+        if cached := _OPTION_STATS_CACHE.get(fyers_symbol):
+            if (now - cached["time"]).total_seconds() < 30.0:
+                return cached["data"]
+
+    fyers = get_fyers_model()
+    if not fyers:
+        return None
+
+    try:
+        res = fyers.quotes(data={"symbols": fyers_symbol})
+        items = res.get("d", [])
+        if items:
+            v = items[0].get("v", {})
+            stats = {
+                "high_price": float(v.get("high_price", 0.0) or 0.0),
+                "low_price": float(v.get("low_price", 0.0) or 0.0),
+                "open_price": float(v.get("open_price", 0.0) or 0.0),
+                "prev_close": float(v.get("prev_close_price", 0.0) or 0.0),
+                "chp": float(v.get("chp", 0.0) or 0.0),
+                "lp": float(v.get("lp", 0.0) or 0.0),
+            }
+            with _OPTION_STATS_LOCK:
+                _OPTION_STATS_CACHE[fyers_symbol] = {"time": now, "data": stats}
+            return stats
+    except Exception as e:
+        log.warning(f"Error fetching stats for option {fyers_symbol}: {e}")
+    return None
+

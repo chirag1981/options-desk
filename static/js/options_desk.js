@@ -1466,30 +1466,54 @@ document.addEventListener("DOMContentLoaded", () => {
             const tradePlan = optBuying.trade_plan || {};
             const bias = state.lastData.market_bias || {};
 
-            if (!tradePlan.entry_price || tradePlan.entry_price <= 0) {
+            let entryPrice = parseFloat(tradePlan.entry_price || tradePlan.ask_at_entry || optBuying.entry_price || 0);
+            let strike = tradePlan.strike;
+            let contractName = tradePlan.contract_name || optBuying.selected_option || "";
+            let tradeType = tradePlan.type || (contractName.includes("PE") || (optBuying.decision && optBuying.decision.includes("PE")) ? "PE" : "CE");
+            let expiry = tradePlan.expiry || (state.lastData.meta ? state.lastData.meta.expiry : "");
+
+            // Fallback: If tradePlan is missing, pull ATM contract from chain
+            if (entryPrice <= 0 || !strike) {
+                const chain = state.lastData.detailed_chain || state.lastData.chain || [];
+                const atmStrike = state.lastData.key_levels ? state.lastData.key_levels.atm_strike : 0;
+                const row = chain.find(r => Math.abs(r.strike - atmStrike) < 1) || chain[0];
+                if (row) {
+                    strike = row.strike;
+                    const isPe = tradeType === "PE";
+                    entryPrice = parseFloat((isPe ? row.pe_ask || row.pe_ltp : row.ce_ask || row.ce_ltp) || 0);
+                    contractName = `${strike} ${tradeType}`;
+                }
+            }
+
+            if (entryPrice <= 0) {
                 alert("No active option contract price available to trade.");
                 return;
             }
 
             const lots = parseInt(paperLotsInput ? paperLotsInput.value : "1", 10) || 1;
-            const entryPrice = parseFloat(tradePlan.entry_price || tradePlan.ask_at_entry || 0);
-            const bidPrice = parseFloat(tradePlan.bid_at_entry !== undefined ? tradePlan.bid_at_entry : (entryPrice - (tradePlan.spread_paid || 0.5)));
-            const askPrice = parseFloat(tradePlan.ask_at_entry !== undefined ? tradePlan.ask_at_entry : entryPrice);
+            const bidPrice = parseFloat(tradePlan.bid_at_entry !== undefined && tradePlan.bid_at_entry > 0 ? tradePlan.bid_at_entry : Math.max(0.05, entryPrice - (tradePlan.spread_paid || 0.5)));
+            const askPrice = parseFloat(tradePlan.ask_at_entry !== undefined && tradePlan.ask_at_entry > 0 ? tradePlan.ask_at_entry : entryPrice);
+
+            // Automatically execute with SL, T1, and T2
+            const riskPts = parseFloat(tradePlan.risk_pts) || Math.max(3.0, Math.min(8.0, Math.round(entryPrice * 0.15 * 10) / 10));
+            const stopLoss = parseFloat(tradePlan.stop_loss) > 0 ? parseFloat(tradePlan.stop_loss) : Math.max(0.05, Math.round((entryPrice - riskPts) * 100) / 100);
+            const target1 = parseFloat(tradePlan.target_1) > 0 ? parseFloat(tradePlan.target_1) : Math.round((entryPrice + (riskPts * 1.5)) * 100) / 100;
+            const target2 = parseFloat(tradePlan.target_2) > 0 ? parseFloat(tradePlan.target_2) : Math.round((entryPrice + (riskPts * 2.5)) * 100) / 100;
 
             const payload = {
                 symbol: state.symbol,
-                type: tradePlan.type || (optBuying.decision && optBuying.decision.includes("PE") ? "PE" : "CE"),
-                contract_name: tradePlan.contract_name,
-                strike: tradePlan.strike,
-                expiry: tradePlan.expiry,
+                type: tradeType,
+                contract_name: contractName,
+                strike: strike,
+                expiry: expiry,
                 spot_price: bias.spot_price,
                 entry_price: entryPrice,
                 bid_at_entry: bidPrice,
                 ask_at_entry: askPrice,
-                spread_paid: tradePlan.spread_paid || (askPrice - bidPrice),
-                stop_loss: tradePlan.stop_loss,
-                target_1: tradePlan.target_1,
-                target_2: tradePlan.target_2,
+                spread_paid: tradePlan.spread_paid || Math.round((askPrice - bidPrice) * 100) / 100,
+                stop_loss: stopLoss,
+                target_1: target1,
+                target_2: target2,
                 risk_reward: tradePlan.risk_reward || "1:2.0",
                 setup_score: optBuying.setup_score || 0,
                 reason: optBuying.reason || "Manual Paper Trade Setup",
@@ -1516,7 +1540,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const res = await resp.json();
                 if (res.success) {
                     if (paperTradeMsg) {
-                        paperTradeMsg.textContent = `✓ Logged ${tradePlan.contract_name} (${lots} Lot)!`;
+                        paperTradeMsg.textContent = `✓ Logged ${contractName} (${lots} Lot)!`;
                         setTimeout(() => { paperTradeMsg.textContent = ""; }, 4000);
                     }
                     await loadSignalsData();
@@ -1839,10 +1863,10 @@ document.addEventListener("DOMContentLoaded", () => {
     loadTradeAnalysis();
     startCountdown();
 
-    // Dedicated 5-second auto-refresh for Signal Tracker & Journal live prices & P&L
+    // Dedicated 30-second auto-refresh for Signal Tracker & Journal live prices & P&L
     setInterval(() => {
         loadSignalsData();
-    }, 5000);
+    }, 30000);
 });
 
 

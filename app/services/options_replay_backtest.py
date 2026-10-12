@@ -257,6 +257,17 @@ def replay_trade_on_ticks(trade: dict, ticks: list[dict], params: dict | None = 
             sim_exit = bid
             break
 
+        # Stepped Ratchet Trail (3-for-1 Ratchet):
+        # Move SL up by +1.0 pt for every +3.0 pts favorable movement
+        if not t1_reached and (ltp - entry) >= 3.0:
+            ratchet_steps = int((ltp - entry) // 3.0)
+            trailed_sl = max(trailed_sl, sim_sl + (ratchet_steps * 1.0))
+
+        # Automated Trailing Break-Even (TSL_BE_0_8_R):
+        # Move SL to Entry + 0.50 buffer once excursion reaches >= +0.75R
+        if not t1_reached and (ltp - entry) >= (0.75 * initial_risk):
+            trailed_sl = max(trailed_sl, entry + 0.5)
+
         # T1 trigger evaluated on ltp (matching journal)
         if ltp >= sim_t1 and not t1_reached:
             t1_reached = True

@@ -224,3 +224,111 @@ class TestActionablePreventions(unittest.TestCase):
         self.assertEqual(updated_exit[0]["status"], "TSL_HIT")
         self.assertEqual(updated_exit[0]["exit_reason"], "TRAILING_STOP_HIT")
         self.assertGreaterEqual(updated_exit[0]["points_pnl"], 0.0)
+
+    def test_automated_trailing_break_even_at_0_8_r(self):
+        """Reaching >= +0.75R to +0.8R excursion automatically trails SL to Entry + 0.50."""
+        future_exp = (datetime.now(IST) + timedelta(days=7)).strftime("%d-%b-%Y")
+        # Entry = 200.0, Initial SL = 180.0 -> Risk = 20 pts. 0.8R = +16 pts (price = 216.0)
+        sig_data = {
+            "symbol": "NIFTY",
+            "type": "CE",
+            "contract_name": "22500 CE",
+            "strike": 22500.0,
+            "expiry": future_exp,
+            "spot_price": 22480.0,
+            "entry_price": 200.0,
+            "ask_at_entry": 200.0,
+            "bid_at_entry": 199.5,
+            "stop_loss": 180.0,
+            "target_1": 230.0,
+            "target_2": 250.0,
+            "lots": 1,
+            "lot_size": 65,
+        }
+        sig = record_signal(sig_data, is_paper_trade=False)
+        self.assertIsNotNone(sig)
+
+        # Price hits 216.0 (+16 pts = 0.8R excursion)
+        market_cache_rally = {
+            "NIFTY": {
+                "spot_price": 22520.0,
+                "chain": [{"strike": 22500, "ce_ltp": 216.0, "ce_bid": 215.5, "ce_ask": 216.5}],
+            }
+        }
+        now_time = datetime.now(IST)
+        updated = update_active_signals(market_data_cache=market_cache_rally, now_dt=now_time)
+        self.assertEqual(len(updated), 1)
+        self.assertGreaterEqual(updated[0]["stop_loss"], 200.50)
+
+    def test_round_strike_tightened_filter_under_round_and_century_levels(self):
+        """Expanded buffer (within 30 pts) and round century strikes block CE buying."""
+        # Spot at 22475 (within 25 pts under 22500 - inside 30 pt expanded buffer)
+        data = self._sample_chain_data(spot=22475.0, entry_price=100.0, is_ce=True, strike=22500)
+        res = analyze_option_desk(data, has_active_trade=False)
+        self.assertEqual(res["option_buying"]["decision"], "WAIT")
+        self.assertIn("MAJOR_ROUND_RESISTANCE_BLOCK", res["option_buying"]["reason"])
+        self.assertIn("22500", res["option_buying"]["reason"])
+
+        # Spot at 22385 (within 15 pts under 22400 century strike)
+        data_century = self._sample_chain_data(spot=22385.0, entry_price=100.0, is_ce=True, strike=22400)
+        res_century = analyze_option_desk(data_century, has_active_trade=False)
+        self.assertEqual(res_century["option_buying"]["decision"], "WAIT")
+        self.assertIn("MAJOR_ROUND_RESISTANCE_BLOCK", res_century["option_buying"]["reason"])
+        self.assertIn("22400", res_century["option_buying"]["reason"])
+
+    def test_stepped_ratchet_trail_3_for_1(self):
+        """Moving +3.0 pts favorably ratchets SL upward by +1.0 pt from initial SL."""
+        future_exp = (datetime.now(IST) + timedelta(days=7)).strftime("%d-%b-%Y")
+        sig_data = {
+            "symbol": "NIFTY",
+            "type": "CE",
+            "contract_name": "22500 CE",
+            "strike": 22500.0,
+            "expiry": future_exp,
+            "spot_price": 22480.0,
+            "entry_price": 200.0,
+            "ask_at_entry": 200.0,
+            "bid_at_entry": 199.5,
+            "stop_loss": 180.0,
+            "target_1": 230.0,
+            "target_2": 250.0,
+            "lots": 1,
+            "lot_size": 65,
+        }
+        sig = record_signal(sig_data, is_paper_trade=False)
+        self.assertIsNotNone(sig)
+
+        # Price ticks up by +3.2 pts (from 200 to 203.2)
+        market_cache = {
+            "NIFTY": {
+                "spot_price": 22490.0,
+                "chain": [{"strike": 22500, "ce_ltp": 203.2, "ce_bid": 203.0, "ce_ask": 203.5}],
+            }
+        }
+        now_time = datetime.now(IST)
+        updated = update_active_signals(market_data_cache=market_cache, now_dt=now_time)
+        self.assertEqual(len(updated), 1)
+        # Verify SL ratcheted from 180.0 to at least 181.0 (+1 pt)
+        self.assertGreaterEqual(updated[0]["stop_loss"], 181.0)
+
+    def test_post_expansion_exhaustion_blocks_buying_exhausted_contract(self):
+        """Contracts with massive intraday expansion (>=70%) dragging >18% below high trigger exhaustion gate."""
+        # Spot bearish (favouring PE), but PE contract already exploded and is currently 21% off high
+        # e.g., 22400 PE: high = 122.4, low = 35.0 (+250% gain), current ltp = 96.0 (drop = 21.5%)
+        data = self._sample_chain_data(spot=22380.0, entry_price=96.0, is_ce=False, strike=22400)
+        # Overwrite PE parameters in chain[0] to reflect exhausted contract
+        row = data["chain"][0]
+        row["pe_ltp"] = 96.0
+        row["pe_bid"] = 95.8
+        row["pe_ask"] = 96.2
+        row["pe_high"] = 122.4
+        row["pe_low"] = 35.0
+        row["pe_chp"] = 85.0
+
+        res = analyze_option_desk(data, has_active_trade=False)
+        self.assertEqual(res["option_buying"]["decision"], "WAIT")
+        self.assertIn("POST_EXPANSION_EXHAUSTION_BLOCK", res["option_buying"]["reason"])
+        self.assertIn("22400 PE", res["option_buying"]["reason"])
+
+
+
