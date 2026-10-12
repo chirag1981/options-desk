@@ -17,6 +17,7 @@ from app.services.fyers_auth import (
     get_fyers_index_ohlc_details,
     get_fyers_model,
     get_fyers_token,
+    invalidate_cached_token,
     FYERS_INDEX_SYMBOLS,
 )
 
@@ -213,6 +214,9 @@ def get_upcoming_expiries(symbol: str = "NIFTY") -> list[str]:
                         "fetch_time": now
                     }
                     return sorted_expiries
+            elif oc_resp.get("code") in (-16, 401) or "invalid or expired" in str(oc_resp.get("message", "")).lower():
+                log.warning(f"FYERS expiries fetch token expired/invalid (code {oc_resp.get('code')}); invalidating cached token.")
+                invalidate_cached_token()
         except Exception as e:
             log.warning(f"Failed to fetch expiries from FYERS for {sym}: {e}")
 
@@ -387,6 +391,9 @@ def fetch_option_chain_data(
                 if chain_records:
                     data_status = "LIVE"
                     source = "FYERS_LIVE"
+            elif oc_resp.get("code") in (-16, 401) or "invalid or expired" in str(oc_resp.get("message", "")).lower():
+                log.warning(f"FYERS optionchain token expired/invalid (code {oc_resp.get('code')}); invalidating cached token.")
+                invalidate_cached_token()
 
         except Exception as e:
             log.warning(f"Error fetching FYERS option chain for {symbol}: {e}")

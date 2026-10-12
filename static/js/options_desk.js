@@ -10,8 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
         symbol: "NIFTY",
         expiry: "",
         strikeRange: 5, // Default ATM ± 5 strikes (5 up, 5 down)
-        refreshIntervalSec: 300, // 5 mins default
-        timerRemaining: 300,
+        refreshIntervalSec: 180, // 3 mins default
+        timerRemaining: 180,
         timerId: null,
         isFetching: false,
         lastData: null,
@@ -982,6 +982,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnRefresh) {
         btnRefresh.addEventListener("click", () => {
             loadOptionsDeskData(true);
+            startCountdown();
         });
     }
 
@@ -1808,29 +1809,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Trending OI Interval Selection & Timer Sync
+    // Trending OI Interval Selection (Dedicated to Trending OI table, preserves 3m desk cycle)
     if (trendingIntervalSelect) {
         trendingIntervalSelect.addEventListener("change", () => {
             const intervalVal = parseInt(trendingIntervalSelect.value, 10) || 5;
-            state.refreshIntervalSec = intervalVal * 60;
-            startCountdown();
 
             fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`)
                 .then(res => res.json())
                 .then(res => {
                     if (res.success && res.data) {
-                        const spot = parseFloat(document.getElementById("spot-price")?.textContent?.replace(/,/g, "") || "0");
-                        renderTrendingOiTable(res.data, null, spot);
+                        const spot = state.lastData?.market_bias?.spot_price || parseFloat(document.getElementById("spot-price-display")?.textContent?.replace(/,/g, "") || "0");
+                        const atm = state.lastData?.key_levels?.atm_strike || null;
+                        if (state.lastData) {
+                            state.lastData.trending_oi_timeseries = res.data;
+                        }
+                        renderTrendingOiTable(res.data, atm, spot);
                     }
                 })
                 .catch(err => console.error("Error updating trending OI interval:", err));
         });
     }
 
-    // Initial Load & Start Timers
-    const initialInterval = parseInt(trendingIntervalSelect?.value, 10) || 5;
-    state.refreshIntervalSec = initialInterval * 60;
-    state.timerRemaining = state.refreshIntervalSec;
+    // Initial Load & Start Timers (Desk auto-refresh is strictly 3 minutes / 180s)
+    state.refreshIntervalSec = 180;
+    state.timerRemaining = 180;
 
     loadOptionsDeskData(false);
     loadSignalsData();

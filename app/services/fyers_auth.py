@@ -25,6 +25,11 @@ log = logging.getLogger("fyers_auth")
 IST = ZoneInfo("Asia/Kolkata")
 _auth_lock = threading.Lock()
 
+_last_auth_attempt_time: float = 0.0
+_last_auth_error: str | None = None
+_AUTH_COOLDOWN_SECONDS: int = 60
+_AUTH_429_COOLDOWN_SECONDS: int = 120
+
 TOKEN_CACHE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "instance"))
 TOKEN_CACHE_FILE = os.path.join(TOKEN_CACHE_DIR, "fyers_token.json")
 
@@ -48,6 +53,16 @@ def get_cached_token() -> str | None:
     return None
 
 
+def invalidate_cached_token() -> None:
+    """Removes cached token file when token is revoked or expired."""
+    try:
+        if os.path.exists(TOKEN_CACHE_FILE):
+            os.remove(TOKEN_CACHE_FILE)
+            log.info("Invalidated FYERS cached token.")
+    except Exception as e:
+        log.warning(f"Error removing cached token: {e}")
+
+
 def save_token(token: str, fyers_id: str) -> None:
     """Saves session token to instance/fyers_token.json with timestamp."""
     os.makedirs(TOKEN_CACHE_DIR, exist_ok=True)
@@ -67,7 +82,10 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
     """
     Performs 100% Automated Headless TOTP login with FYERS API.
     Returns (access_token, error_message).
+    Protects against 429 Too Many Requests cascades via intelligent cooldown.
     """
+    global _last_auth_attempt_time, _last_auth_error
+
     fy_id = os.getenv("FYERS_ID", "").strip(" \"'")
     pin = os.getenv("PIN", "").strip(" \"'")
     app_id = os.getenv("APP_ID", "").strip(" \"'")
@@ -94,6 +112,17 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
         if cached:
             return cached, None
 
+        # Check cooldown to prevent 429 Too Many Requests spam
+        now = time.time()
+        cooldown = _AUTH_429_COOLDOWN_SECONDS if (_last_auth_error and "429" in _last_auth_error) else _AUTH_COOLDOWN_SECONDS
+        elapsed = now - _last_auth_attempt_time
+        if elapsed < cooldown:
+            remaining = int(cooldown - elapsed)
+            msg = f"FYERS authentication in cooldown ({remaining}s remaining to prevent rate-limiting). Previous error: {_last_auth_error}"
+            log.warning(msg)
+            return None, msg
+
+        _last_auth_attempt_time = now
         log.info("Initiating automated zero-click FYERS headless login...")
 
         session = requests.Session()
@@ -105,10 +134,12 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
             # Step 1: Send Login OTP
             r1 = session.post("https://api-t2.fyers.in/vagator/v2/send_login_otp", json={"fy_id": fy_id, "app_id": "2"}, timeout=10)
             if r1.status_code != 200:
-                return None, f"Step 1 send_login_otp failed ({r1.status_code}): {r1.text}"
+                _last_auth_error = f"Step 1 send_login_otp failed ({r1.status_code}): {r1.text}"
+                return None, _last_auth_error
             req_key = r1.json().get("request_key")
             if not req_key:
-                return None, f"Step 1 did not return request_key: {r1.text}"
+                _last_auth_error = f"Step 1 did not return request_key: {r1.text}"
+                return None, _last_auth_error
 
             # Step 2: Verify TOTP (with clock-drift retry)
             req_key2 = None
@@ -120,16 +151,19 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
                     break
 
             if not req_key2:
-                return None, f"Step 2 verify_otp failed: {r2.text}"
+                _last_auth_error = f"Step 2 verify_otp failed: {r2.text}"
+                return None, _last_auth_error
 
             # Step 3: Verify PIN
             r3 = session.post("https://api-t2.fyers.in/vagator/v2/verify_pin", json={"request_key": req_key2, "identity_type": "pin", "identifier": pin}, timeout=10)
             if r3.status_code != 200:
-                return None, f"Step 3 verify_pin failed ({r3.status_code}): {r3.text}"
+                _last_auth_error = f"Step 3 verify_pin failed ({r3.status_code}): {r3.text}"
+                return None, _last_auth_error
             r3_data = r3.json().get("data", {})
             bearer_token = r3_data.get("access_token") or r3_data.get("token_result", {}).get("access_token")
             if not bearer_token:
-                return None, f"Step 3 missing bearer access_token: {r3.text}"
+                _last_auth_error = f"Step 3 missing bearer access_token: {r3.text}"
+                return None, _last_auth_error
 
             # Step 4: Request Auth Code URL
             headers = {"Authorization": f"Bearer {bearer_token}"}
@@ -148,13 +182,15 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
             r4 = session.post("https://api-t1.fyers.in/api/v3/token", headers=headers, json=payload, timeout=10)
             auth_url = r4.json().get("Url")
             if not auth_url:
-                return None, f"Step 4 failed to obtain auth_url: {r4.text}"
+                _last_auth_error = f"Step 4 failed to obtain auth_url: {r4.text}"
+                return None, _last_auth_error
 
             parsed = urllib.parse.urlparse(auth_url)
             qs = urllib.parse.parse_qs(parsed.query)
             auth_code = qs.get("auth_code", [""])[0]
             if not auth_code:
-                return None, f"Step 4 URL missing auth_code parameter: {auth_url}"
+                _last_auth_error = f"Step 4 URL missing auth_code parameter: {auth_url}"
+                return None, _last_auth_error
 
             # Step 5: Generate API v3 Access Token
             fyers_session = fyersModel.SessionModel(
@@ -169,13 +205,16 @@ def generate_fyers_access_token() -> tuple[str | None, str | None]:
 
             access_token = gen_token_resp.get("access_token")
             if not access_token:
-                return None, f"Step 5 token generation failed: {gen_token_resp.get('message') or gen_token_resp}"
+                _last_auth_error = f"Step 5 token generation failed: {gen_token_resp.get('message') or gen_token_resp}"
+                return None, _last_auth_error
 
+            _last_auth_error = None
             save_token(access_token, fy_id)
             log.info(f"Automated FYERS login SUCCESSFUL for user {fy_id}")
             return access_token, None
 
         except Exception as e:
+            _last_auth_error = str(e)
             log.error(f"FYERS automated login exception: {e}")
             return None, str(e)
 
@@ -233,6 +272,9 @@ def get_fyers_index_spot(symbol: str = "NIFTY") -> tuple[float, float, str] | No
                 chg_pct = float(item.get("chp", 0.0) or 0.0)
                 if ltp > 0:
                     return ltp, chg_pct, "LIVE"
+        elif resp.get("code") in (-16, 401) or "invalid or expired" in str(resp.get("message", "")).lower():
+            log.warning(f"FYERS session token expired or invalid (code {resp.get('code')}); invalidating cached token.")
+            invalidate_cached_token()
     except Exception as e:
         log.warning(f"FYERS spot quote error for {symbol}: {e}")
     return None
@@ -274,6 +316,9 @@ def get_fyers_index_ohlc_details(symbol: str = "NIFTY") -> dict | None:
                         "prev_close": prev_close if prev_close > 0 else (round(ltp / (1.0 + chg_pct / 100.0), 2) if chg_pct != -100 else ltp),
                         "status": "LIVE"
                     }
+        elif resp.get("code") in (-16, 401) or "invalid or expired" in str(resp.get("message", "")).lower():
+            log.warning(f"FYERS session token expired or invalid (code {resp.get('code')}); invalidating cached token.")
+            invalidate_cached_token()
     except Exception as e:
         log.warning(f"FYERS spot quote error for {symbol}: {e}")
     return None
@@ -301,6 +346,9 @@ def get_fyers_option_ltp(symbol: str, strike: float, signal_type: str, expiry: s
                     ltp = float(c.get("ltp", 0.0) or 0.0)
                     if ltp > 0:
                         return ltp
+        elif oc.get("code") in (-16, 401) or "invalid or expired" in str(oc.get("message", "")).lower():
+            log.warning(f"FYERS session token expired or invalid (code {oc.get('code')}); invalidating cached token.")
+            invalidate_cached_token()
     except Exception as e:
         log.warning(f"FYERS option LTP fetch error for {symbol} {strike} {signal_type}: {e}")
     return None
