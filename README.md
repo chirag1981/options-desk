@@ -18,20 +18,33 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
 
 ### 2. ⚡ Automated Signal Tracker & Paper Trading Journal
 * **Selective Option Buying Flow:** Triggers directional CE / PE trade plans (Entry, SL, T1, T2, R:R) upon multi-factor confirmation (Bias Score ≥ 60%, level breakout/breakdown, momentum, real bid/ask, and 2 consecutive cycle confirmations). Setup quality score (0–100) is tracked in telemetry.
-* **🛡️ Dynamic Trailing Stop-Loss (TSL):**
-  * When profit reaches +10% or 50% to Target 1: Stop-Loss ratchets to `Entry + 1 pt` (Guaranteed Breakeven).
-  * When profit reaches +20% or 80% to Target 1: Stop-Loss locks in +10% gain (`Entry × 1.10`).
-  * When Target 1 is reached: Status updates to `TARGET_1_HIT` and Stop-Loss ratchets to `Entry + 0.5 × (Target 1 - Entry)`.
-  * Beyond Target 1: Stop-Loss ratchets dynamically: `Target 1 + 0.5 × (Highest - Target 1)`.
-* **🎯 50% Partial Profit Booking:** Locks in 50% realized gains at Target 1, while allowing the remaining 50% to ride risk-free toward Target 2 (`TARGET_2_HIT` / `🛡️ T1 BOOKED & TSL`).
+* **🛡️ Post-Expansion Exhaustion Filter:**
+  * Blocks late-entry option buying into exhausted contracts that already surged $>70\%$ intraday and are dragging $>18\%$ below their peaks.
+  * Protects option buyers from entering midday distribution traps and decaying premiums.
+* **🛡️ Tighter Round & Century Strike Defense:**
+  * Expanded 30-point buffer under major 500/1000 round strikes and 100-multiple century levels blocks CE buying if active Call writing or dominant OI exists.
+  * Symmetric 30-point buffer above major round/century floors blocks PE buying into Put writing walls.
+* **🛡️ 3-for-1 Stepped Ratchet & Automated Trailing Break-Even:**
+  * **3-for-1 Ratchet:** Ratchets SL upward by $+1.0\text{ pt}$ for every $+3.0\text{ pts}$ of favorable excursion from Initial SL.
+  * **Break-Even Lock:** At $\ge +0.75R$ excursion ($+6\text{ pts}$ / $+4\%$), the Stop-Loss automatically locks to $\text{Entry} + 0.50$ (risk-free trade).
+  * **Target 1 & 2 Progressive Trailing:** Locks in 50% partial profit at Target 1, ratchets SL to half of gained distance, and trails toward Target 2 (`TARGET_2_HIT` / `🛡️ T1 BOOKED & TSL`).
 * **⏱️ Dynamic Stagnation Time-Stop (`TIME_STOP_EXIT`):** Automatically closes stagnant positions (30 mins before 13:00 / 15 mins after 13:00 IST) if the trade fails to progress toward Target 1, protecting buyers from Theta decay.
 * **⏰ Strict 14:00 (2:00 PM) Cutoff:** Disables fresh option buying in the late afternoon session to eliminate late-day theta crush and squaring-off whipsaws.
-* **🔒 Anti-Whipsaw Cooldown:** Enforces a 15-minute lockout per index after exit to prevent revenge-trading.
+* **🔒 Anti-Whipsaw Cooldown & Manual Override:** Enforces a 15-minute lockout per index after 2 consecutive losses. Manual "Track / Paper Trade" button allows trader override with auto-calculated SL/T1/T2 and attaches automated trailing logic.
+* **⚡ 30-Second Signal Refresh:** Dedicated 30-second polling cycle updates active positions, trailing stops, and MFE/MAE in real time without waiting for the 3-minute macro chain cycle.
 * **🛡️ Real Bid Fills & Slippage Guard:** Entries fill strictly at live Ask prices and exits at live Bid prices, ensuring 100% realistic execution logs without mid-market distortion.
 
 ---
 
-### 3. 🤖 Autonomous Post-Trade Diagnostic Agent
+### 3. 📊 Trending OI (Oi Pulse Specification)
+* **Intraday ATM ± 5 Strikes Basket:** Continuously tracks Call vs. Put OI changes across the closest 11 strikes (5 OTM, ATM, 5 ITM).
+* **Multi-Timeframe Resampling:** Resamples intraday snapshots into **3-minute, 5-minute, or 15-minute** interval tables.
+* **14-Column Oi Pulse Table:** Displays Date, Time, Spot LTP, Day H/L Break, Net Call OI Change, Net Put OI Change, Net Difference in OI, Strength Status (BULLISH / BEARISH / WEAK with conviction dots), Direction of Change arrows, Net PCR, and Day High/Low OI difference.
+* **Permanent Daily Storage:** Snapshots are permanently saved in SQLite (`trending_oi_snapshots`) with indexing on `(symbol, trade_date)` and `(symbol, timestamp)`, enabling historical session replay and audit.
+
+---
+
+### 4. 🤖 Autonomous Post-Trade Diagnostic Agent
 * **Automated Audit Reviews:** Every closed trade is analyzed tick-by-tick upon exit and categorized into 7 mutually exclusive diagnostic classifications:
   1. `CLEAN_WIN` (Smooth move to targets with minimal drawdown)
   2. `WRONG_DIRECTION` (Failed immediately, MFE ≤ 0.05R)
@@ -44,7 +57,7 @@ A high-performance, real-time Options Analytical Terminal and Automated Paper Tr
 
 ---
 
-### 4. 📈 High-Density Option Chain & OI Trend
+### 5. 📈 High-Density Option Chain & OI Trend
 * **OI Trend Table:** Focused view of ATM ± 8 strikes with ITM/OTM color coding, strike-by-strike delta, and writing/unwinding labels.
 * **Full Interactive Option Chain:** Complete real-time strike chain with Calls and Puts metrics, live LTP, IV, Volume, and OI changes powered in sub-150ms latency by FYERS API v3.
 
