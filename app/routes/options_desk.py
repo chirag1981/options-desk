@@ -170,8 +170,16 @@ def record_paper_trade():
     try:
         from app.services.options_signal_service import record_signal, has_active_signal_for_symbol
         data = request.get_json() or {}
-        lots = int(data.get("lots", 1))
-        sym = data.get("symbol", "NIFTY").upper()
+        try:
+            lots = int(data.get("lots", 1))
+            if lots <= 0 or lots > 100:
+                lots = 1
+        except (TypeError, ValueError):
+            lots = 1
+
+        sym = str(data.get("symbol", "NIFTY")).upper().strip()
+        if sym not in INDEX_CONFIGS:
+            sym = "NIFTY"
 
         if has_active_signal_for_symbol(sym):
             return jsonify({

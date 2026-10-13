@@ -23,6 +23,7 @@ options_signal_service.DB_PATH = os.path.join(_TEST_DB_DIR, "options_signals_tes
 def _assert_isolated_db():
     """Fails fast if any test is about to touch the live database."""
     assert "instance" not in options_signal_service.DB_PATH, "Tests must not use the live DB"
+    options_signal_service.init_signal_db()
     yield
 
 

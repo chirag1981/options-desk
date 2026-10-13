@@ -122,6 +122,8 @@ class TestActionablePreventions(unittest.TestCase):
             "expiry": future_exp,
             "spot_price": 22480.0,
             "entry_price": 100.0,
+            "bid_at_entry": 99.5,
+            "ask_at_entry": 100.5,
             "stop_loss": 92.0,
             "target_1": 112.0,
             "target_2": 120.0,
@@ -130,6 +132,13 @@ class TestActionablePreventions(unittest.TestCase):
         }
         res = record_signal(sig_data, is_paper_trade=True)
         self.assertIsNone(res, "record_signal should return None when in consecutive loss cooldown")
+
+        # Verify valid breakout with setup_score >= 85 and bias bypasses cooldown
+        sig_data_breakout = dict(sig_data)
+        sig_data_breakout["setup_score"] = 90
+        sig_data_breakout["bias"] = "BULLISH"
+        res_breakout = record_signal(sig_data_breakout, is_paper_trade=True)
+        self.assertIsNotNone(res_breakout, "record_signal should allow high-conviction breakout during cooldown")
 
     def test_consecutive_loss_cooldown_expires_after_20_minutes(self):
         """Cooldown clears after 20 minutes have elapsed since the last SL_HIT."""
@@ -203,7 +212,7 @@ class TestActionablePreventions(unittest.TestCase):
                 "chain": [{"strike": 22500, "ce_ltp": 105.5, "ce_bid": 105.0, "ce_ask": 106.0}],
             }
         }
-        now_time = datetime.now(IST)
+        now_time = datetime.now(IST).replace(hour=11, minute=0, second=0)
         updated = update_active_signals(market_data_cache=market_cache_rally, now_dt=now_time)
         
         # Verify SL is trailed to at least Entry + 0.50 = 100.50
@@ -255,7 +264,7 @@ class TestActionablePreventions(unittest.TestCase):
                 "chain": [{"strike": 22500, "ce_ltp": 216.0, "ce_bid": 215.5, "ce_ask": 216.5}],
             }
         }
-        now_time = datetime.now(IST)
+        now_time = datetime.now(IST).replace(hour=11, minute=0, second=0)
         updated = update_active_signals(market_data_cache=market_cache_rally, now_dt=now_time)
         self.assertEqual(len(updated), 1)
         self.assertGreaterEqual(updated[0]["stop_loss"], 200.50)
@@ -305,7 +314,7 @@ class TestActionablePreventions(unittest.TestCase):
                 "chain": [{"strike": 22500, "ce_ltp": 203.2, "ce_bid": 203.0, "ce_ask": 203.5}],
             }
         }
-        now_time = datetime.now(IST)
+        now_time = datetime.now(IST).replace(hour=11, minute=0, second=0)
         updated = update_active_signals(market_data_cache=market_cache, now_dt=now_time)
         self.assertEqual(len(updated), 1)
         # Verify SL ratcheted from 180.0 to at least 181.0 (+1 pt)

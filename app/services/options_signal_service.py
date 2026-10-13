@@ -43,11 +43,11 @@ STALE_EXIT = "STALE_EXIT"
 CONTRACT_EXPIRED = "CONTRACT_EXPIRED"
 DUPLICATE_CLEANUP = "DUPLICATE_CLEANUP"
 
-# [APPROVAL] Paper Trade Trailing & Execution Behavior Flags (Default preserves current behavior)
+# [APPROVAL] Paper Trade Trailing & Execution Behavior Flags
 SIGNAL_EXEC_CONFIG = {
-    "USE_BID_FOR_MFE_TRAILING": False,    # [APPROVAL] Default False: LTP tracks MFE/trail ratchets; True: use Bid
-    "CREDIT_T1_T2_AT_OBSERVED_BID": False,# [APPROVAL] Default False: credit at target price; True: credit at observed Bid
-    "APPLY_CONSISTENT_SLIPPAGE": False,   # [APPROVAL] Default False: standard slippage; True: consistent slippage on SL/TSL/targets
+    "USE_BID_FOR_MFE_TRAILING": True,     # True: use Bid for MFE/trail ratchets & T1 evaluations
+    "CREDIT_T1_T2_AT_OBSERVED_BID": True, # True: credit at observed Bid
+    "APPLY_CONSISTENT_SLIPPAGE": False,   # Default False: standard slippage; True: consistent slippage on SL/TSL/targets
 }
 
 # Database Path
@@ -1127,11 +1127,15 @@ def get_trending_oi_timeseries(
             pt_dt = datetime.strptime(pt["timestamp"], "%Y-%m-%d %H:%M:%S")
             minutes_from_midnight = pt_dt.hour * 60 + pt_dt.minute
             slot = minutes_from_midnight // interval_minutes
+            slot_mins = slot * interval_minutes
+            slot_time_str = f"{slot_mins // 60:02d}:{slot_mins % 60:02d}:00"
+            pt_copy = dict(pt)
+            pt_copy["time_str"] = slot_time_str
             if slot != last_bucket_slot:
-                bucketed.append(pt)
+                bucketed.append(pt_copy)
                 last_bucket_slot = slot
             else:
-                bucketed[-1] = pt
+                bucketed[-1] = pt_copy
         except Exception:
             bucketed.append(pt)
 
@@ -1770,9 +1774,13 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1,
             if not override_cooldown:
                 in_loss_cd, loss_cd_msg, _ = check_consecutive_loss_cooldown(symbol, now)
                 if in_loss_cd:
-                    log.info(f"[SUPPRESSED: CONSECUTIVE_LOSS_COOLDOWN] {symbol} {contract_name} blocked — {loss_cd_msg}")
-                    conn.execute("ROLLBACK")
-                    return None
+                    is_valid_breakout = (signal_data.get("setup_score", 0) >= 85 and str(signal_data.get("bias", "")).upper() in ("BULLISH", "BEARISH"))
+                    if not is_valid_breakout:
+                        log.info(f"[SUPPRESSED: CONSECUTIVE_LOSS_COOLDOWN] {symbol} {contract_name} blocked — {loss_cd_msg}")
+                        conn.execute("ROLLBACK")
+                        return None
+                    else:
+                        log.info(f"[SMART_BREAKOUT_RESET] {symbol} {contract_name} allowed through cooldown on valid high-conviction breakout (Score: {signal_data.get('setup_score')})")
 
             recent = conn.execute("""
                 SELECT id, status, updated_at, exit_time, created_at
@@ -1996,8 +2004,8 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         consistent_slippage = SIGNAL_EXEC_CONFIG.get("APPLY_CONSISTENT_SLIPPAGE", False)
 
         mfe_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp
-        highest = max(float(sig["highest_price"]), mfe_quote)
-        lowest = min(float(sig["lowest_price"]), mfe_quote)
+        highest = max(float(sig["highest_price"]), mfe_quote) if has_valid_new_quote else float(sig["highest_price"])
+        lowest = min(float(sig["lowest_price"]), mfe_quote) if has_valid_new_quote else float(sig["lowest_price"])
 
         new_status = curr_status
         exit_price = sig.get("exit_price")
@@ -2020,45 +2028,46 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         initial_risk_pts = max(1.0, entry - initial_sl_calc) if entry > initial_sl_calc else max(1.0, entry * 0.15)
         r_multiple = round(mfe_pts / initial_risk_pts, 3) if initial_risk_pts > 0 else 0.0
 
-        # Stepped Ratchet Trail (3-for-1 Ratchet):
-        # For every +3.0 pts favorable movement, ratchet SL upward by +1.0 pt from initial SL
-        # Steadily trims downside risk on minor momentum expansion without choking on noise
-        if mfe_pts >= 3.0:
-            ratchet_steps = int(mfe_pts // 3.0)
-            ratchet_sl = round(initial_sl_calc + (ratchet_steps * 1.0), 2)
-            trailed_sl = max(trailed_sl, ratchet_sl)
+        if has_valid_new_quote:
+            # Stepped Ratchet Trail (3-for-1 Ratchet):
+            # For every +3.0 pts favorable movement, ratchet SL upward by +1.0 pt from initial SL
+            # Steadily trims downside risk on minor momentum expansion without choking on noise
+            if mfe_pts >= 3.0:
+                ratchet_steps = int(mfe_pts // 3.0)
+                ratchet_sl = round(initial_sl_calc + (ratchet_steps * 1.0), 2)
+                trailed_sl = max(trailed_sl, ratchet_sl)
 
-        # Automated Trailing Break-Even (TSL_BE_0_8_R):
-        # Immunizes option buyer against RIGHT_THEN_REVERSED reversals once excursion reaches >= +0.75R / +0.8R
-        # or early excursion (+4% / +0.40 of (T1 - entry) / +5 pts profit).
-        # Move SL to Cost + 0.50 buffer to secure break-even against slippage and statutory costs.
-        if (
-            r_multiple >= 0.75
-            or (highest - entry) >= (initial_risk_pts * 0.75)
-            or mfe_pct >= 4.0
-            or (highest - entry) >= ((t1 - entry) * 0.40)
-            or (highest - entry) >= 5.0
-        ):
-            trailed_sl = max(trailed_sl, round(entry + 0.5, 2))
+            # Automated Trailing Break-Even (TSL_BE_0_8_R):
+            # Immunizes option buyer against RIGHT_THEN_REVERSED reversals once excursion reaches >= +0.75R / +0.8R
+            # or early excursion (+4% / +0.40 of (T1 - entry) / +5 pts profit).
+            # Move SL to Cost + 0.50 buffer to secure break-even against slippage and statutory costs.
+            if (
+                r_multiple >= 0.75
+                or (highest - entry) >= (initial_risk_pts * 0.75)
+                or mfe_pct >= 4.0
+                or (highest - entry) >= ((t1 - entry) * 0.40)
+                or (highest - entry) >= 5.0
+            ):
+                trailed_sl = max(trailed_sl, round(entry + 0.5, 2))
 
-        # Tier 2: Lock in Moderate Gains (+10% / +1.0R profit / 70% to T1 -> Move SL to Cost + 2.0 pts)
-        if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.70) or r_multiple >= 1.0:
-            trailed_sl = max(trailed_sl, round(entry + 2.0, 2))
+            # Tier 2: Lock in Moderate Gains (+10% / +1.0R profit / 70% to T1 -> Move SL to Cost + 2.0 pts)
+            if mfe_pct >= 10.0 or (highest - entry) >= ((t1 - entry) * 0.70) or r_multiple >= 1.0:
+                trailed_sl = max(trailed_sl, round(entry + 2.0, 2))
 
-        # Tier 3: Lock in Substantial Gains (+20% / +1.5R profit / at T1 -> Move SL to +10%)
-        if mfe_pct >= 20.0 or (highest - entry) >= (t1 - entry) or r_multiple >= 1.5:
-            trailed_sl = max(trailed_sl, round(entry * 1.10, 2))
+            # Tier 3: Lock in Substantial Gains (+20% / +1.5R profit / at T1 -> Move SL to +10%)
+            if mfe_pct >= 20.0 or (highest - entry) >= (t1 - entry) or r_multiple >= 1.5:
+                trailed_sl = max(trailed_sl, round(entry * 1.10, 2))
 
-        t1_eval_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp
-        if t1_eval_quote >= t1 and curr_status == "ACTIVE":
-            new_status = "TARGET_1_HIT"
-            curr_status = "TARGET_1_HIT"
-            trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
+            t1_eval_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp
+            if t1_eval_quote >= t1 and curr_status == "ACTIVE":
+                new_status = "TARGET_1_HIT"
+                curr_status = "TARGET_1_HIT"
+                trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
 
-        if curr_status == "TARGET_1_HIT":
-            trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
-            if highest > t1:
-                trailed_sl = max(trailed_sl, round(t1 + 0.5 * (highest - t1), 2))
+            if curr_status == "TARGET_1_HIT":
+                trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
+                if highest > t1:
+                    trailed_sl = max(trailed_sl, round(t1 + 0.5 * (highest - t1), 2))
 
         max_allowed_stagnation = 15.0 if time_now >= dtime(13, 0) else 30.0
 
@@ -2075,23 +2084,46 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         close_lots_t1 = (lots // 2) if has_partial_t1_booked else 0
         rem_lots = lots - close_lots_t1
 
-        def _calc_pnl(terminal_price: float) -> tuple[float, float]:
+        def _calc_pnl(terminal_price: float, is_exit: bool = False) -> tuple[float, float]:
             if has_partial_t1_booked:
                 tot_pts = (close_lots_t1 * (t1 - entry) + rem_lots * (terminal_price - entry))
                 avg_pts = round(tot_pts / lots, 2)
-                net_inr_val = round(tot_pts * lot_size, 2)
-                return avg_pts, net_inr_val
+                gross_inr_val = round(tot_pts * lot_size, 2)
+                exit_legs = [
+                    (t1, float(close_lots_t1) / float(lots)),
+                    (terminal_price, float(rem_lots) / float(lots)),
+                ]
             else:
                 pts = round(terminal_price - entry, 2)
-                net_inr_val = round(pts * lot_size * lots, 2)
-                return pts, net_inr_val
+                gross_inr_val = round(pts * lot_size * lots, 2)
+                avg_pts = pts
+                exit_legs = [(terminal_price, 1.0)]
+
+            if is_exit:
+                try:
+                    from app.services.options_replay_backtest import calculate_trade_costs
+                    costs = calculate_trade_costs(
+                        entry_price=entry,
+                        exit_prices=exit_legs,
+                        lot_size=lot_size,
+                        lots=lots,
+                        symbol=sym,
+                    )
+                    net_inr_val = round(gross_inr_val - costs.get("total_costs_inr", 0.0), 2)
+                except Exception as e:
+                    log.warning(f"Could not calculate trade costs for #{sig_id}: {e}")
+                    net_inr_val = gross_inr_val
+            else:
+                net_inr_val = gross_inr_val
+
+            return avg_pts, net_inr_val
 
         if is_contract_expired:
             new_status = "EXPIRED"
             exit_price = current_bid
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(exit_price)
+            points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
             exit_time = now_str
             exit_reason = "CONTRACT_EXPIRED"
             terminal_exit_reached = True
@@ -2100,26 +2132,26 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             exit_price = current_bid
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(exit_price)
+            points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
             exit_time = now_str
             exit_reason = STALE_EXIT
             terminal_exit_reached = True
-        elif current_bid >= t2:
+        elif has_valid_new_quote and current_bid >= t2:
             new_status = "TARGET_2_HIT"
-            raw_exit = round(max(t2, current_bid), 2)
+            raw_exit = round(current_bid, 2) if credit_bid_targets else round(max(t2, current_bid), 2)
             exit_price = round((t1 + raw_exit) / 2.0, 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(raw_exit)
+            points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
             exit_time = now_str
             exit_reason = TARGET_2_HIT
             terminal_exit_reached = True
-        elif current_bid <= trailed_sl:
+        elif has_valid_new_quote and current_bid <= trailed_sl:
             if has_trailed:
                 new_status = "TSL_HIT"
-                raw_exit = round(min(trailed_sl, current_bid), 2)
+                raw_exit = round(current_bid, 2) if credit_bid_targets else round(min(trailed_sl, current_bid), 2)
                 exit_price = round((t1 + raw_exit) / 2.0, 2) if has_partial_t1_booked else raw_exit
-                points_pnl, net_inr = _calc_pnl(raw_exit)
+                points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
                 exit_bid = current_bid
                 exit_ask = current_ask
                 exit_time = now_str
@@ -2127,19 +2159,20 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             else:
                 new_status = "SL_HIT"
                 slippage = round(trailed_sl * 0.015, 2)
-                exit_price = round(max(trailed_sl - slippage, min(trailed_sl, current_bid)), 2)
-                points_pnl, net_inr = _calc_pnl(exit_price)
+                raw_exit = round(current_bid, 2) if credit_bid_targets else round(max(trailed_sl - slippage, min(trailed_sl, current_bid)), 2)
+                exit_price = raw_exit
+                points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
                 exit_bid = current_bid
                 exit_ask = current_ask
                 exit_time = now_str
                 exit_reason = STOP_LOSS_HIT
             terminal_exit_reached = True
-        elif curr_status == "ACTIVE" and elapsed_mins >= max_allowed_stagnation and (current_bid - entry) < ((t1 - entry) * 0.25):
+        elif has_valid_new_quote and curr_status == "ACTIVE" and elapsed_mins >= max_allowed_stagnation and (current_bid - entry) < ((t1 - entry) * 0.25):
             new_status = "TIME_STOP_EXIT"
             exit_price = current_bid
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(current_bid)
+            points_pnl, net_inr = _calc_pnl(current_bid, is_exit=True)
             exit_time = now_str
             exit_reason = TIME_STOP_EXIT
             terminal_exit_reached = True
@@ -2148,12 +2181,12 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             exit_price = current_bid
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(current_bid)
+            points_pnl, net_inr = _calc_pnl(current_bid, is_exit=True)
             exit_time = now_str
             exit_reason = EOD_CLOSED
             terminal_exit_reached = True
         else:
-            points_pnl, net_inr = _calc_pnl(current_bid)
+            points_pnl, net_inr = _calc_pnl(current_bid, is_exit=False)
 
         pnl_pct = round((points_pnl / entry) * 100, 2) if entry > 0 else 0.0
 
@@ -2307,12 +2340,31 @@ def close_signal_manually(
                 rem_lots = lots - close_lots
                 tot_pts = (close_lots * (t1_p - entry_p) + rem_lots * (curr_p - entry_p))
                 pts = round(tot_pts / lots, 2)
-                inr = round(tot_pts * lot_size, 2)
+                gross_inr = round(tot_pts * lot_size, 2)
                 stored_exit_p = round((t1_p + curr_p) / 2.0, 2)
+                exit_legs = [
+                    (t1_p, float(close_lots) / float(lots)),
+                    (curr_p, float(rem_lots) / float(lots)),
+                ]
             else:
                 pts = round(curr_p - entry_p, 2)
-                inr = round(pts * lot_size * lots, 2)
+                gross_inr = round(pts * lot_size * lots, 2)
                 stored_exit_p = curr_p
+                exit_legs = [(curr_p, 1.0)]
+
+            try:
+                from app.services.options_replay_backtest import calculate_trade_costs
+                costs = calculate_trade_costs(
+                    entry_price=entry_p,
+                    exit_prices=exit_legs,
+                    lot_size=lot_size,
+                    lots=lots,
+                    symbol=sig.get("symbol", "NIFTY"),
+                )
+                inr = round(gross_inr - costs.get("total_costs_inr", 0.0), 2)
+            except Exception as e:
+                log.warning(f"Could not calculate trade costs for manual close #{signal_id}: {e}")
+                inr = gross_inr
 
             pnl_pct = round(pts / entry_p * 100, 2) if entry_p > 0 else 0.0
 
@@ -2353,17 +2405,28 @@ def clear_history() -> bool:
 
 
 def export_signals_csv() -> str:
-    """Exports full trade journal (excluding soft-deleted rows) to CSV string."""
+    """Exports full trade journal (excluding soft-deleted rows) to CSV string with formula injection protection."""
     with _get_db() as conn:
         rows = [dict(r) for r in conn.execute("SELECT * FROM signals WHERE is_deleted = 0 ORDER BY id ASC").fetchall()]
 
     if not rows:
         return "No signals recorded."
 
+    # Neutralize CSV formula injection (=, +, -, @)
+    sanitized_rows = []
+    for row in rows:
+        sanitized_row = {}
+        for k, v in row.items():
+            if isinstance(v, str) and v.startswith(("=", "+", "-", "@")):
+                sanitized_row[k] = f"'{v}"
+            else:
+                sanitized_row[k] = v
+        sanitized_rows.append(sanitized_row)
+
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+    writer = csv.DictWriter(output, fieldnames=list(sanitized_rows[0].keys()))
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(sanitized_rows)
     return output.getvalue()
 
 

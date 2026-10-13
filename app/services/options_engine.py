@@ -40,7 +40,8 @@ ENGINE_CONFIG = {
     "IV_MAX_FAVORABLE": 32.0,
     "IV_MAX_NEUTRAL": 45.0,
     "PRIME_WINDOW_START_MINS": 570,   # 09:30 IST
-    "PRIME_WINDOW_END_MINS": 840,     # 14:00 IST
+    "PRIME_WINDOW_END_MINS": int(os.environ.get("PRIME_WINDOW_END_MINS", 870)),     # 14:30 IST (02:30 PM default cutoff, extended from 14:00)
+    "BREAKOUT_WINDOW_END_MINS": int(os.environ.get("BREAKOUT_WINDOW_END_MINS", 885)), # 14:45 IST (02:45 PM on valid high-conviction breakouts)
     "MARKET_SESSION_START_MINS": 555, # 09:15 IST
     "MARKET_SESSION_END_MINS": 930,   # 15:30 IST
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
@@ -99,7 +100,7 @@ def update_symbol_bias_state(symbol: str, raw_bias: str, score_diff: float) -> s
             }
 
         state = _BIAS_STATES[symbol]
-        req_confirmations = ENGINE_CONFIG.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 2)
+        req_confirmations = ENGINE_CONFIG.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)
 
         if raw_bias == state["last_bias"]:
             state["consecutive_confirmations"] += 1
@@ -121,6 +122,9 @@ def update_symbol_bias_state(symbol: str, raw_bias: str, score_diff: float) -> s
                 else:
                     state["pending_bias"] = raw_bias
                     state["consecutive_confirmations"] = 1
+                    if state["consecutive_confirmations"] >= req_confirmations:
+                        state["last_bias"] = raw_bias
+                        state["last_changed_time"] = datetime.now(IST).strftime("%H:%M")
 
         return state["last_bias"]
 
@@ -424,17 +428,22 @@ def evaluate_iv_and_time_filter(atm_iv: float | None, now_dt: datetime | None = 
 
     total_mins = now_dt.hour * 60 + now_dt.minute
 
+    end_mins = ENGINE_CONFIG.get("PRIME_WINDOW_END_MINS", 870)
+    end_h = end_mins // 60
+    end_m = end_mins % 60
+    end_str = f"{end_h:02d}:{end_m:02d}"
+
     # Trading Session Windows (IST)
     if total_mins < ENGINE_CONFIG["PRIME_WINDOW_START_MINS"]:  # 09:15 - 09:30
         time_status = "OPENING CHOP (09:15-09:30)"
         time_favorable = False
         time_note = "Opening volatility window. Allow market structure to settle."
-    elif total_mins >= ENGINE_CONFIG["PRIME_WINDOW_END_MINS"]:  # Post 14:00
-        time_status = "LATE SESSION THETA DECAY (Post 14:00)"
+    elif total_mins >= end_mins:  # Post cutoff
+        time_status = f"LATE SESSION THETA DECAY (Post {end_str})"
         time_favorable = False
-        time_note = "Late afternoon session. Exponential Theta decay and squaring-off chop. No fresh buying."
+        time_note = f"Late afternoon session (post {end_str} IST). Exponential Theta decay and squaring-off chop. No fresh buying."
     else:
-        time_status = "PRIME TRADING WINDOW (09:30-14:00)"
+        time_status = f"PRIME TRADING WINDOW (09:30-{end_str})"
         time_favorable = True
         time_note = "Optimal liquidity and trend follow-through window for option buyers."
 
@@ -1534,6 +1543,21 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     ce_score, ce_checklist, ce_pillar_flags = build_checklist_and_flags(is_ce=True)
     pe_score, pe_checklist, pe_pillar_flags = build_checklist_and_flags(is_ce=False)
 
+    # Smart Breakout Detection (Score >= 80 and confirmed directional move)
+    is_breakout_expansion = (
+        (is_bullish_dir and ce_score >= 80 and spot_chg > 0.05) or
+        (is_bearish_dir and pe_score >= 80 and spot_chg < -0.05)
+    )
+
+    # Breakout Extension: Extend cutoff up to 14:45 IST (02:45 PM) on valid high-conviction breakout
+    now_dt = datetime.now(IST)
+    now_mins = now_dt.hour * 60 + now_dt.minute
+    breakout_end_mins = ENGINE_CONFIG.get("BREAKOUT_WINDOW_END_MINS", 885)
+    effective_trade_window = in_trade_window or (is_breakout_expansion and now_mins < breakout_end_mins)
+
+    # Smart Cooldown Reset on Valid Breakout:
+    effective_loss_cooldown = in_loss_cooldown and not is_breakout_expansion
+
     if not is_live_data:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
@@ -1542,14 +1566,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_pillar_flags = ce_pillar_flags if is_bullish_dir else pe_pillar_flags
         focus_title = "WAIT"
         focus_reason = f"Data quality gate failed: FYERS LIVE market data required (current status: {data_status})."
-    elif not in_trade_window:
+    elif not effective_trade_window:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
         active_checklist = ce_checklist if is_bullish_dir else pe_checklist
         active_trade_plan = (ce_trade_plan if is_bullish_dir else pe_trade_plan) or {}
         active_pillar_flags = ce_pillar_flags if is_bullish_dir else pe_pillar_flags
         focus_title = "WAIT"
-        focus_reason = f"Outside entry window (09:30-14:00 IST): {iv_time_info.get('time_status', '')}. No fresh buying."
+        focus_reason = f"Outside entry window: {iv_time_info.get('time_status', '')}. No fresh buying."
     elif not iv_safe:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
@@ -1566,7 +1590,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_pillar_flags = ce_pillar_flags if is_bullish_dir else pe_pillar_flags
         focus_title = "WAIT"
         focus_reason = "ACTIVE TRADE EXISTS"
-    elif in_loss_cooldown:
+    elif effective_loss_cooldown:
         decision = "WAIT"
         setup_score = max(ce_score, pe_score)
         active_checklist = ce_checklist if (is_bullish_dir or ce_score >= pe_score) else pe_checklist

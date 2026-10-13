@@ -274,7 +274,8 @@ def fetch_option_chain_data(
     if not force_refresh and cache_key in _OPTION_CHAIN_CACHE:
         cached = _OPTION_CHAIN_CACHE[cache_key]
         age_seconds = (now - cached["fetch_time"]).total_seconds()
-        if age_seconds < _CACHE_TTL_SECONDS:
+        ttl = _CACHE_TTL_SECONDS if cached.get("status") == "LIVE" else 5
+        if age_seconds < ttl:
             return cached["data"]
 
     fyers = get_fyers_model()

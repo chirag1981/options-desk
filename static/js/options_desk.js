@@ -15,6 +15,9 @@ document.addEventListener("DOMContentLoaded", () => {
         timerId: null,
         isFetching: false,
         lastData: null,
+        trendingData: null,
+        trendingLastFetchTime: 0,
+        trendingTimerId: null,
     };
 
     // DOM Elements
@@ -475,7 +478,20 @@ document.addEventListener("DOMContentLoaded", () => {
         renderBigOiMovements(data.big_oi_movements || []);
 
         // 7. Section 3: Trending OI & Strike Breakdown (ATM ± 5 strikes)
-        renderTrendingOiTable(data.trending_oi_timeseries || {}, levels.atm_strike, bias.spot_price);
+        // Refresh Trending OI ONLY at selected interval; manual desk refresh preserves Trending OI table
+        const currentIntervalMins = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
+        const intervalMs = currentIntervalMins * 60 * 1000;
+        const timeSinceTrendingFetch = Date.now() - (state.trendingLastFetchTime || 0);
+
+        if (!state.trendingData || timeSinceTrendingFetch >= intervalMs) {
+            if (data.trending_oi_timeseries && data.trending_oi_timeseries.rows) {
+                state.trendingData = data.trending_oi_timeseries;
+                state.trendingLastFetchTime = Date.now();
+            }
+        }
+        if (state.trendingData) {
+            renderTrendingOiTable(state.trendingData, levels.atm_strike, bias.spot_price);
+        }
         renderOiTrendTable(data.oi_trend || [], levels.atm_strike, bias.spot_price);
 
         // 8. Section 4: Detailed Option Chain
@@ -528,34 +544,39 @@ document.addEventListener("DOMContentLoaded", () => {
         let thesis = "";
         let playbook = "";
 
-        // BEARISH DIRECTIONAL CORRELATION (PE PLAY)
-        if ((isCeHeavy || bias.bias === "BEARISH") && isBelowAtm) {
-            mode = "PE";
-            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bearish_score || 78)));
-            head = `BEARISH VECTOR (${convictionPct}% Conviction)`;
-            
-            const ceRatio = peAdds > 0 ? (ceAdds / peAdds).toFixed(1) : "Heavy";
-            thesis = `Institutional Call Writing (${ceRatio}x vs Put Support) capping upside. Spot (${formatIndianNumber(spot)}) pinned below ATM (${formatIndianNumber(atm)}).`;
-            
-            if (distToS1 <= (atm * 0.003)) {
-                playbook = `Breakdown Zone: Spot testing S1 (${formatIndianNumber(s1)}). Clean break below ${formatIndianNumber(s1)} opens fast slide to S2 (${formatIndianNumber(s2)}). Invalidation: Reclaiming ATM (${formatIndianNumber(atm)}).`;
-            } else {
-                playbook = `Sell-on-Rise: Rallies towards ${formatIndianNumber(atm)} or ${formatIndianNumber(r1)} face heavy institutional supply. Downside target: ${formatIndianNumber(s1)}.`;
-            }
-        }
-        // BULLISH DIRECTIONAL CORRELATION (CE PLAY)
-        else if ((isPeHeavy || bias.bias === "BULLISH") && isAboveAtm) {
+        const isBullish = bias.bias === "BULLISH" || isPeHeavy || (data.trending_oi && data.trending_oi.diff_pct >= 40);
+        const isBearish = bias.bias === "BEARISH" || isCeHeavy || (data.trending_oi && data.trending_oi.diff_pct <= -40);
+
+        // BULLISH DIRECTIONAL CORRELATION (CE PLAY / BREAKOUT)
+        if (isBullish && !isCeHeavy) {
             mode = "CE";
             convictionPct = Math.min(95, Math.max(65, Math.round(bias.bullish_score || 78)));
-            head = `BULLISH VECTOR (${convictionPct}% Conviction)`;
-            
-            const peRatio = ceAdds > 0 ? (peAdds / ceAdds).toFixed(1) : "Heavy";
-            thesis = `Institutional Put Writing (${peRatio}x vs Call Resistance) building strong floor. Spot (${formatIndianNumber(spot)}) holding above ATM (${formatIndianNumber(atm)}).`;
-            
-            if (distToR1 <= (atm * 0.003)) {
-                playbook = `Breakout Zone: Spot testing R1 (${formatIndianNumber(r1)}). Clean break above ${formatIndianNumber(r1)} opens squeeze to R2 (${formatIndianNumber(r2)}). Invalidation: Falling below ATM (${formatIndianNumber(atm)}).`;
+            const peRatio = ceAdds > 0 ? (peAdds / ceAdds).toFixed(1) : "3.0+";
+
+            if (distToR1 <= Math.max(30, atm * 0.002) || spot >= r1) {
+                head = `BULLISH BREAKOUT ZONE (${convictionPct}% Conviction)`;
+                thesis = `Heavy Institutional Put Writing (${peRatio}x vs Call Resistance) driving momentum. Spot (${formatIndianNumber(spot)}) is pressing against R1 Resistance (${formatIndianNumber(r1)}).`;
+                playbook = `Breakout Watch: Spot is testing R1 (${formatIndianNumber(r1)}). A 5m candle close above ${formatIndianNumber(r1)} triggers a short-covering squeeze towards R2 (${formatIndianNumber(r2)}). Dynamic support floor: S1 (${formatIndianNumber(s1)}).`;
             } else {
-                playbook = `Buy-on-Dip: Pullbacks towards ${formatIndianNumber(atm)} or ${formatIndianNumber(s1)} offer support. Upside target: ${formatIndianNumber(r1)}.`;
+                head = `BULLISH VECTOR (${convictionPct}% Conviction)`;
+                thesis = `Institutional Put Writing (${peRatio}x vs Call Resistance) providing strong underlying floor. Spot (${formatIndianNumber(spot)}) holding firmly above S1 (${formatIndianNumber(s1)}).`;
+                playbook = `Buy-on-Dip: Dips towards S1 (${formatIndianNumber(s1)}) offer high probability support. Upside target: R1 (${formatIndianNumber(r1)}).`;
+            }
+        }
+        // BEARISH DIRECTIONAL CORRELATION (PE PLAY / BREAKDOWN)
+        else if (isBearish && !isPeHeavy) {
+            mode = "PE";
+            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bearish_score || 78)));
+            const ceRatio = peAdds > 0 ? (ceAdds / peAdds).toFixed(1) : "3.0+";
+
+            if (distToS1 <= Math.max(30, atm * 0.002) || spot <= s1) {
+                head = `BEARISH BREAKDOWN ZONE (${convictionPct}% Conviction)`;
+                thesis = `Heavy Institutional Call Writing (${ceRatio}x vs Put Support) capping upside. Spot (${formatIndianNumber(spot)}) is pressing against S1 Support (${formatIndianNumber(s1)}).`;
+                playbook = `Breakdown Watch: Spot is testing S1 (${formatIndianNumber(s1)}). A 5m candle close below ${formatIndianNumber(s1)} opens a rapid slide towards S2 (${formatIndianNumber(s2)}). Dynamic resistance ceiling: R1 (${formatIndianNumber(r1)}).`;
+            } else {
+                head = `BEARISH VECTOR (${convictionPct}% Conviction)`;
+                thesis = `Institutional Call Writing (${ceRatio}x vs Put Support) capping rallies. Spot (${formatIndianNumber(spot)}) trading below R1 (${formatIndianNumber(r1)}).`;
+                playbook = `Sell-on-Rise: Rallies towards R1 (${formatIndianNumber(r1)}) face heavy institutional supply. Downside target: S1 (${formatIndianNumber(s1)}).`;
             }
         }
         // NEUTRAL / CONSOLIDATION CHOP
@@ -935,14 +956,16 @@ document.addEventListener("DOMContentLoaded", () => {
             r.pe_oi,
         ]);
 
-        let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-        const encodedUri = encodeURI(csvContent);
+        const csvString = [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+        const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
+        link.setAttribute("href", url);
         link.setAttribute("download", `Option_Desk_${state.symbol}_${state.expiry || "Chain"}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     }
 
     // Event Listeners
@@ -967,6 +990,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (symbolSelect) {
         symbolSelect.addEventListener("change", async (e) => {
             state.symbol = e.target.value;
+            state.trendingData = null;
+            state.trendingLastFetchTime = 0;
             await updateExpiriesForSymbol(state.symbol);
             loadOptionsDeskData(true);
         });
@@ -975,6 +1000,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (expirySelect) {
         expirySelect.addEventListener("change", (e) => {
             state.expiry = e.target.value;
+            state.trendingData = null;
+            state.trendingLastFetchTime = 0;
             loadOptionsDeskData(true);
         });
     }
@@ -982,6 +1009,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnRefresh) {
         btnRefresh.addEventListener("click", () => {
             loadOptionsDeskData(true);
+            loadSignalsData();
+            loadTradeAnalysis();
             startCountdown();
         });
     }
@@ -1833,24 +1862,51 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Trending OI Interval Selection (Dedicated to Trending OI table, preserves 3m desk cycle)
+    // Dedicated Trending OI Interval Fetcher & Timer
+    async function fetchTrendingOiData(force = false) {
+        const intervalVal = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
+        const intervalMs = intervalVal * 60 * 1000;
+        const now = Date.now();
+
+        if (!force && state.trendingData && (now - state.trendingLastFetchTime) < intervalMs) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`);
+            const json = await res.json();
+            if (json.success && json.data) {
+                state.trendingData = json.data;
+                state.trendingLastFetchTime = Date.now();
+                const spot = state.lastData?.market_bias?.spot_price || parseFloat(document.getElementById("spot-price-display")?.textContent?.replace(/,/g, "") || "0");
+                const atm = state.lastData?.key_levels?.atm_strike || null;
+                renderTrendingOiTable(json.data, atm, spot);
+            }
+        } catch (err) {
+            console.error("Error updating trending OI:", err);
+        }
+    }
+
+    function setupTrendingOiTimer() {
+        if (state.trendingTimerId) {
+            clearInterval(state.trendingTimerId);
+            state.trendingTimerId = null;
+        }
+        const intervalMins = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
+        const intervalMs = intervalMins * 60 * 1000;
+
+        state.trendingTimerId = setInterval(() => {
+            fetchTrendingOiData(true);
+        }, intervalMs);
+    }
+
+    // Trending OI Interval Selection (Dedicated to Trending OI table)
     if (trendingIntervalSelect) {
         trendingIntervalSelect.addEventListener("change", () => {
-            const intervalVal = parseInt(trendingIntervalSelect.value, 10) || 5;
-
-            fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`)
-                .then(res => res.json())
-                .then(res => {
-                    if (res.success && res.data) {
-                        const spot = state.lastData?.market_bias?.spot_price || parseFloat(document.getElementById("spot-price-display")?.textContent?.replace(/,/g, "") || "0");
-                        const atm = state.lastData?.key_levels?.atm_strike || null;
-                        if (state.lastData) {
-                            state.lastData.trending_oi_timeseries = res.data;
-                        }
-                        renderTrendingOiTable(res.data, atm, spot);
-                    }
-                })
-                .catch(err => console.error("Error updating trending OI interval:", err));
+            state.trendingData = null;
+            state.trendingLastFetchTime = 0;
+            fetchTrendingOiData(true);
+            setupTrendingOiTimer();
         });
     }
 
@@ -1858,14 +1914,16 @@ document.addEventListener("DOMContentLoaded", () => {
     state.refreshIntervalSec = 180;
     state.timerRemaining = 180;
 
+    setupTrendingOiTimer();
     loadOptionsDeskData(false);
     loadSignalsData();
     loadTradeAnalysis();
     startCountdown();
 
-    // Dedicated 30-second auto-refresh for Signal Tracker & Journal live prices & P&L
+    // Dedicated 30-second auto-refresh for Signal Tracker & Journal live prices, trades & analytics
     setInterval(() => {
         loadSignalsData();
+        loadTradeAnalysis();
     }, 30000);
 });
 
