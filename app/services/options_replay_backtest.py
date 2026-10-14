@@ -112,6 +112,9 @@ def calculate_trade_costs(
         "gst": round(gst, 2),
         "stamp_duty": round(stamp_duty, 2),
         "sebi_charges": round(sebi_charges, 2),
+        "turnover_buy": buy_turnover,
+        "turnover_sell": total_sell_turnover,
+        "total_turnover": total_turnover,
         "total_costs_inr": total_costs,
         "cost_points": round(total_costs / total_qty, 2) if total_qty > 0 else 0.0,
         "exchange": exch_code,
@@ -145,15 +148,28 @@ def compute_trade_r_multiple(trade: dict) -> dict:
 
     # Whole-lot partial exit logic:
     # If lots >= 2 and TARGET_1 was hit, 50% lots booked at T1, remainder at exit_p
-    has_partial_t1 = (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and status == "TARGET_1_HIT")) and (lots >= 2)
+    stored_partial_lots = int(t.get("partial_exit_lots") or 0)
+    stored_partial_price = float(t.get("partial_exit_price") or t1) if stored_partial_lots > 0 else t1
 
-    if has_partial_t1:
+    if stored_partial_lots > 0:
+        has_partial_t1 = True
+        close_lots = stored_partial_lots
+        partial_price = stored_partial_price
+    elif (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and (status == "TARGET_1_HIT" or float(t.get("highest_price") or 0.0) >= t1))) and (lots >= 2):
+        has_partial_t1 = True
         close_lots = lots // 2
+        partial_price = t1
+    else:
+        has_partial_t1 = False
+        close_lots = 0
+        partial_price = t1
+
+    if has_partial_t1 and close_lots > 0:
         rem_lots = lots - close_lots
         f_t1 = close_lots / lots
         f_rem = rem_lots / lots
-        exit_legs = [(t1, f_t1), (exit_p, f_rem)]
-        gross_pnl_pts = (close_lots * (t1 - entry) + rem_lots * (exit_p - entry)) / lots
+        exit_legs = [(partial_price, f_t1), (exit_p, f_rem)]
+        gross_pnl_pts = (close_lots * (partial_price - entry) + rem_lots * (exit_p - entry)) / lots
     else:
         exit_legs = [(exit_p, 1.0)]
         gross_pnl_pts = exit_p - entry
@@ -179,7 +195,10 @@ def replay_trade_on_ticks(trade: dict, ticks: list[dict], params: dict | None = 
     """
     Replays a specific parameter set on a trade's tick stream:
     - Fills entry at Ask, exits at Bid.
-    - Matches journal price triggers (T1 on ltp, T2 on bid, SL/TSL on bid).
+    - Evaluates T1 on LTP (or observed Bid if use_bid_for_t1 configured).
+    - Evaluates T2 and Stop Loss / Trailing Stop strictly on observed Bid.
+    - Never fabricates missing bid from LTP; invalid/missing ticks cannot trigger executable exits.
+    - Applies conservative gap-fill rule (if bid gaps below SL, fills at observed bid).
     - Deducts exact statutory transaction costs and models whole-lot partial exits at T1.
     - Returns NET R-multiple (matching compute_trade_r_multiple).
     """
@@ -237,8 +256,29 @@ def replay_trade_on_ticks(trade: dict, ticks: list[dict], params: dict | None = 
     sim_exit = None
 
     for tick in ticks:
-        ltp = float(tick.get("ltp") or 0.0)
-        bid = float(tick.get("bid") or ltp)
+        raw_bid = tick.get("bid")
+        raw_ltp = tick.get("ltp")
+
+        # Reject or flag invalid ticks rather than inventing executable prices
+        if raw_bid is None and raw_ltp is None:
+            continue
+
+        try:
+            bid = float(raw_bid) if raw_bid is not None else None
+        except (ValueError, TypeError):
+            bid = None
+
+        try:
+            ltp = float(raw_ltp) if raw_ltp is not None else None
+        except (ValueError, TypeError):
+            ltp = None
+
+        if (bid is None or bid <= 0.05) and (ltp is None or ltp <= 0.05):
+            continue
+
+        has_executable_bid = (bid is not None and bid > 0.05)
+        eval_ltp = ltp if (ltp is not None and ltp > 0.05) else (bid or entry)
+
         ts_str = tick.get("timestamp") or tick.get("created_at")
         try:
             ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
@@ -249,40 +289,44 @@ def replay_trade_on_ticks(trade: dict, ticks: list[dict], params: dict | None = 
             elapsed_m = 0.0
 
         if time_stop_mins is not None and elapsed_m >= time_stop_mins and not t1_reached:
-            if (bid - entry) < ((sim_t1 - entry) * 0.25):
+            if has_executable_bid and (bid - entry) < ((sim_t1 - entry) * 0.25):
                 sim_exit = bid
                 break
 
-        if bid >= sim_t2:
+        if has_executable_bid and bid >= sim_t2:
             sim_exit = bid
             break
 
         # Stepped Ratchet Trail (3-for-1 Ratchet):
         # Move SL up by +1.0 pt for every +3.0 pts favorable movement
-        if not t1_reached and (ltp - entry) >= 3.0:
-            ratchet_steps = int((ltp - entry) // 3.0)
+        if not t1_reached and (eval_ltp - entry) >= 3.0:
+            ratchet_steps = int((eval_ltp - entry) // 3.0)
             trailed_sl = max(trailed_sl, sim_sl + (ratchet_steps * 1.0))
 
         # Automated Trailing Break-Even (TSL_BE_0_8_R):
         # Move SL to Entry + 0.50 buffer once excursion reaches >= +0.75R
-        if not t1_reached and (ltp - entry) >= (0.75 * initial_risk):
+        if not t1_reached and (eval_ltp - entry) >= (0.75 * initial_risk):
             trailed_sl = max(trailed_sl, entry + 0.5)
 
-        # T1 trigger evaluated on ltp (matching journal)
-        if ltp >= sim_t1 and not t1_reached:
+        # T1 trigger evaluation
+        use_bid_t1 = p.get("use_bid_for_t1", False)
+        t1_target_quote = bid if use_bid_t1 else eval_ltp
+        if t1_target_quote is not None and t1_target_quote >= sim_t1 and not t1_reached:
             t1_reached = True
             trailed_sl = max(trailed_sl, entry + (p.get("trail_t1_lock", 0.5) * (sim_t1 - entry)))
 
-        if t1_reached and bid > sim_t1:
+        if t1_reached and has_executable_bid and bid > sim_t1:
             trailed_sl = max(trailed_sl, sim_t1 + 0.5 * (bid - sim_t1))
 
-        if bid <= trailed_sl:
+        if has_executable_bid and bid <= trailed_sl:
+            # Conservative gap fill rule: fill at observed bid if bid gapped below trailed_sl
             sim_exit = min(trailed_sl, bid)
             break
 
     if sim_exit is None:
-        last_bid = float(ticks[-1].get("bid") or ticks[-1].get("ltp") or entry)
-        sim_exit = last_bid
+        last_valid_bids = [float(t.get("bid")) for t in ticks if t.get("bid") is not None and float(t.get("bid", 0) or 0) > 0.05]
+        sim_exit = last_valid_bids[-1] if last_valid_bids else entry
+
 
     has_partial = t1_reached and (lots >= 2)
     if has_partial:

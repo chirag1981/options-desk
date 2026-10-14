@@ -36,7 +36,18 @@ INDEX_CONFIGS = {
         "exchange": "NSE",
         "exch_code": "NSE",
     },
+    "SENSEX": {
+        "token_symbol": "SENSEX",
+        "fyers_symbol": "BSE:SENSEX-INDEX",
+        "name": "BSE SENSEX",
+        "lot_size": 20,
+        "strike_step": 100,
+        "default_spot": 72000.0,
+        "exchange": "BSE",
+        "exch_code": "BSE",
+    },
 }
+
 
 _OPTION_CHAIN_CACHE = {}
 _EXPIRIES_CACHE = {}

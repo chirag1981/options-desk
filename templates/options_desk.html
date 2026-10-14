@@ -89,6 +89,30 @@
                     <li>Evaluating previous day boundaries, CPR structure, and opening flow...</li>
                 </ul>
             </div>
+
+            <!-- Tomorrow Outlook Strip (Option 1) -->
+            <div class="tomorrow-bias-strip" id="tomorrow-bias-strip">
+                <div class="tomorrow-bias-header">
+                    <span class="tomorrow-badge-label">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.3rem;vertical-align:-1px;color:var(--gold-primary);">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                        TOMORROW'S BIAS
+                    </span>
+                    <span class="tomorrow-bias-pill font-mono" id="tomorrow-bias-pill">ANALYZING...</span>
+                </div>
+                <div class="tomorrow-bias-detail" id="tomorrow-bias-detail">
+                    Next Pivot: -- | Resistance: -- | Base: --
+                </div>
+            </div>
         </article>
 
         <!-- CARD 2: KEY LEVELS -->
@@ -166,24 +190,6 @@
             <div class="levels-summary-strip" id="levels-summary-strip">
                 <span class="summary-icon">💡</span>
                 <span id="levels-summary-text">Evaluating key level breakout & support zones...</span>
-            </div>
-
-            <!-- Directional Play Correlation Radar -->
-            <div class="directional-radar-box" id="directional-radar-box">
-                <div class="radar-top-row">
-                    <div class="radar-title-group">
-                        <span class="radar-pulse-dot" id="radar-pulse-dot"></span>
-                        <strong class="radar-head-text" id="radar-head-text">DIRECTIONAL RADAR: ANALYZING FLOW...</strong>
-                    </div>
-                    <span class="radar-conviction-pill font-mono" id="radar-conviction-pill">--</span>
-                </div>
-                <div class="radar-thesis font-mono" id="radar-thesis">
-                    Correlating ATM position, Key Levels, and institutional Big OI movements...
-                </div>
-                <div class="radar-playbook" id="radar-playbook">
-                    <span class="playbook-tag">🎯 Playbook:</span>
-                    <span id="radar-playbook-text">Awaiting boundary confirmation.</span>
-                </div>
             </div>
         </article>
 
@@ -678,6 +684,9 @@
             </div>
         </div>
 
+        <!-- Divergence / Trap Warning Banner -->
+        <div id="trending-divergence-alert-container" style="display:none;margin-bottom:0.75rem;"></div>
+
         <!-- VIEW 1: Trending OI Oi Pulse Table -->
         <div id="trending-oi-timeseries-container" class="table-responsive">
             <table class="desk-table trending-pulse-table" id="trending-pulse-table">
@@ -689,13 +698,13 @@
                         <th class="text-right">Call &Delta;OI</th>
                         <th class="text-right">Put &Delta;OI</th>
                         <th class="text-right">Diff OI</th>
-                        <th class="text-center">Strength</th>
+                        <th class="text-center">Str</th>
                         <th class="text-center">Dir</th>
                         <th class="text-right">&Delta; Dir</th>
                         <th class="text-right">Dir %</th>
                         <th class="text-center">PCR</th>
-                        <th class="text-center">Day H/L Diff</th>
-                        <th class="text-center">Build-up / Flow</th>
+                        <th class="text-center">Diff H/L</th>
+                        <th class="text-center">Build-up</th>
                         <th class="text-center">Sentiment</th>
                     </tr>
                 </thead>

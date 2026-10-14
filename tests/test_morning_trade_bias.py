@@ -163,3 +163,38 @@ def test_analyze_option_desk_includes_morning_bias():
     assert "morning_bias" in unavail_analysis
     assert unavail_analysis["morning_bias"]["direction"] == "NEUTRAL"
     assert unavail_analysis["morning_bias"]["action"] == "WAIT"
+    assert "tomorrow_bias" in unavail_analysis
+    assert unavail_analysis["tomorrow_bias"]["direction"] == "NEUTRAL"
+
+
+def test_tomorrow_trade_bias_bearish_call_writing():
+    """Verifies tomorrow's bias is BEARISH when Call writing dominates and bearish score is elevated."""
+    from app.services.options_engine import compute_tomorrow_trade_bias
+
+    market_data = {
+        "symbol": "NIFTY",
+        "spot_price": 22625.0,
+        "high_price": 22755.0,
+        "low_price": 22572.0,
+        "strike_step": 50,
+    }
+
+    result = compute_tomorrow_trade_bias(
+        market_data=market_data,
+        spot=22625.0,
+        step=50.0,
+        pcr=0.68,
+        bullish_score=0.0,
+        bearish_score=95.0,
+        r1=22700.0,
+        s1=22500.0,
+        trending_oi={"diff_pct": -83.0, "sentiment": "Strong Bearish"}
+    )
+
+    assert result["direction"] == "BEARISH"
+    assert "SELL-ON-RISE" in result["badge"]
+    assert result["badge_class"] == "bearish"
+    assert result["pivot"] > 22600.0
+    assert "22,700 CE" in result["detail"]
+    assert "22,500 PE" in result["detail"]
+

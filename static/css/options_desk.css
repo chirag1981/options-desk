@@ -563,6 +563,67 @@ body.desk-body {
     line-height: 1.35;
 }
 
+/* Card 1: Tomorrow Bias Strip (Option 1) */
+.tomorrow-bias-strip {
+    margin-top: 0.5rem;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.65rem;
+}
+
+.tomorrow-bias-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.tomorrow-badge-label {
+    display: flex;
+    align-items: center;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--gold-primary);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.tomorrow-bias-pill {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.12rem 0.45rem;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.tomorrow-bias-pill.bearish {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.28);
+}
+
+.tomorrow-bias-pill.bullish {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.28);
+}
+
+.tomorrow-bias-pill.neutral {
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+}
+
+.tomorrow-bias-detail {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 0.25rem;
+    line-height: 1.35;
+}
+
 /* CARD 2: Key Levels (Compact) */
 .badge-levels-info {
     font-size: 0.62rem;
@@ -744,119 +805,6 @@ body.desk-body {
 
 .levels-summary-strip strong {
     color: var(--gold-dark);
-}
-
-/* Directional Radar Correlation Box */
-.directional-radar-box {
-    margin-top: 0.5rem;
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    border-left: 3px solid var(--gold-primary);
-    border-radius: var(--radius-sm);
-    padding: 0.45rem 0.65rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    transition: all 0.25s ease;
-}
-
-.directional-radar-box.radar-mode-pe {
-    border-left-color: var(--bearish-red);
-    background: linear-gradient(90deg, rgba(239, 68, 68, 0.05), transparent);
-}
-
-.directional-radar-box.radar-mode-ce {
-    border-left-color: var(--bullish-green);
-    background: linear-gradient(90deg, rgba(16, 185, 129, 0.05), transparent);
-}
-
-.directional-radar-box.radar-mode-wait {
-    border-left-color: var(--neutral-amber);
-    background: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent);
-}
-
-.radar-top-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.radar-title-group {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-
-.radar-pulse-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--gold-primary);
-    display: inline-block;
-    animation: pulseGlow 1.8s infinite ease-in-out;
-}
-
-.radar-mode-pe .radar-pulse-dot { background: var(--bearish-red); }
-.radar-mode-ce .radar-pulse-dot { background: var(--bullish-green); }
-.radar-mode-wait .radar-pulse-dot { background: var(--neutral-amber); }
-
-@keyframes pulseGlow {
-    0%, 100% { transform: scale(0.9); opacity: 0.7; }
-    50% { transform: scale(1.3); opacity: 1; }
-}
-
-.radar-head-text {
-    font-size: 0.65rem;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    color: var(--text-primary);
-}
-
-.radar-conviction-pill {
-    font-size: 0.6rem;
-    font-weight: 800;
-    padding: 0.1rem 0.35rem;
-    border-radius: var(--radius-sm);
-    letter-spacing: 0.02em;
-}
-
-.radar-mode-pe .radar-conviction-pill {
-    background: var(--bearish-surface);
-    color: var(--bearish-red);
-    border: 1px solid var(--bearish-border);
-}
-
-.radar-mode-ce .radar-conviction-pill {
-    background: var(--bullish-surface);
-    color: var(--bullish-green);
-    border: 1px solid var(--bullish-border);
-}
-
-.radar-mode-wait .radar-conviction-pill {
-    background: var(--neutral-surface);
-    color: var(--neutral-amber);
-    border: 1px solid var(--neutral-border);
-}
-
-.radar-thesis {
-    font-size: 0.65rem;
-    color: var(--text-secondary);
-    line-height: 1.35;
-}
-
-.radar-playbook {
-    font-size: 0.65rem;
-    color: var(--text-primary);
-    background: var(--bg-surface-alt);
-    border-radius: var(--radius-sm);
-    padding: 0.25rem 0.45rem;
-    line-height: 1.35;
-}
-
-.playbook-tag {
-    font-weight: 800;
-    color: var(--gold-dark);
-    margin-right: 0.2rem;
 }
 
 /* CARD 3: Option Buying & Focus (Compact) */
@@ -2459,30 +2407,34 @@ body.desk-body {
    ============================================================================== */
 .trending-pulse-table {
     width: 100%;
+    table-layout: auto;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: 0.76rem;
+    font-size: 0.70rem;
 }
 
 .trending-pulse-table th {
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 0.68rem;
-    letter-spacing: 0.5px;
-    padding: 8px 10px;
+    font-size: 0.63rem;
+    letter-spacing: 0.1px;
+    padding: 5px 3px;
     color: var(--text-muted, #64748b);
     border-bottom: 2px solid rgba(0, 0, 0, 0.08);
     background: rgba(0, 0, 0, 0.02);
+    text-align: center;
+    white-space: nowrap;
 }
 
 .trending-pulse-table td {
-    padding: 7px 10px;
+    padding: 3px 2px;
     vertical-align: middle;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    font-size: 0.76rem;
+    font-size: 0.70rem;
     font-weight: 600;
     font-family: var(--font-mono, monospace);
     color: var(--text-color, #1e293b);
+    white-space: nowrap;
 }
 
 .trending-pulse-table tr:hover td {
@@ -2493,7 +2445,7 @@ body.desk-body {
 .oi-val {
     font-family: var(--font-mono, monospace);
     font-weight: 600;
-    letter-spacing: 0.2px;
+    letter-spacing: 0px;
 }
 
 .oi-val.val-bullish {
@@ -2513,7 +2465,7 @@ body.desk-body {
 
 .trending-pulse-table .sub-date {
     display: block;
-    font-size: 0.58rem;
+    font-size: 0.55rem;
     color: #64748b;
     font-weight: 500;
     line-height: 1;
@@ -2521,7 +2473,7 @@ body.desk-body {
 }
 
 .trending-pulse-table .buildup-sub-action {
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     font-family: var(--font-mono, monospace);
     color: #64748b;
     white-space: nowrap;
@@ -2531,9 +2483,9 @@ body.desk-body {
 /* Day H/L Break Badges */
 .badge-dhb {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.68rem;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-size: 0.63rem;
     font-weight: 700;
     font-family: var(--font-mono, monospace);
     background: rgba(22, 163, 74, 0.12);
@@ -2543,9 +2495,9 @@ body.desk-body {
 
 .badge-dlb {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.68rem;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-size: 0.63rem;
     font-weight: 700;
     font-family: var(--font-mono, monospace);
     background: rgba(220, 38, 38, 0.12);
@@ -2555,9 +2507,9 @@ body.desk-body {
 
 .badge-diff-break-high {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.68rem;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-size: 0.62rem;
     font-weight: 600;
     background: rgba(22, 163, 74, 0.1);
     color: #15803d;
@@ -2566,9 +2518,9 @@ body.desk-body {
 
 .badge-diff-break-low {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.68rem;
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-size: 0.62rem;
     font-weight: 600;
     background: rgba(220, 38, 38, 0.1);
     color: #b91c1c;
@@ -2579,10 +2531,10 @@ body.desk-body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    font-size: 0.70rem;
     font-weight: 700;
 }
 .dir-arrow-pill.dir-green {
@@ -2592,6 +2544,49 @@ body.desk-body {
 .dir-arrow-pill.dir-red {
     background: rgba(220, 38, 38, 0.15);
     color: #b91c1c;
+}
+
+/* Divergence / Trap Alert Badges */
+.badge-divergence-pill {
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.60rem;
+    font-weight: 700;
+    line-height: 1.1;
+    cursor: default;
+    white-space: nowrap;
+}
+.badge-divergence-pill.pill-bull-trap {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.45);
+}
+.badge-divergence-pill.pill-bear-trap {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.45);
+}
+
+.trending-oi-divergence-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+.trending-oi-divergence-banner.divergence-bull-trap {
+    background: rgba(239, 68, 68, 0.12);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.trending-oi-divergence-banner.divergence-bear-trap {
+    background: rgba(34, 197, 94, 0.12);
+    color: #16a34a;
+    border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
 

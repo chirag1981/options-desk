@@ -46,6 +46,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const scorePillVal = document.getElementById("score-pill-val");
     const biasLastChanged = document.getElementById("bias-last-changed");
     const whyBiasList = document.getElementById("why-bias-list");
+    const tomorrowBiasPill = document.getElementById("tomorrow-bias-pill");
+    const tomorrowBiasDetail = document.getElementById("tomorrow-bias-detail");
 
     // Key Levels Elements
     const levelR2 = document.getElementById("level-r2");
@@ -353,6 +355,16 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
+        // Render Tomorrow Bias Strip (Card 1 Footer - Option 1)
+        const tomorrow = data.tomorrow_bias || {};
+        if (tomorrowBiasPill) {
+            tomorrowBiasPill.textContent = tomorrow.badge || "NEUTRAL";
+            tomorrowBiasPill.className = `tomorrow-bias-pill font-mono ${tomorrow.badge_class || "neutral"}`;
+        }
+        if (tomorrowBiasDetail) {
+            tomorrowBiasDetail.textContent = tomorrow.detail || `Next Pivot: ${formatIndianNumber(tomorrow.pivot || levels.atm_strike)}`;
+        }
+
         // 3. Card 2: Key Levels
         const r1 = levels.resistance_1 || 0;
         const r2 = levels.resistance_2 || 0;
@@ -402,9 +414,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 levelsSummaryText.textContent = "Analyzing key level breakout & support zones...";
             }
         }
-
-        // Directional Conviction Correlation Radar
-        updateDirectionalRadar(data);
 
         // 4. Card 3: Option Buying Focus & Execution Plan
         const optBuying = data.option_buying || data.option_focus || {};
@@ -496,105 +505,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 8. Section 4: Detailed Option Chain
         renderOptionChainTable(data.detailed_chain || [], levels.atm_strike, levels.resistance_1, levels.support_1, bias.spot_price);
-    }
-
-    /**
-     * Correlates ATM price, Key Levels (S1/R1), and Big OI Flow into pure Directional Vector
-     */
-    function updateDirectionalRadar(data) {
-        const radarBox = document.getElementById("directional-radar-box");
-        const radarHeadText = document.getElementById("radar-head-text");
-        const radarConvictionPill = document.getElementById("radar-conviction-pill");
-        const radarThesis = document.getElementById("radar-thesis");
-        const radarPlaybookText = document.getElementById("radar-playbook-text");
-
-        if (!radarBox) return;
-
-        const bias = data.market_bias || {};
-        const levels = data.key_levels || {};
-        const movements = data.big_oi_movements || [];
-        const spot = bias.spot_price || 0;
-        const atm = levels.atm_strike || 0;
-        const r1 = levels.resistance_1 || 0;
-        const r2 = levels.resistance_2 || 0;
-        const s1 = levels.support_1 || 0;
-        const s2 = levels.support_2 || 0;
-
-        let ceAdds = 0;
-        let peAdds = 0;
-        movements.forEach((m) => {
-            const chg = m.change_oi || 0;
-            if (m.side === "CE" || (m.activity && m.activity.includes("CALL"))) {
-                if (chg > 0) ceAdds += chg;
-            } else {
-                if (chg > 0) peAdds += chg;
-            }
-        });
-
-        const isCeHeavy = ceAdds > (peAdds * 1.25);
-        const isPeHeavy = peAdds > (ceAdds * 1.25);
-        const isBelowAtm = spot < atm;
-        const isAboveAtm = spot > atm;
-        const distToR1 = r1 > 0 ? (r1 - spot) : 999;
-        const distToS1 = s1 > 0 ? (spot - s1) : 999;
-
-        let mode = "WAIT";
-        let convictionPct = 50;
-        let head = "CHOP / TWO-WAY TRAP ZONE";
-        let thesis = "";
-        let playbook = "";
-
-        const isBullish = bias.bias === "BULLISH" || isPeHeavy || (data.trending_oi && data.trending_oi.diff_pct >= 40);
-        const isBearish = bias.bias === "BEARISH" || isCeHeavy || (data.trending_oi && data.trending_oi.diff_pct <= -40);
-
-        // BULLISH DIRECTIONAL CORRELATION (CE PLAY / BREAKOUT)
-        if (isBullish && !isCeHeavy) {
-            mode = "CE";
-            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bullish_score || 78)));
-            const peRatio = ceAdds > 0 ? (peAdds / ceAdds).toFixed(1) : "3.0+";
-
-            if (distToR1 <= Math.max(30, atm * 0.002) || spot >= r1) {
-                head = `BULLISH BREAKOUT ZONE (${convictionPct}% Conviction)`;
-                thesis = `Heavy Institutional Put Writing (${peRatio}x vs Call Resistance) driving momentum. Spot (${formatIndianNumber(spot)}) is pressing against R1 Resistance (${formatIndianNumber(r1)}).`;
-                playbook = `Breakout Watch: Spot is testing R1 (${formatIndianNumber(r1)}). A 5m candle close above ${formatIndianNumber(r1)} triggers a short-covering squeeze towards R2 (${formatIndianNumber(r2)}). Dynamic support floor: S1 (${formatIndianNumber(s1)}).`;
-            } else {
-                head = `BULLISH VECTOR (${convictionPct}% Conviction)`;
-                thesis = `Institutional Put Writing (${peRatio}x vs Call Resistance) providing strong underlying floor. Spot (${formatIndianNumber(spot)}) holding firmly above S1 (${formatIndianNumber(s1)}).`;
-                playbook = `Buy-on-Dip: Dips towards S1 (${formatIndianNumber(s1)}) offer high probability support. Upside target: R1 (${formatIndianNumber(r1)}).`;
-            }
-        }
-        // BEARISH DIRECTIONAL CORRELATION (PE PLAY / BREAKDOWN)
-        else if (isBearish && !isPeHeavy) {
-            mode = "PE";
-            convictionPct = Math.min(95, Math.max(65, Math.round(bias.bearish_score || 78)));
-            const ceRatio = peAdds > 0 ? (ceAdds / peAdds).toFixed(1) : "3.0+";
-
-            if (distToS1 <= Math.max(30, atm * 0.002) || spot <= s1) {
-                head = `BEARISH BREAKDOWN ZONE (${convictionPct}% Conviction)`;
-                thesis = `Heavy Institutional Call Writing (${ceRatio}x vs Put Support) capping upside. Spot (${formatIndianNumber(spot)}) is pressing against S1 Support (${formatIndianNumber(s1)}).`;
-                playbook = `Breakdown Watch: Spot is testing S1 (${formatIndianNumber(s1)}). A 5m candle close below ${formatIndianNumber(s1)} opens a rapid slide towards S2 (${formatIndianNumber(s2)}). Dynamic resistance ceiling: R1 (${formatIndianNumber(r1)}).`;
-            } else {
-                head = `BEARISH VECTOR (${convictionPct}% Conviction)`;
-                thesis = `Institutional Call Writing (${ceRatio}x vs Put Support) capping rallies. Spot (${formatIndianNumber(spot)}) trading below R1 (${formatIndianNumber(r1)}).`;
-                playbook = `Sell-on-Rise: Rallies towards R1 (${formatIndianNumber(r1)}) face heavy institutional supply. Downside target: S1 (${formatIndianNumber(s1)}).`;
-            }
-        }
-        // NEUTRAL / CONSOLIDATION CHOP
-        else {
-            mode = "WAIT";
-            convictionPct = 50;
-            head = `CHOP / TWO-WAY TRAP ZONE`;
-            thesis = `Both Call & Put writing active around ATM (${formatIndianNumber(atm)}). Range bounded between S1 (${formatIndianNumber(s1)}) and R1 (${formatIndianNumber(r1)}).`;
-            playbook = `Preserve Capital: Avoid fresh naked option buying in middle of channel. Wait for breakout above ${formatIndianNumber(r1)} (CE) or breakdown below ${formatIndianNumber(s1)} (PE).`;
-        }
-
-        radarBox.className = `directional-radar-box radar-mode-${mode.toLowerCase()}`;
-        if (radarHeadText) radarHeadText.textContent = head;
-        if (radarConvictionPill) {
-            radarConvictionPill.textContent = mode === "PE" ? "⚡ PURE PE PLAY" : (mode === "CE" ? "⚡ PURE CE PLAY" : "⏸ WAIT / TRAP");
-        }
-        if (radarThesis) radarThesis.textContent = thesis;
-        if (radarPlaybookText) radarPlaybookText.textContent = playbook;
     }
 
     /**
@@ -727,8 +637,21 @@ document.addEventListener("DOMContentLoaded", () => {
             const dotChar = "●";
             const dotsStr = dotChar.repeat(latest.strength_dots || 0);
 
+            // Handle Divergence Alert Banner
+            const divAlertEl = document.getElementById("trending-divergence-alert-container");
+            if (divAlertEl) {
+                if (latest && latest.divergence_badge) {
+                    const trapClass = latest.divergence === "BULL_TRAP" ? "divergence-bull-trap" : "divergence-bear-trap";
+                    divAlertEl.className = `trending-oi-divergence-banner ${trapClass}`;
+                    divAlertEl.innerHTML = `<span><strong>${latest.divergence_badge}</strong> &mdash; ${latest.divergence_detail || 'Price breaking range in opposite direction of cumulative OI.'}</span>`;
+                    divAlertEl.style.display = "flex";
+                } else {
+                    divAlertEl.style.display = "none";
+                }
+            }
+
             trendingLiveCapsuleSummary.innerHTML = `
-                <div style="display:flex;align-items:center;gap:0.4rem;" title="Oi Pulse Conviction Rule: >=40% diff with 2+ dots indicates trading conviction. <30% is noise/chop.">
+                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;" title="Oi Pulse Conviction Rule: >=40% diff with 2+ dots indicates trading conviction. <30% is noise/chop.">
                     <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);">Live Strength:</span>
                     <span class="strength-capsule ${latest.strength_class || 'strength-weak'}">
                         <span>${pctSign}${latest.strength_pct}%</span>
@@ -738,6 +661,11 @@ document.addEventListener("DOMContentLoaded", () => {
                         ${latest.sentiment}
                     </span>
                     <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.5rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
+                    ${latest.divergence_badge ? `
+                        <span class="badge-divergence-pill ${latest.divergence === 'BULL_TRAP' ? 'pill-bull-trap' : 'pill-bear-trap'}" style="margin-left:0.4rem;" title="${latest.divergence_detail || ''}">
+                            ${latest.divergence_badge}
+                        </span>
+                    ` : ''}
                 </div>
             `;
         }
@@ -805,6 +733,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             `;
 
+            // Divergence badge in sentiment cell
+            const divBadgeHtml = r.divergence_badge ? `
+                <span class="badge-divergence-pill ${r.divergence === 'BULL_TRAP' ? 'pill-bull-trap' : 'pill-bear-trap'}" title="${r.divergence_detail || ''}" style="margin-top:2px;">
+                    ${r.divergence_badge}
+                </span>
+            ` : '';
+
             const ltpVal = typeof r.ltp === "number" ? r.ltp.toFixed(2) : (r.ltp || "--");
             const dirPctVal = typeof r.direction_chng_pct === "number" ? r.direction_chng_pct.toFixed(2) : (r.direction_chng_pct || "0.00");
             const netPcrVal = typeof r.net_pcr === "number" ? r.net_pcr.toFixed(2) : (r.net_pcr || "--");
@@ -826,7 +761,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td class="text-center font-mono"><strong>${netPcrVal}</strong></td>
                 <td class="text-center">${dayHlDiffHtml}</td>
                 <td class="text-center">${buildupHtml}</td>
-                <td class="text-center"><span class="${sentClass}">${r.sentiment || "--"}</span></td>
+                <td class="text-center">
+                    <div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
+                        <span class="${sentClass}">${r.sentiment || "--"}</span>
+                        ${divBadgeHtml}
+                    </div>
+                </td>
             `;
 
             trendingPulseTbody.appendChild(tr);

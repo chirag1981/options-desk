@@ -64,8 +64,15 @@ ENGINE_CONFIG = {
             "UNWINDING": 50000,
             "BIG_MOVEMENT": 75000,
         },
+        "SENSEX": {
+            "ACTIVITY": 8000,
+            "WRITING": 6000,
+            "UNWINDING": 10000,
+            "BIG_MOVEMENT": 15000,
+        },
     }
 }
+
 
 # Thread-safe, per-symbol persistent bias tracking across refreshes
 _BIAS_LOCK = threading.Lock()
@@ -466,6 +473,7 @@ def evaluate_iv_and_time_filter(atm_iv: float | None, now_dt: datetime | None = 
         iv_note = "Extreme IV crush risk or outside safety parameters."
 
     return {
+        "total_mins": total_mins,
         "time_status": time_status,
         "time_favorable": time_favorable,
         "time_note": time_note,
@@ -473,6 +481,8 @@ def evaluate_iv_and_time_filter(atm_iv: float | None, now_dt: datetime | None = 
         "iv_favorable": iv_favorable,
         "iv_note": iv_note,
     }
+
+
 
 
 def compute_trending_oi_metrics(
@@ -483,48 +493,125 @@ def compute_trending_oi_metrics(
     num_strikes_each_side: int = 5,
 ) -> dict:
     """
-    Computes Trending OI metrics over ATM ± 5 strikes (5 up, 5 down, 11 strikes total)
-    matching Oi Pulse methodology:
+    Computes Trending OI metrics over ATM ± num_strikes_each_side strikes (default 5 up, 5 down = 11 strikes)
+    following Oi Pulse methodology with comprehensive support for positive, negative, zero, and mixed OI changes:
+
       - Diff. in OI = Chng. in Put OI - Chng. in Call OI
-      - Bullish: diff_pct = + (Put_Chg - Call_Chg) / max(Put_Chg, 1) * 100
-      - Bearish: diff_pct = - (Call_Chg - Put_Chg) / max(Call_Chg, 1) * 100
+      - Formulas:
+          * Positive Changes (Both PE_chg >= 0 and CE_chg >= 0):
+              If PE_chg >= CE_chg: diff_pct = + (PE_chg - CE_chg) / max(PE_chg, 1) * 100, Bullish
+              Else:                diff_pct = - (CE_chg - PE_chg) / max(CE_chg, 1) * 100, Bearish
+          * Negative Changes (Both unwinding: PE_chg <= 0 and CE_chg <= 0):
+              Diff_oi = PE_chg - CE_chg.
+              If Diff_oi > 0 (CE unwound more): raw_pct = + (Diff_oi / max(|CE_chg|, |PE_chg|, 1)) * 100, Bullish
+              If Diff_oi < 0 (PE unwound more): raw_pct = - (|Diff_oi| / max(|PE_chg|, |CE_chg|, 1)) * 100, Bearish
+              If Diff_oi == 0:                  diff_pct = 0, Neutral
+          * Mixed Changes (One positive, one negative):
+              If PE_chg >= 0 and CE_chg < 0 (Put writing + Call unwinding):
+                  raw_pct = + (Diff_oi / max(PE_chg + |CE_chg|, 1)) * 100, Bullish
+              If PE_chg < 0 and CE_chg >= 0 (Put unwinding + Call writing):
+                  raw_pct = - (|Diff_oi| / max(|PE_chg| + CE_chg, 1)) * 100, Bearish
+          * Zero / Inactive (Both == 0):
+              diff_pct = 0, sentiment = "Neutral", dots = 0, status = "NEUTRAL"
       - Strength Dots:
           < 30%: 0 dots, gray capsule (weak sentiment)
           30% - 39%: 1 dot, gray capsule
           40% - 59%: 2 dots, active color (>= 40% threshold for conviction)
           >= 60%: 3 dots, active color (strong conviction)
-      - Net PCR = Chng. in Put OI / max(Chng. in Call OI, 1)
+      - Net PCR = Chng. in Put OI / max(Chng. in Call OI, 1) if positive, else ratio of magnitudes.
     """
     if step <= 0:
         step = 50.0
 
     target_strikes = [round(atm_strike + i * step, 2) for i in range(-num_strikes_each_side, num_strikes_each_side + 1)]
 
-    # Filter rows matching target strikes
-    selected_rows = [r for r in enriched_chain if any(abs(r["strike"] - s) < 1.0 for s in target_strikes)]
-    selected_rows.sort(key=lambda x: x["strike"])
+    # Deduplicate and sort rows matching target strikes
+    seen_strikes = set()
+    selected_rows = []
+    for r in enriched_chain:
+        stk = r.get("strike")
+        if stk is not None and any(abs(float(stk) - s) < 1.0 for s in target_strikes):
+            stk_round = round(float(stk), 2)
+            if stk_round not in seen_strikes:
+                seen_strikes.add(stk_round)
+                selected_rows.append(r)
+    selected_rows.sort(key=lambda x: float(x["strike"]))
 
-    total_ce_change_oi = sum(int(r.get("ce_change_oi", 0) or 0) for r in selected_rows)
-    total_pe_change_oi = sum(int(r.get("pe_change_oi", 0) or 0) for r in selected_rows)
+    for r in selected_rows:
+        if "ce_activity" not in r:
+            ce_c = int(r.get("ce_change_oi") if r.get("ce_change_oi") is not None else (r.get("ce_oich") or 0))
+            ce_p = r.get("ce_chp")
+            if ce_c > 0:
+                r["ce_activity"] = "Long Buildup" if (ce_p is not None and ce_p > 0.05) else ("Call Writing" if (ce_p is not None and ce_p < -0.05) else "Call Buildup")
+            elif ce_c < 0:
+                r["ce_activity"] = "Short Covering" if (ce_p is not None and ce_p > 0.05) else ("Long Unwinding" if (ce_p is not None and ce_p < -0.05) else "Call Unwinding")
+            else:
+                r["ce_activity"] = "Neutral"
+        if "pe_activity" not in r:
+            pe_c = int(r.get("pe_change_oi") if r.get("pe_change_oi") is not None else (r.get("pe_oich") or 0))
+            pe_p = r.get("pe_chp")
+            if pe_c > 0:
+                r["pe_activity"] = "Short Buildup (Writing)" if (pe_p is not None and pe_p < -0.05) else ("Long Buildup" if (pe_p is not None and pe_p > 0.05) else "Put Buildup")
+            elif pe_c < 0:
+                r["pe_activity"] = "Long Unwinding" if (pe_p is not None and pe_p < -0.05) else ("Short Covering" if (pe_p is not None and pe_p > 0.05) else "Put Unwinding")
+            else:
+                r["pe_activity"] = "Neutral"
+
+    total_ce_change_oi = sum(int(r.get("ce_change_oi") if r.get("ce_change_oi") is not None else (r.get("ce_oich") or 0)) for r in selected_rows)
+    total_pe_change_oi = sum(int(r.get("pe_change_oi") if r.get("pe_change_oi") is not None else (r.get("pe_oich") or 0)) for r in selected_rows)
     total_ce_oi = sum(int(r.get("ce_oi", 0) or 0) for r in selected_rows)
     total_pe_oi = sum(int(r.get("pe_oi", 0) or 0) for r in selected_rows)
 
     diff_oi = total_pe_change_oi - total_ce_change_oi
 
-    # Calculate difference percentage and sentiment matching Oi Pulse formula
-    if total_pe_change_oi >= total_ce_change_oi:
-        denom = max(total_pe_change_oi, 1)
-        raw_pct = ((total_pe_change_oi - total_ce_change_oi) / denom) * 100.0
+    # Calculate difference percentage and sentiment
+    if total_pe_change_oi == 0 and total_ce_change_oi == 0:
+        diff_pct = 0
+        sentiment = "Neutral"
+    elif total_pe_change_oi >= 0 and total_ce_change_oi >= 0:
+        # Standard Oi Pulse positive buildup regime
+        if total_pe_change_oi >= total_ce_change_oi:
+            denom = max(total_pe_change_oi, 1)
+            raw_pct = ((total_pe_change_oi - total_ce_change_oi) / denom) * 100.0
+            diff_pct = min(100, max(0, round(raw_pct)))
+            sentiment = "Bullish"
+        else:
+            denom = max(total_ce_change_oi, 1)
+            raw_pct = -((total_ce_change_oi - total_pe_change_oi) / denom) * 100.0
+            diff_pct = max(-100, min(0, round(raw_pct)))
+            sentiment = "Bearish"
+    elif total_pe_change_oi <= 0 and total_ce_change_oi <= 0:
+        # Both sides unwinding
+        if diff_oi > 0:
+            denom = max(abs(total_ce_change_oi), abs(total_pe_change_oi), 1)
+            raw_pct = (diff_oi / denom) * 100.0
+            diff_pct = min(100, max(0, round(raw_pct)))
+            sentiment = "Bullish"
+        elif diff_oi < 0:
+            denom = max(abs(total_pe_change_oi), abs(total_ce_change_oi), 1)
+            raw_pct = (diff_oi / denom) * 100.0
+            diff_pct = max(-100, min(0, round(raw_pct)))
+            sentiment = "Bearish"
+        else:
+            diff_pct = 0
+            sentiment = "Neutral"
+    elif total_pe_change_oi >= 0 and total_ce_change_oi < 0:
+        # PE writing + CE unwinding (Clear Bullish)
+        activity = total_pe_change_oi + abs(total_ce_change_oi)
+        denom = max(activity, 1)
+        raw_pct = (diff_oi / denom) * 100.0
         diff_pct = min(100, max(0, round(raw_pct)))
         sentiment = "Bullish"
     else:
-        denom = max(total_ce_change_oi, 1)
-        raw_pct = -((total_ce_change_oi - total_pe_change_oi) / denom) * 100.0
+        # PE unwinding + CE writing (Clear Bearish)
+        activity = abs(total_pe_change_oi) + total_ce_change_oi
+        denom = max(activity, 1)
+        raw_pct = (diff_oi / denom) * 100.0
         diff_pct = max(-100, min(0, round(raw_pct)))
         sentiment = "Bearish"
 
     abs_pct = abs(diff_pct)
-    if abs_pct < 30:
+    if sentiment == "Neutral" or abs_pct < 30:
         dots = 0
         strength_class = "strength-weak"
         strength_status = "WEAK"
@@ -539,9 +626,19 @@ def compute_trending_oi_metrics(
     else:
         dots = 3
         strength_class = "strength-bullish" if diff_pct > 0 else "strength-bearish"
-        strength_status = "STRONG_BULLISH" if diff_pct > 0 else "STRONG_BEARISH"
+        strength_status = "STRONG"
+        sentiment = "Strong Bullish" if diff_pct > 0 else "Strong Bearish"
 
-    net_pcr = round(total_pe_change_oi / max(total_ce_change_oi, 1), 2) if total_ce_change_oi > 0 else (1.0 if total_pe_change_oi == 0 else 9.99)
+    if total_ce_change_oi > 0:
+        net_pcr = round(total_pe_change_oi / total_ce_change_oi, 2)
+    elif total_ce_change_oi < 0:
+        if total_pe_change_oi < 0:
+            net_pcr = round(abs(total_pe_change_oi) / abs(total_ce_change_oi), 2)
+        else:
+            net_pcr = 9.99
+    else:
+        net_pcr = 1.0 if total_pe_change_oi == 0 else (9.99 if total_pe_change_oi > 0 else 0.01)
+
     selected_strike_list = [r["strike"] for r in selected_rows]
 
     return {
@@ -562,6 +659,7 @@ def compute_trending_oi_metrics(
         "sentiment": sentiment,
         "strikes_data": selected_rows,
     }
+
 
 
 def compute_morning_trade_bias(
@@ -772,6 +870,75 @@ def compute_morning_trade_bias(
     }
 
 
+def compute_tomorrow_trade_bias(
+    market_data: dict,
+    spot: float,
+    step: float,
+    pcr: float,
+    bullish_score: float,
+    bearish_score: float,
+    r1: float,
+    s1: float,
+    trending_oi: dict | None = None,
+) -> dict:
+    """
+    Computes deterministic Tomorrow's Bias / Next Day Outlook based on:
+    1. Today's OHLC & Next-Day Central Pivot Range (Pivot, TC, BC, R1, S1)
+    2. EOD Open Interest accumulation, PCR, and Trending OI dominance
+    3. Overhead Call walls and downside Put bases
+    """
+    today_high = float(market_data.get("high_price") or market_data.get("high") or market_data.get("prev_high") or (spot + step))
+    today_low = float(market_data.get("low_price") or market_data.get("low") or market_data.get("prev_low") or (spot - step))
+    today_close = spot
+
+    if today_high <= today_low:
+        today_high = max(today_high, today_low + step)
+
+    pivot = round((today_high + today_low + today_close) / 3.0, 1)
+    bc = round((today_high + today_low) / 2.0, 1)
+    tc = round((pivot - bc) + pivot, 1)
+    cpr_width = round(abs(tc - bc), 1)
+    cpr_type = "NARROW (TRENDING)" if (cpr_width / pivot * 100 <= 0.25) else ("WIDE (RANGEBOUND)" if (cpr_width / pivot * 100 >= 0.55) else "AVERAGE")
+
+    tomorrow_r1 = round(2 * pivot - today_low, 1)
+    tomorrow_s1 = round(2 * pivot - today_high, 1)
+
+    diff_pct = float(trending_oi.get("diff_pct", 0.0)) if trending_oi else 0.0
+    sentiment = (trending_oi.get("sentiment") or "").upper() if trending_oi else ""
+
+    call_wall = f"{r1:,.0f} CE"
+    put_base = f"{s1:,.0f} PE"
+
+    if bearish_score >= 60 or diff_pct <= -30 or pcr < 0.8 or "BEARISH" in sentiment:
+        direction = "BEARISH"
+        badge = "BEARISH (SELL-ON-RISE)"
+        badge_class = "bearish"
+        detail = f"Next Pivot: {pivot:,.0f} | Resistance: {call_wall} | Base: {put_base}"
+    elif bullish_score >= 60 or diff_pct >= 30 or pcr > 1.2 or "BULLISH" in sentiment:
+        direction = "BULLISH"
+        badge = "BULLISH (BUY-ON-DIPS)"
+        badge_class = "bullish"
+        detail = f"Next Pivot: {pivot:,.0f} | Resistance: {call_wall} | Base: {put_base}"
+    else:
+        direction = "RANGEBOUND"
+        badge = "RANGEBOUND (WAIT FOR BREAKOUT)"
+        badge_class = "neutral"
+        detail = f"Expected Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Pivot: {pivot:,.0f}"
+
+    return {
+        "direction": direction,
+        "badge": badge,
+        "badge_class": badge_class,
+        "pivot": pivot,
+        "r1": tomorrow_r1,
+        "s1": tomorrow_s1,
+        "key_wall": call_wall,
+        "key_support": put_base,
+        "cpr_type": cpr_type,
+        "detail": detail,
+    }
+
+
 def analyze_option_desk(market_data: dict, update_state: bool = False, has_active_trade: bool | None = None) -> dict:
     """
     Comprehensive Options Analytical Engine with Selective Option Buying Decision Flow:
@@ -881,6 +1048,18 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                 },
                 "why_reasons": ["Market data currently unavailable from FYERS. Fail-closed discipline active."],
             },
+            "tomorrow_bias": {
+                "direction": "NEUTRAL",
+                "badge": "ANALYZING...",
+                "badge_class": "neutral",
+                "pivot": spot,
+                "r1": spot + step,
+                "s1": spot - step,
+                "key_wall": f"{spot + step:,.0f} CE",
+                "key_support": f"{spot - step:,.0f} PE",
+                "cpr_type": "AVERAGE",
+                "detail": "Data unavailable. Evaluating EOD market structure...",
+            },
             "oi_activity_summary": {"call_writing_strike": 0, "put_writing_strike": 0, "call_unwinding_strike": "None", "put_unwinding_strike": "None", "pcr": 1.0, "total_ce_oi": "0", "total_pe_oi": "0", "total_ce_change_oi": "0", "total_pe_change_oi": "0"},
             "pcr": {"pcr_ratio": 1.0, "pcr_chg": 0.0},
             "big_oi_movements": [],
@@ -944,7 +1123,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     for row in chain:
         strike = row["strike"]
         ce_oi = int(row.get("ce_oi", 0) or 0)
-        ce_chg = int(row.get("ce_change_oi", 0) or 0)
+        ce_chg = int(row.get("ce_change_oi") if row.get("ce_change_oi") is not None else (row.get("ce_oich") or 0))
         ce_ltp = float(row.get("ce_ltp", 0.0) or 0.0)
         ce_vol = int(row.get("ce_volume", 0) or 0)
         ce_iv = float(row.get("ce_iv", 0.0) or 0.0)
@@ -953,7 +1132,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         ce_ask = float(row.get("ce_ask", 0.0) or 0.0)
 
         pe_oi = int(row.get("pe_oi", 0) or 0)
-        pe_chg = int(row.get("pe_change_oi", 0) or 0)
+        pe_chg = int(row.get("pe_change_oi") if row.get("pe_change_oi") is not None else (row.get("pe_oich") or 0))
         pe_ltp = float(row.get("pe_ltp", 0.0) or 0.0)
         pe_vol = int(row.get("pe_volume", 0) or 0)
         pe_iv = float(row.get("pe_iv", 0.0) or 0.0)
@@ -968,21 +1147,56 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         total_ce_vol += ce_vol
         total_pe_vol += pe_vol
 
-        # Classify Call side using symbol threshold
+        # Classify Call side using symbol threshold and premium change heuristic
+        ce_chp = row.get("ce_chp")
+        if ce_chp is not None:
+            try:
+                ce_chp = float(ce_chp)
+            except (ValueError, TypeError):
+                ce_chp = None
+
+        pe_chp = row.get("pe_chp")
+        if pe_chp is not None:
+            try:
+                pe_chp = float(pe_chp)
+            except (ValueError, TypeError):
+                pe_chp = None
+
         ce_act = "NO CLEAR SIGNAL"
         if abs(ce_chg) >= oi_thresholds["WRITING"]:
             if ce_chg > 0:
-                ce_act = "CALL WRITING" if strike >= spot - step else "LONG CALL BUILDUP"
+                if ce_chp is not None and ce_chp > 0.05:
+                    ce_act = "LONG CALL BUILDUP"  # OI rising + premium rising
+                elif ce_chp is not None and ce_chp < -0.05:
+                    ce_act = "CALL WRITING"       # OI rising + premium falling
+                else:
+                    ce_act = "CALL WRITING" if strike >= spot - step else "LONG CALL BUILDUP"
             else:
-                ce_act = "CALL UNWINDING"
+                if ce_chp is not None and ce_chp > 0.05:
+                    ce_act = "CALL SHORT COVERING" # OI falling + premium rising
+                elif ce_chp is not None and ce_chp < -0.05:
+                    ce_act = "CALL UNWINDING"      # OI falling + premium falling
+                else:
+                    ce_act = "CALL UNWINDING"
 
-        # Classify Put side using symbol threshold
+        # Classify Put side using symbol threshold and premium change heuristic
         pe_act = "NO CLEAR SIGNAL"
         if abs(pe_chg) >= oi_thresholds["WRITING"]:
             if pe_chg > 0:
-                pe_act = "PUT WRITING" if strike <= spot + step else "LONG PUT BUILDUP"
+                if pe_chp is not None and pe_chp > 0.05:
+                    pe_act = "LONG PUT BUILDUP"   # OI rising + premium rising
+                elif pe_chp is not None and pe_chp < -0.05:
+                    pe_act = "PUT WRITING"        # OI rising + premium falling
+                else:
+                    pe_act = "PUT WRITING" if strike <= spot + step else "LONG PUT BUILDUP"
             else:
-                pe_act = "PUT UNWINDING"
+                if pe_chp is not None and pe_chp > 0.05:
+                    pe_act = "PUT SHORT COVERING" # OI falling + premium rising
+                elif pe_chp is not None and pe_chp < -0.05:
+                    pe_act = "PUT UNWINDING"      # OI falling + premium falling
+                else:
+                    pe_act = "PUT UNWINDING"
+
 
         enriched_row = {
             **row,
@@ -1197,7 +1411,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     # Real rolling percentile per symbol (read-only query, returns None if < 30 days of daily history)
     iv_percentile = get_rolling_iv_percentile(symbol, avg_atm_iv, min_days=30) if avg_atm_iv else None
-    iv_time_info = evaluate_iv_and_time_filter(avg_atm_iv)
+    iv_time_info = evaluate_iv_and_time_filter(avg_atm_iv, now_dt=market_data.get("now_dt"))
 
     # -------------------------------------------------------------
     # 7. 5 CORE STRATEGY SIGNALS (Price, Momentum, OI, Volume, PCR)
@@ -1219,11 +1433,25 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     else:
         momentum_signal = "NEUTRAL"
 
-    # Signal 3: OI Structure
-    unwind_threshold = oi_thresholds["UNWINDING"]
-    if near_pe_writing > near_ce_writing or (near_ce_unwinding > near_pe_unwinding and near_ce_unwinding > unwind_threshold):
+    # Signal 3: OI Structure (OI-Led Directional Evaluation)
+    writing_threshold = oi_thresholds.get("WRITING", 30000)
+    unwind_threshold = oi_thresholds.get("UNWINDING", 50000)
+    activity_threshold = oi_thresholds.get("ACTIVITY", 40000)
+
+    has_pe_writing_dominance = (near_pe_writing >= writing_threshold and near_pe_writing > near_ce_writing * 1.15)
+    has_ce_unwind_squeeze = (near_ce_unwinding >= unwind_threshold and near_ce_unwinding > near_pe_unwinding * 1.15)
+    has_net_bullish_flow = (total_pe_change_oi - total_ce_change_oi) >= activity_threshold
+
+    has_ce_writing_dominance = (near_ce_writing >= writing_threshold and near_ce_writing > near_pe_writing * 1.15)
+    has_pe_unwind_panic = (near_pe_unwinding >= unwind_threshold and near_pe_unwinding > near_ce_unwinding * 1.15)
+    has_net_bearish_flow = (total_ce_change_oi - total_pe_change_oi) >= activity_threshold
+
+    is_oi_bullish = (has_pe_writing_dominance or has_ce_unwind_squeeze or has_net_bullish_flow) and not (has_ce_writing_dominance or has_pe_unwind_panic)
+    is_oi_bearish = (has_ce_writing_dominance or has_pe_unwind_panic or has_net_bearish_flow) and not (has_pe_writing_dominance or has_ce_unwind_squeeze)
+
+    if is_oi_bullish:
         oi_signal = "BULLISH"
-    elif near_ce_writing > near_pe_writing or (near_pe_unwinding > near_ce_unwinding and near_pe_unwinding > unwind_threshold):
+    elif is_oi_bearish:
         oi_signal = "BEARISH"
     else:
         oi_signal = "NEUTRAL"
@@ -1245,12 +1473,15 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     else:
         pcr_signal = "NEUTRAL"
 
-    # 2 of 3 Confirmations required from (OI, Volume, PCR)
+    # Confirmations from (OI, Volume, PCR)
     bull_confirm_count = sum(1 for s in (oi_signal, volume_signal, pcr_signal) if s == "BULLISH")
     bear_confirm_count = sum(1 for s in (oi_signal, volume_signal, pcr_signal) if s == "BEARISH")
 
-    is_bullish_dir = (price_signal == "BULLISH" and momentum_signal == "BULLISH" and bull_confirm_count >= 2)
-    is_bearish_dir = (price_signal == "BEARISH" and momentum_signal == "BEARISH" and bear_confirm_count >= 2)
+    # OI-Led directional gate: OI MUST agree with direction; price context must not conflict.
+    # Price is a sanity check (spot_chg not contradicting); momentum is not counted as an independent vote.
+    is_bullish_dir = (oi_signal == "BULLISH" and spot_chg >= 0.0 and bull_confirm_count >= 2)
+    is_bearish_dir = (oi_signal == "BEARISH" and spot_chg <= 0.0 and bear_confirm_count >= 2)
+
 
     # Pullback & Recovery Detection
     custom_price_hist = market_data.get("price_history")
@@ -1550,10 +1781,16 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     )
 
     # Breakout Extension: Extend cutoff up to 14:45 IST (02:45 PM) on valid high-conviction breakout
-    now_dt = datetime.now(IST)
-    now_mins = now_dt.hour * 60 + now_dt.minute
+    # Cannot extend before 09:30 (opening chop)
+    iv_mins = iv_time_info.get("total_mins")
+    if iv_mins is None:
+        now_dt = datetime.now(IST)
+        iv_mins = now_dt.hour * 60 + now_dt.minute
+    prime_start_mins = ENGINE_CONFIG.get("PRIME_WINDOW_START_MINS", 570)
     breakout_end_mins = ENGINE_CONFIG.get("BREAKOUT_WINDOW_END_MINS", 885)
-    effective_trade_window = in_trade_window or (is_breakout_expansion and now_mins < breakout_end_mins)
+    can_extend_breakout = is_breakout_expansion and (prime_start_mins <= iv_mins < breakout_end_mins)
+    effective_trade_window = in_trade_window or can_extend_breakout
+
 
     # Smart Cooldown Reset on Valid Breakout:
     effective_loss_cooldown = in_loss_cooldown and not is_breakout_expansion
@@ -1729,12 +1966,23 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         focus_title = "WAIT"
         if is_choppy or not expansion_confirmed:
             focus_reason = "LOW_EXPANSION_OR_CHOP"
-        elif price_signal == "BULLISH" and momentum_signal == "BULLISH":
+        elif price_signal == "BULLISH" and oi_signal != "BULLISH":
+            if bull_confirm_count < 2:
+                focus_reason = f"Bullish confirmation gate failed: Only {bull_confirm_count}/3 confirmations (OI, Volume, PCR) support Bullish direction."
+            else:
+                focus_reason = "Bullish confirmation gate failed: OI evidence is neutral, conflicting, or insufficient."
+        elif price_signal == "BEARISH" and oi_signal != "BEARISH":
+            if bear_confirm_count < 2:
+                focus_reason = f"Bearish confirmation gate failed: Only {bear_confirm_count}/3 confirmations (OI, Volume, PCR) support Bearish direction."
+            else:
+                focus_reason = "Bearish confirmation gate failed: OI evidence is neutral, conflicting, or insufficient."
+        elif price_signal == "BULLISH":
             focus_reason = f"Bullish confirmation gate failed: Only {bull_confirm_count}/3 confirmations (OI, Volume, PCR) support Bullish direction."
-        elif price_signal == "BEARISH" and momentum_signal == "BEARISH":
+        elif price_signal == "BEARISH":
             focus_reason = f"Bearish confirmation gate failed: Only {bear_confirm_count}/3 confirmations (OI, Volume, PCR) support Bearish direction."
         else:
             focus_reason = "Market direction or momentum unclear. Preserve capital."
+
 
     # -------------------------------------------------------------
     # STRUCTURED STRATEGY LOGGING (Item 12: Explicit Strategy Telemetry)
@@ -1852,8 +2100,21 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         enriched_chain=enriched_chain,
     )
 
+    tomorrow_bias = compute_tomorrow_trade_bias(
+        market_data=market_data,
+        spot=spot,
+        step=step,
+        pcr=pcr,
+        bullish_score=bullish_score,
+        bearish_score=bearish_score,
+        r1=r1,
+        s1=s1,
+        trending_oi=trending_oi,
+    )
+
     return {
         "morning_bias": morning_bias,
+        "tomorrow_bias": tomorrow_bias,
         "market_bias": {
             "bias": market_bias_str if market_bias_str in ("BULLISH", "BEARISH") else final_bias,
             "confidence": confidence,
@@ -1883,6 +2144,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         "option_buying": {
             "decision": decision,  # BUY CE, BUY PE, WAIT
             "action": decision,
+            "candidate_side": "CE" if "CE" in decision else ("PE" if "PE" in decision else None),
             "type": "CE" if "CE" in decision else ("PE" if "PE" in decision else "WAIT"),
             "symbol": symbol,
             "market_direction": market_bias_str,

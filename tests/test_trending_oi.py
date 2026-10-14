@@ -191,3 +191,18 @@ def test_api_trending_oi_endpoint(client):
     assert data["data"]["interval_minutes"] == 15
     assert len(data["data"]["rows"]) > 0
     assert "buildup_label" in data["data"]["rows"][0]
+
+
+def test_trending_oi_divergence_warning(client):
+    """7. Tests that divergence warning badge and details are populated when DLB occurs with positive Put OI."""
+    ts = get_trending_oi_timeseries("NIFTY", interval_minutes=5, spot_price=22695.35, strike_step=50.0)
+    assert "latest_divergence" in ts
+    # Verify every row contains divergence fields
+    for r in ts["rows"]:
+        assert "divergence" in r
+        assert "divergence_badge" in r
+        assert "divergence_detail" in r
+        if r.get("day_hl_break", "").startswith("D.L.B.") and r.get("diff_oi", 0) > 0:
+            assert r["divergence"] == "BULL_TRAP"
+            assert "Trap" in r["divergence_badge"]
+            assert "Put Writers Trapped" in r["divergence_detail"]

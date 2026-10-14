@@ -313,6 +313,31 @@ def init_signal_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trending_oi_sym_date ON trending_oi_snapshots(symbol, trade_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trending_oi_sym_ts ON trending_oi_snapshots(symbol, timestamp)")
 
+            # 10. Granular Per-Contract Snapshots Table (Interval flow tracking per contract)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS oi_contract_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    expiry TEXT NOT NULL,
+                    strike REAL NOT NULL,
+                    option_type TEXT NOT NULL,
+                    oi INTEGER NOT NULL,
+                    oi_change INTEGER,
+                    ltp REAL,
+                    volume INTEGER,
+                    bid REAL,
+                    ask REAL,
+                    spot_price REAL,
+                    source TEXT DEFAULT 'FYERS',
+                    is_fresh INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_oi_contract_lookup ON oi_contract_snapshots(symbol, expiry, strike, option_type, timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_oi_contract_sym_ts ON oi_contract_snapshots(symbol, timestamp)")
+
             # Dynamic migrations for signals
             existing_sig_cols = {col[1] for col in conn.execute("PRAGMA table_info(signals)").fetchall()}
             new_sig_columns = [
@@ -339,6 +364,10 @@ def init_signal_db():
                 ("is_deleted", "INTEGER DEFAULT 0"),
                 ("entry_latency_sec", "REAL"),
                 ("iv_missing", "INTEGER DEFAULT 0"),
+                ("partial_exit_lots", "INTEGER DEFAULT 0"),
+                ("partial_exit_price", "REAL"),
+                ("partial_exit_time", "TEXT"),
+                ("t1_hit_at", "TEXT"),
             ]
             for col_name, col_type in new_sig_columns:
                 if col_name not in existing_sig_cols:
@@ -934,7 +963,7 @@ def record_trending_oi_snapshot(symbol: str, analysis: dict) -> bool:
         sentiment = str(trending_oi.get("sentiment", "Neutral"))
 
         with _get_db() as conn:
-            # Check if recently recorded within 45 seconds
+            # Enforce chronological ordering and reject duplicate/out-of-order snapshots
             last_ts = conn.execute("""
                 SELECT timestamp FROM trending_oi_snapshots
                 WHERE symbol = ? AND trade_date = ?
@@ -943,10 +972,15 @@ def record_trending_oi_snapshot(symbol: str, analysis: dict) -> bool:
             if last_ts:
                 try:
                     last_dt = datetime.strptime(last_ts[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+                    if now_dt <= last_dt:
+                        # Out of order or duplicate timestamp rejection
+                        return False
                     if (now_dt - last_dt).total_seconds() < 45:
                         return False
                 except Exception:
                     pass
+
+            expiry_str = str(analysis.get("expiry") or analysis.get("market_bias", {}).get("expiry") or "")
 
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("""
@@ -962,11 +996,122 @@ def record_trending_oi_snapshot(symbol: str, analysis: dict) -> bool:
                 ce_change_oi, pe_change_oi, diff_oi, diff_pct,
                 dots, strength_status, net_pcr, sentiment, timestamp
             ))
+
+            # Store per-contract granular observations for true interval-flow tracking
+            for s in trending_oi.get("strikes_data") or trending_oi.get("selected_strikes", []):
+                if not isinstance(s, dict):
+                    continue
+                strike_val = float(s.get("strike", 0.0))
+                # CE observation
+                conn.execute("""
+                    INSERT INTO oi_contract_snapshots (
+                        symbol, trade_date, timestamp, expiry, strike, option_type,
+                        oi, oi_change, ltp, volume, bid, ask, spot_price, source, is_fresh, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'CE', ?, ?, ?, ?, ?, ?, ?, 'FYERS', 1, ?)
+                """, (
+                    symbol, trade_date, timestamp, expiry_str, strike_val,
+                    int(s.get("ce_oi", 0)), int(s.get("ce_oich", 0)), float(s.get("ce_ltp", 0.0)),
+                    int(s.get("ce_volume", 0)), s.get("ce_bid"), s.get("ce_ask"), spot, timestamp
+                ))
+                # PE observation
+                conn.execute("""
+                    INSERT INTO oi_contract_snapshots (
+                        symbol, trade_date, timestamp, expiry, strike, option_type,
+                        oi, oi_change, ltp, volume, bid, ask, spot_price, source, is_fresh, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'PE', ?, ?, ?, ?, ?, ?, ?, 'FYERS', 1, ?)
+                """, (
+                    symbol, trade_date, timestamp, expiry_str, strike_val,
+                    int(s.get("pe_oi", 0)), int(s.get("pe_oich", 0)), float(s.get("pe_ltp", 0.0)),
+                    int(s.get("pe_volume", 0)), s.get("pe_bid"), s.get("pe_ask"), spot, timestamp
+                ))
+
             conn.execute("COMMIT")
             return True
     except Exception as e:
         log.warning(f"Could not record Trending OI snapshot for {symbol}: {e}")
         return False
+
+
+def compute_contract_interval_oi_change(
+    symbol: str,
+    expiry: str,
+    strike: float,
+    option_type: str,
+    target_interval_sec: int = 300,
+    tolerance_sec: int = 120,
+    max_gap_sec: int = 900,
+) -> dict:
+    """
+    Computes true interval OI change (e.g. 5-min flow) by comparing two timestamped
+    observations of the EXACT contract and expiry.
+    
+    Distinguishes provider-reported day OI change (oich) from locally calculated interval flow.
+    Enforces:
+    - Same underlying symbol, expiry, strike, and option_type.
+    - Minimum elapsed time (target_interval_sec - tolerance_sec).
+    - Rejecting comparisons across outages (> max_gap_sec).
+    - Returns UNCLEAR / INSUFFICIENT_DATA if previous observation does not exist.
+    """
+    with _get_db() as conn:
+        curr_row = conn.execute("""
+            SELECT * FROM oi_contract_snapshots
+            WHERE symbol = ? AND expiry = ? AND abs(strike - ?) < 0.01 AND option_type = ?
+            ORDER BY id DESC LIMIT 1
+        """, (symbol.upper(), expiry, strike, option_type.upper())).fetchone()
+
+        if not curr_row:
+            return {"status": "INSUFFICIENT_DATA", "interval_oi_change": None, "reason": "No current contract observation"}
+
+        curr = dict(curr_row)
+        try:
+            curr_dt = datetime.strptime(curr["timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+        except Exception:
+            return {"status": "INSUFFICIENT_DATA", "interval_oi_change": None, "reason": "Malformed current timestamp"}
+
+        candidates = conn.execute("""
+            SELECT * FROM oi_contract_snapshots
+            WHERE symbol = ? AND expiry = ? AND abs(strike - ?) < 0.01 AND option_type = ? AND id < ?
+            ORDER BY id DESC LIMIT 15
+        """, (symbol.upper(), expiry, strike, option_type.upper(), curr["id"])).fetchall()
+
+        if not candidates:
+            return {"status": "INSUFFICIENT_DATA", "interval_oi_change": None, "reason": "No prior contract observation"}
+
+        prev = None
+        cand_dt = None
+        for cand in candidates:
+            c_dict = dict(cand)
+            try:
+                dt = datetime.strptime(c_dict["timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+            except Exception:
+                continue
+            delta_sec = (curr_dt - dt).total_seconds()
+            if delta_sec > max_gap_sec:
+                # Interrupted by data outage — reject comparison
+                break
+            if delta_sec >= (target_interval_sec - tolerance_sec):
+                prev = c_dict
+                cand_dt = dt
+                break
+
+        if not prev or not cand_dt:
+            return {"status": "INSUFFICIENT_DATA", "interval_oi_change": None, "reason": "Insufficient elapsed time or data gap"}
+
+        interval_change = int(curr["oi"]) - int(prev["oi"])
+        return {
+            "status": "VALID",
+            "symbol": symbol.upper(),
+            "expiry": expiry,
+            "strike": strike,
+            "option_type": option_type.upper(),
+            "current_oi": int(curr["oi"]),
+            "previous_oi": int(prev["oi"]),
+            "provider_day_oich": int(curr.get("oi_change") or 0),
+            "interval_oi_change": interval_change,
+            "interval_seconds": (curr_dt - cand_dt).total_seconds(),
+            "current_timestamp": curr["timestamp"],
+            "previous_timestamp": prev["timestamp"]
+        }
 
 
 def get_trending_oi_timeseries(
@@ -1295,6 +1440,28 @@ def get_trending_oi_timeseries(
         except Exception:
             disp_date = pt["trade_date"]
 
+        # Divergence / Trap Detection
+        atm_strike_val = round(ltp / strike_step) * strike_step if strike_step > 0 else ltp
+        divergence = None
+        divergence_badge = None
+        divergence_detail = None
+
+        is_dlb = bool(day_hl_break and day_hl_break.startswith("D.L.B."))
+        is_dhb = bool(day_hl_break and day_hl_break.startswith("D.H.B."))
+
+        # Bull Trap / Put Writers Trapped:
+        # Price breaking Day Lows while Put OI is higher (or sentiment is Bullish)
+        if (is_dlb or (prev_point and ltp < float(prev_point["spot_price"]) and ltp < atm_strike_val)) and diff_oi > 0:
+            divergence = "BULL_TRAP"
+            divergence_badge = f"⚠️ Trap < {int(atm_strike_val):,}"
+            divergence_detail = f"DIVERGENCE: Put Writers Trapped below {int(atm_strike_val):,}. Spot (₹{ltp:.2f}) breaking Day Low with net Put OI (+{diff_oi:,})."
+        # Bear Trap / Call Writers Trapped:
+        # Price breaking Day Highs while Call OI is higher (or sentiment is Bearish)
+        elif (is_dhb or (prev_point and ltp > float(prev_point["spot_price"]) and ltp > atm_strike_val)) and diff_oi < 0:
+            divergence = "BEAR_TRAP"
+            divergence_badge = f"⚠️ Trap > {int(atm_strike_val):,}"
+            divergence_detail = f"DIVERGENCE: Call Writers Trapped above {int(atm_strike_val):,}. Spot (₹{ltp:.2f}) breaking Day High with net Call OI ({diff_oi:,})."
+
         row = {
             "date": disp_date,
             "time": pt["time_str"],
@@ -1320,6 +1487,9 @@ def get_trending_oi_timeseries(
             "ce_action": ce_action,
             "pe_action": pe_action,
             "sub_activity": f"{ce_action} • {pe_action}",
+            "divergence": divergence,
+            "divergence_badge": divergence_badge,
+            "divergence_detail": divergence_detail,
         }
         processed_rows.append(row)
 
@@ -1335,13 +1505,17 @@ def get_trending_oi_timeseries(
         atm_s = round(spot_price / strike_step) * strike_step
         selected_strikes = [round(atm_s + i * strike_step, 2) for i in range(-5, 6)]
 
+    latest_row = processed_rows[0] if processed_rows else {}
     return {
         "symbol": symbol,
         "trade_date": trade_date,
         "interval_minutes": interval_minutes,
         "selected_strikes": selected_strikes,
         "atm_strike": round(spot_price / strike_step) * strike_step if spot_price else (selected_strikes[5] if len(selected_strikes) > 5 else 0),
-        "latest_summary": processed_rows[0] if processed_rows else {},
+        "latest_summary": latest_row,
+        "latest_divergence": latest_row.get("divergence"),
+        "latest_divergence_badge": latest_row.get("divergence_badge"),
+        "latest_divergence_detail": latest_row.get("divergence_detail"),
         "rows": processed_rows,
     }
 
@@ -1621,7 +1795,14 @@ def check_consecutive_loss_cooldown(symbol: str, now_dt: datetime | None = None)
     return False, "", 0
 
 
-def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1, override_cooldown: bool = False) -> dict | None:
+def record_signal(
+    signal_data: dict,
+    is_paper_trade: bool = True,
+    lots: int = 1,
+    override_cooldown: bool = False,
+    now_dt: datetime | None = None,
+) -> dict | None:
+
     """
     Atomically records a new signal into the journal (PAPER TRADING ONLY).
     GUARANTEES: At most one open signal (ACTIVE or TARGET_1_HIT) per index symbol.
@@ -1744,12 +1925,24 @@ def record_signal(signal_data: dict, is_paper_trade: bool = True, lots: int = 1,
     data_quality_json = json.dumps(dq_dict)
 
     cfg = INDEX_CONFIGS.get(symbol, INDEX_CONFIGS["NIFTY"])
-    lot_size = int(cfg.get("lot_size", 25))
+    lot_size = int(signal_data.get("lot_size") or cfg.get("lot_size", 65))
+    lots = int(signal_data.get("lots") or lots or 1)
     step = float(cfg.get("strike_step", 50.0))
     moneyness = signal_data.get("moneyness") or determine_moneyness(spot_at_entry, strike, signal_type, step)
 
-    now = datetime.now(IST)
+    if now_dt is not None:
+        now = now_dt
+    elif signal_data.get("now_dt") is not None:
+        now = signal_data["now_dt"]
+    elif signal_data.get("created_at") is not None:
+        try:
+            now = datetime.strptime(signal_data["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+        except Exception:
+            now = datetime.now(IST)
+    else:
+        now = datetime.now(IST)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
 
     with _get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -1938,25 +2131,28 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         current_spot = float(sig.get("spot_at_entry", 0.0))
 
         if market_data_cache and sym in market_data_cache:
-            current_spot = float(market_data_cache[sym].get("spot_price", current_spot))
-            chain = market_data_cache[sym].get("chain", [])
-            for item in chain:
-                if abs(item["strike"] - strike) < 1.0:
-                    current_ltp = item.get("ce_ltp" if sig_type == "CE" else "pe_ltp")
-                    current_bid = item.get("ce_bid" if sig_type == "CE" else "pe_bid")
-                    current_ask = item.get("ce_ask" if sig_type == "CE" else "pe_ask")
-                    break
-
-        if current_ltp is None or current_ltp <= 0.05:
-            try:
-                raw = fetch_option_chain_data(symbol=sym, expiry=expiry_str, force_refresh=True)
-                current_spot = float(raw.get("spot_price", current_spot))
-                for item in raw.get("chain", []):
+            cached_data = market_data_cache[sym]
+            data_status = cached_data.get("data_status", "LIVE")
+            if data_status == "LIVE":
+                current_spot = float(cached_data.get("spot_price", current_spot))
+                chain = cached_data.get("chain", [])
+                for item in chain:
                     if abs(item["strike"] - strike) < 1.0:
                         current_ltp = item.get("ce_ltp" if sig_type == "CE" else "pe_ltp")
                         current_bid = item.get("ce_bid" if sig_type == "CE" else "pe_bid")
                         current_ask = item.get("ce_ask" if sig_type == "CE" else "pe_ask")
                         break
+        else:
+            try:
+                raw = fetch_option_chain_data(symbol=sym, expiry=expiry_str, force_refresh=True)
+                if raw.get("data_status", "LIVE") == "LIVE":
+                    current_spot = float(raw.get("spot_price", current_spot))
+                    for item in raw.get("chain", []):
+                        if abs(item["strike"] - strike) < 1.0:
+                            current_ltp = item.get("ce_ltp" if sig_type == "CE" else "pe_ltp")
+                            current_bid = item.get("ce_bid" if sig_type == "CE" else "pe_bid")
+                            current_ask = item.get("ce_ask" if sig_type == "CE" else "pe_ask")
+                            break
             except Exception as e:
                 log.warning(f"Could not fetch option chain quotes for #{sig_id}: {e}")
 
@@ -1978,11 +2174,16 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         if has_valid_new_quote:
             last_valid_ts_str = now_str
             mins_since_last_valid_quote = 0.0
+        else:
+            log.warning(
+                f"Quote missing/stale for trade #{sig_id} ({sym} {strike} {sig_type}): "
+                f"LTP={current_ltp}, Bid={current_bid}. Stale duration: {mins_since_last_valid_quote:.1f}m. Preserving trade state."
+            )
 
         # Stale quote check: > 15 mins without valid quote since last_valid_quote_at
         is_stale_quote = (not has_valid_new_quote) and (mins_since_last_valid_quote > 15.0)
 
-        # Fallback to last known prices without fabricating ltp*0.99
+        # Fallback to last known prices for display only without fabricating quotes
         if current_ltp is None or current_ltp <= 0.05:
             current_ltp = float(sig["current_price"] or entry)
         if current_bid is None or current_bid <= 0.05:
@@ -2028,19 +2229,20 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         initial_risk_pts = max(1.0, entry - initial_sl_calc) if entry > initial_sl_calc else max(1.0, entry * 0.15)
         r_multiple = round(mfe_pts / initial_risk_pts, 3) if initial_risk_pts > 0 else 0.0
 
+        # Retrieve stored partial exit details to prevent data loss across statuses
+        stored_partial_lots = int(sig.get("partial_exit_lots") or 0)
+        stored_partial_price = float(sig.get("partial_exit_price") or 0.0) if sig.get("partial_exit_price") is not None else None
+        stored_partial_time = sig.get("partial_exit_time")
+        stored_t1_hit_at = sig.get("t1_hit_at")
+
         if has_valid_new_quote:
             # Stepped Ratchet Trail (3-for-1 Ratchet):
-            # For every +3.0 pts favorable movement, ratchet SL upward by +1.0 pt from initial SL
-            # Steadily trims downside risk on minor momentum expansion without choking on noise
             if mfe_pts >= 3.0:
                 ratchet_steps = int(mfe_pts // 3.0)
                 ratchet_sl = round(initial_sl_calc + (ratchet_steps * 1.0), 2)
                 trailed_sl = max(trailed_sl, ratchet_sl)
 
             # Automated Trailing Break-Even (TSL_BE_0_8_R):
-            # Immunizes option buyer against RIGHT_THEN_REVERSED reversals once excursion reaches >= +0.75R / +0.8R
-            # or early excursion (+4% / +0.40 of (T1 - entry) / +5 pts profit).
-            # Move SL to Cost + 0.50 buffer to secure break-even against slippage and statutory costs.
             if (
                 r_multiple >= 0.75
                 or (highest - entry) >= (initial_risk_pts * 0.75)
@@ -2063,6 +2265,11 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
                 new_status = "TARGET_1_HIT"
                 curr_status = "TARGET_1_HIT"
                 trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
+                stored_t1_hit_at = now_str
+                if lots >= 2:
+                    stored_partial_lots = lots // 2
+                    stored_partial_price = round(current_bid, 2) if credit_bid_targets else t1
+                    stored_partial_time = now_str
 
             if curr_status == "TARGET_1_HIT":
                 trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
@@ -2080,17 +2287,18 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # Whole-lot partial exit logic:
         # lots == 1: 0 lots closed at T1, 100% position trails to T2/TSL.
         # lots >= 2: close_lots = lots // 2 closed at T1, rem_lots = lots - close_lots trail to T2/TSL.
-        has_partial_t1_booked = (curr_status == "TARGET_1_HIT" and lots >= 2)
-        close_lots_t1 = (lots // 2) if has_partial_t1_booked else 0
+        has_partial_t1_booked = (stored_partial_lots > 0) or (curr_status == "TARGET_1_HIT" and lots >= 2)
+        close_lots_t1 = stored_partial_lots if stored_partial_lots > 0 else ((lots // 2) if has_partial_t1_booked else 0)
         rem_lots = lots - close_lots_t1
+        t1_booked_price = stored_partial_price if stored_partial_price is not None else t1
 
         def _calc_pnl(terminal_price: float, is_exit: bool = False) -> tuple[float, float]:
             if has_partial_t1_booked:
-                tot_pts = (close_lots_t1 * (t1 - entry) + rem_lots * (terminal_price - entry))
+                tot_pts = (close_lots_t1 * (t1_booked_price - entry) + rem_lots * (terminal_price - entry))
                 avg_pts = round(tot_pts / lots, 2)
                 gross_inr_val = round(tot_pts * lot_size, 2)
                 exit_legs = [
-                    (t1, float(close_lots_t1) / float(lots)),
+                    (t1_booked_price, float(close_lots_t1) / float(lots)),
                     (terminal_price, float(rem_lots) / float(lots)),
                 ]
             else:
@@ -2120,26 +2328,28 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
 
         if is_contract_expired:
             new_status = "EXPIRED"
-            exit_price = current_bid
+            raw_exit = current_bid
+            exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
+            points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
             exit_time = now_str
             exit_reason = "CONTRACT_EXPIRED"
             terminal_exit_reached = True
         elif is_stale_quote:
             new_status = "STALE_EXIT"
-            exit_price = current_bid
+            raw_exit = current_bid
+            exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
+            points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
             exit_time = now_str
             exit_reason = STALE_EXIT
             terminal_exit_reached = True
         elif has_valid_new_quote and current_bid >= t2:
             new_status = "TARGET_2_HIT"
             raw_exit = round(current_bid, 2) if credit_bid_targets else round(max(t2, current_bid), 2)
-            exit_price = round((t1 + raw_exit) / 2.0, 2) if has_partial_t1_booked else raw_exit
+            exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
             points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
@@ -2150,7 +2360,7 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             if has_trailed:
                 new_status = "TSL_HIT"
                 raw_exit = round(current_bid, 2) if credit_bid_targets else round(min(trailed_sl, current_bid), 2)
-                exit_price = round((t1 + raw_exit) / 2.0, 2) if has_partial_t1_booked else raw_exit
+                exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
                 points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
                 exit_bid = current_bid
                 exit_ask = current_ask
@@ -2160,28 +2370,30 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
                 new_status = "SL_HIT"
                 slippage = round(trailed_sl * 0.015, 2)
                 raw_exit = round(current_bid, 2) if credit_bid_targets else round(max(trailed_sl - slippage, min(trailed_sl, current_bid)), 2)
-                exit_price = raw_exit
-                points_pnl, net_inr = _calc_pnl(exit_price, is_exit=True)
+                exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
+                points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
                 exit_bid = current_bid
                 exit_ask = current_ask
                 exit_time = now_str
                 exit_reason = STOP_LOSS_HIT
             terminal_exit_reached = True
-        elif has_valid_new_quote and curr_status == "ACTIVE" and elapsed_mins >= max_allowed_stagnation and (current_bid - entry) < ((t1 - entry) * 0.25):
+        elif has_valid_new_quote and curr_status in ("ACTIVE", "TARGET_1_HIT") and elapsed_mins >= max_allowed_stagnation and (current_bid - entry) < ((t1 - entry) * 0.25):
             new_status = "TIME_STOP_EXIT"
-            exit_price = current_bid
+            raw_exit = current_bid
+            exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(current_bid, is_exit=True)
+            points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
             exit_time = now_str
             exit_reason = TIME_STOP_EXIT
             terminal_exit_reached = True
         elif is_eod and curr_status in ("ACTIVE", "TARGET_1_HIT"):
             new_status = "EOD_CLOSED"
-            exit_price = current_bid
+            raw_exit = current_bid
+            exit_price = round((close_lots_t1 * t1_booked_price + rem_lots * raw_exit) / float(lots), 2) if has_partial_t1_booked else raw_exit
             exit_bid = current_bid
             exit_ask = current_ask
-            points_pnl, net_inr = _calc_pnl(current_bid, is_exit=True)
+            points_pnl, net_inr = _calc_pnl(raw_exit, is_exit=True)
             exit_time = now_str
             exit_reason = EOD_CLOSED
             terminal_exit_reached = True
@@ -2199,7 +2411,8 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
                     mfe_points = ?, mfe_pct = ?, mae_points = ?, mae_pct = ?,
                     duration_mins = ?, exit_reason = ?,
                     status = ?, exit_price = ?, bid_at_exit = ?, ask_at_exit = ?,
-                    exit_time = ?, last_valid_quote_at = ?, updated_at = ?
+                    exit_time = ?, last_valid_quote_at = ?, updated_at = ?,
+                    partial_exit_lots = ?, partial_exit_price = ?, partial_exit_time = ?, t1_hit_at = ?
                 WHERE id = ?
             """, (
                 current_ltp, highest, lowest,
@@ -2207,6 +2420,7 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
                 mfe_pts, mfe_pct, mae_pts, mae_pct,
                 duration_mins, exit_reason,
                 new_status, exit_price, exit_bid, exit_ask, exit_time, last_valid_ts_str, now_str,
+                stored_partial_lots, stored_partial_price, stored_partial_time, stored_t1_hit_at,
                 sig_id
             ))
             conn.execute("COMMIT")
@@ -2223,6 +2437,10 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             "exit_price": exit_price,
             "exit_reason": exit_reason,
             "last_valid_quote_at": last_valid_ts_str,
+            "partial_exit_lots": stored_partial_lots,
+            "partial_exit_price": stored_partial_price,
+            "partial_exit_time": stored_partial_time,
+            "t1_hit_at": stored_t1_hit_at,
         })
         updated_signals.append(sig)
 
@@ -2335,15 +2553,17 @@ def close_signal_manually(
             lots = int(sig.get("lots") or 1)
             curr_status = sig["status"]
 
-            if curr_status == "TARGET_1_HIT" and lots >= 2:
-                close_lots = lots // 2
+            has_partial = (int(sig.get("partial_exit_lots") or 0) > 0) or (curr_status == "TARGET_1_HIT" and lots >= 2)
+            if has_partial:
+                close_lots = int(sig.get("partial_exit_lots") or (lots // 2))
                 rem_lots = lots - close_lots
-                tot_pts = (close_lots * (t1_p - entry_p) + rem_lots * (curr_p - entry_p))
+                partial_p = float(sig.get("partial_exit_price") or t1_p)
+                tot_pts = (close_lots * (partial_p - entry_p) + rem_lots * (curr_p - entry_p))
                 pts = round(tot_pts / lots, 2)
                 gross_inr = round(tot_pts * lot_size, 2)
-                stored_exit_p = round((t1_p + curr_p) / 2.0, 2)
+                stored_exit_p = curr_p
                 exit_legs = [
-                    (t1_p, float(close_lots) / float(lots)),
+                    (partial_p, float(close_lots) / float(lots)),
                     (curr_p, float(rem_lots) / float(lots)),
                 ]
             else:
@@ -2380,10 +2600,20 @@ def close_signal_manually(
             # Trigger asynchronous post-trade review
             trigger_async_trade_review(signal_id)
 
-            return get_signal_by_id(signal_id)
+            sig.update({
+                "status": "CLOSED",
+                "exit_reason": final_reason,
+                "exit_price": stored_exit_p,
+                "bid_at_exit": curr_p,
+                "exit_time": now_str,
+                "points_pnl": pts,
+                "pnl_pct": pnl_pct,
+                "net_pnl_inr": inr,
+            })
+            return sig
         else:
             conn.execute("ROLLBACK")
-            return sig
+            return None
 
 
 def delete_signal(signal_id: int) -> bool:

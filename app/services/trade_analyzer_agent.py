@@ -155,24 +155,41 @@ def review_closed_trade(signal_id: int) -> dict | None:
 
     # 3. Whole-Lot Transaction Costs & R-Multiple
     status = (sig.get("status") or "").upper()
-    has_partial_t1 = (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and status == "TARGET_1_HIT")) and (lots >= 2)
+    stored_partial_lots = int(sig.get("partial_exit_lots") or 0)
+    stored_partial_price = float(sig.get("partial_exit_price") or t1_p) if stored_partial_lots > 0 else t1_p
+    inferred_partial = False
 
-    if has_partial_t1:
+    if stored_partial_lots > 0:
+        has_partial_t1 = True
+        close_lots = stored_partial_lots
+        partial_price = stored_partial_price
+    elif lots >= 2 and (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and (status == "TARGET_1_HIT" or float(sig.get("highest_price") or 0.0) >= t1_p))):
+        has_partial_t1 = True
         close_lots = lots // 2
+        partial_price = t1_p
+        inferred_partial = True
+        data_quality_flags.append("INFERRED_PARTIAL_EXIT")
+    else:
+        has_partial_t1 = False
+        close_lots = 0
+        partial_price = t1_p
+
+    if has_partial_t1 and close_lots > 0:
         rem_lots = lots - close_lots
         f_t1 = close_lots / lots
         f_rem = rem_lots / lots
-        exit_legs = [(t1_p, f_t1), (exit_p, f_rem)]
-        gross_pts = (close_lots * (t1_p - entry_p) + rem_lots * (exit_p - entry_p)) / lots
+        exit_legs = [(partial_price, f_t1), (exit_p, f_rem)]
+        gross_pts = (close_lots * (partial_price - entry_p) + rem_lots * (exit_p - entry_p)) / lots
     else:
         exit_legs = [(exit_p, 1.0)]
         gross_pts = exit_p - entry_p
 
-    costs = calculate_trade_costs(entry_p, exit_legs, lot_size=lot_size, lots=lots)
+    costs = calculate_trade_costs(entry_p, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol)
     net_pts = round(gross_pts - costs["cost_points"], 2)
     net_inr = round(net_pts * lot_size * lots, 2)
     r_multiple = round(net_pts / initial_risk, 3)
     pnl_pct = round((net_pts / entry_p * 100.0), 2) if entry_p > 0 else 0.0
+
 
     # 4. Excursion & Trajectory Metrics
     high_p = float(sig.get("highest_price") or entry_p)
@@ -931,8 +948,8 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
 def _enrich_trade_costs_and_r(trade: dict) -> dict:
     t = dict(trade)
     symbol = (t.get("symbol") or "NIFTY").upper()
-    cfg = INDEX_CONFIGS.get(symbol, INDEX_CONFIGS.get("NIFTY", {"lot_size": 25}))
-    lot_size = int(t.get("lot_size") or cfg.get("lot_size", 25))
+    cfg = INDEX_CONFIGS.get(symbol, INDEX_CONFIGS.get("NIFTY", {"lot_size": 65}))
+    lot_size = int(t.get("lot_size") or cfg.get("lot_size", 65))
     lots = int(t.get("lots") or 1)
 
     entry = float(t.get("ask_at_entry") or t.get("entry_price") or 0.0)
@@ -943,22 +960,35 @@ def _enrich_trade_costs_and_r(trade: dict) -> dict:
 
     status = (t.get("status") or "").upper()
     exit_reason = (t.get("exit_reason") or "").upper()
+    stored_partial_lots = int(t.get("partial_exit_lots") or 0)
+    t1_val = float(t.get("target_1") or (entry + initial_risk * 1.5))
+    stored_partial_price = float(t.get("partial_exit_price") or t1_val) if stored_partial_lots > 0 else t1_val
 
-    has_partial_t1 = (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and status == "TARGET_1_HIT")) and (lots >= 2)
-
-    if has_partial_t1:
-        t1 = float(t.get("target_1") or (entry + initial_risk * 1.5))
+    if stored_partial_lots > 0:
+        has_partial_t1 = True
+        close_lots = stored_partial_lots
+        partial_price = stored_partial_price
+    elif lots >= 2 and (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and (status == "TARGET_1_HIT" or float(t.get("highest_price") or 0.0) >= t1_val))):
+        has_partial_t1 = True
         close_lots = lots // 2
+        partial_price = t1_val
+    else:
+        has_partial_t1 = False
+        close_lots = 0
+        partial_price = t1_val
+
+    if has_partial_t1 and close_lots > 0:
         rem_lots = lots - close_lots
         f_t1 = close_lots / lots
         f_rem = rem_lots / lots
-        exit_legs = [(t1, f_t1), (exit_p, f_rem)]
-        gross_pts = (close_lots * (t1 - entry) + rem_lots * (exit_p - entry)) / lots
+        exit_legs = [(partial_price, f_t1), (exit_p, f_rem)]
+        gross_pts = (close_lots * (partial_price - entry) + rem_lots * (exit_p - entry)) / lots
     else:
         exit_legs = [(exit_p, 1.0)]
         gross_pts = exit_p - entry
 
-    costs = calculate_trade_costs(entry, exit_legs, lot_size=lot_size, lots=lots)
+    costs = calculate_trade_costs(entry, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol)
+
     net_pts = round(gross_pts - costs["cost_points"], 2)
     net_inr = round(net_pts * lot_size * lots, 2)
     r_multiple = round(net_pts / initial_risk, 3)

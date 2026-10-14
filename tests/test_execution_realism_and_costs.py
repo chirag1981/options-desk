@@ -101,6 +101,7 @@ def test_target1_requires_bid_above_t1_not_just_ltp():
 def test_stale_fallback_quotes_do_not_trigger_fills_or_exits():
     """Missing or non-positive quotes fall back for display only and do not trigger regular exits."""
     future_exp = (datetime.now(IST) + timedelta(days=7)).strftime("%d-%b-%Y")
+    midday = datetime.now(IST).replace(hour=11, minute=30, second=0)
     sig = record_signal({
         "symbol": "NIFTY",
         "type": "CE",
@@ -115,11 +116,10 @@ def test_stale_fallback_quotes_do_not_trigger_fills_or_exits():
         "target_2": 160.0,
         "lots": 1,
         "lot_size": 65,
-    }, is_paper_trade=True, override_cooldown=True)
+    }, is_paper_trade=True, override_cooldown=True, now_dt=midday)
     assert sig is not None
     sig_id = sig["id"]
 
-    midday = datetime.now(IST).replace(hour=11, minute=30, second=0)
 
     # Empty cache / missing strike in chain (has_valid_new_quote == False)
     empty_cache = {

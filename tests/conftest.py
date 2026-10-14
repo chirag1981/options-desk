@@ -21,10 +21,25 @@ options_signal_service.DB_PATH = os.path.join(_TEST_DB_DIR, "options_signals_tes
 
 @pytest.fixture(autouse=True)
 def _assert_isolated_db():
-    """Fails fast if any test is about to touch the live database."""
+    """Fails fast if any test is about to touch the live database and isolates test state."""
     assert "instance" not in options_signal_service.DB_PATH, "Tests must not use the live DB"
     options_signal_service.init_signal_db()
+    with options_signal_service._get_db() as conn:
+        conn.execute("DELETE FROM signals")
+        conn.execute("DELETE FROM trending_oi_snapshots")
+        try:
+            conn.execute("DELETE FROM decision_log")
+            conn.execute("DELETE FROM trade_ticks")
+        except Exception:
+            pass
+    from app.services import options_engine
+    with options_engine._BIAS_LOCK:
+        options_engine._BIAS_STATES.clear()
+    from app.services import options_scheduler
+    with options_scheduler._CONFIRMATION_LOCK:
+        options_scheduler._PENDING_ENTRY_CONFIRMATIONS.clear()
     yield
+
 
 
 @pytest.fixture(autouse=True)
