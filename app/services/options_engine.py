@@ -939,6 +939,82 @@ def compute_tomorrow_trade_bias(
     }
 
 
+def compute_market_vector(
+    bias: str,
+    bullish_score: float,
+    bearish_score: float,
+    pcr: float,
+    spot: float,
+    atm: float,
+    r1: float,
+    r2: float,
+    s1: float,
+    s2: float,
+    trending_oi: dict | None = None,
+) -> dict:
+    """
+    Computes unified, deterministic Market Vector (BULLISH / BEARISH / RANGEBOUND)
+    and plain-English Seller Actions + Actionable Playbook.
+    Guaranteed to stay perfectly aligned with Market Bias, Trending OI, and PCR.
+    """
+    diff_pct = float(trending_oi.get("diff_pct", 0.0)) if trending_oi else 0.0
+    sentiment = (trending_oi.get("sentiment") or "").upper() if trending_oi else ""
+
+    is_bearish = (
+        bias == "BEARISH"
+        or diff_pct <= -35.0
+        or (pcr < 0.85 and bearish_score > bullish_score)
+        or "BEARISH" in sentiment
+    )
+    is_bullish = (
+        not is_bearish
+        and (
+            bias == "BULLISH"
+            or diff_pct >= 35.0
+            or (pcr > 1.15 and bullish_score > bearish_score)
+            or "BULLISH" in sentiment
+        )
+    )
+
+    call_wall = f"{r1:,.0f} CE"
+    put_base = f"{s1:,.0f} PE"
+
+    if is_bearish:
+        conviction = int(min(98, max(70, round(max(bearish_score, abs(diff_pct))))))
+        mode = "PE"
+        mode_pill = "PURE PE PLAY (SELL-ON-RISE)"
+        mode_class = "bearish"
+        title = f"BEARISH VECTOR ({conviction}% Conviction)"
+        seller_action = f"Institutional Call Writing dominant at {call_wall}. Put writers unwinding support floor."
+        playbook = f"Sell-on-Rise: Rallies towards R1 ({r1:,.0f}) face heavy institutional supply. Downside target: S1 ({s1:,.0f}) / S2 ({s2:,.0f})."
+    elif is_bullish:
+        conviction = int(min(98, max(70, round(max(bullish_score, abs(diff_pct))))))
+        mode = "CE"
+        mode_pill = "PURE CE PLAY (BUY-ON-DIPS)"
+        mode_class = "bullish"
+        title = f"BULLISH VECTOR ({conviction}% Conviction)"
+        seller_action = f"Institutional Put Writing dominant at {put_base}. Call writers trapped and short-covering."
+        playbook = f"Buy-on-Dip: Dips towards S1 ({s1:,.0f}) offer high probability support. Upside target: R1 ({r1:,.0f}) / R2 ({r2:,.0f})."
+    else:
+        conviction = 50
+        mode = "WAIT"
+        mode_pill = "AVOID NAKED BUYING (CHOP TRAP)"
+        mode_class = "neutral"
+        title = "RANGEBOUND VECTOR (50% Conviction)"
+        seller_action = f"Two-way writing active around ATM ({atm:,.0f}). Diff OI under 30L; sellers eating premium from buyers."
+        playbook = f"Preserve Capital: Avoid buying in middle of channel ({s1:,.0f} - {r1:,.0f}). Wait for confirmed breakout above R1 or breakdown below S1."
+
+    return {
+        "title": title,
+        "mode": mode,
+        "mode_pill": mode_pill,
+        "mode_class": mode_class,
+        "conviction_pct": conviction,
+        "seller_action": seller_action,
+        "playbook": playbook,
+    }
+
+
 def analyze_option_desk(market_data: dict, update_state: bool = False, has_active_trade: bool | None = None) -> dict:
     """
     Comprehensive Options Analytical Engine with Selective Option Buying Decision Flow:
@@ -1059,6 +1135,15 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                 "key_support": f"{spot - step:,.0f} PE",
                 "cpr_type": "AVERAGE",
                 "detail": "Data unavailable. Evaluating EOD market structure...",
+            },
+            "market_vector": {
+                "title": "RANGEBOUND VECTOR (Awaiting Live Flow)",
+                "mode": "WAIT",
+                "mode_pill": "⏸ AWAITING DATA",
+                "mode_class": "neutral",
+                "conviction_pct": 50,
+                "seller_action": "Market data currently unavailable from broker.",
+                "playbook": "Preserve Capital: Do not place orders until live data feeds are active.",
             },
             "oi_activity_summary": {"call_writing_strike": 0, "put_writing_strike": 0, "call_unwinding_strike": "None", "put_unwinding_strike": "None", "pcr": 1.0, "total_ce_oi": "0", "total_pe_oi": "0", "total_ce_change_oi": "0", "total_pe_change_oi": "0"},
             "pcr": {"pcr_ratio": 1.0, "pcr_chg": 0.0},
@@ -2112,9 +2197,24 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         trending_oi=trending_oi,
     )
 
+    market_vector = compute_market_vector(
+        bias=market_bias_str if market_bias_str in ("BULLISH", "BEARISH") else final_bias,
+        bullish_score=bullish_score,
+        bearish_score=bearish_score,
+        pcr=pcr,
+        spot=spot,
+        atm=atm_strike,
+        r1=r1,
+        r2=r2,
+        s1=s1,
+        s2=s2,
+        trending_oi=trending_oi,
+    )
+
     return {
         "morning_bias": morning_bias,
         "tomorrow_bias": tomorrow_bias,
+        "market_vector": market_vector,
         "market_bias": {
             "bias": market_bias_str if market_bias_str in ("BULLISH", "BEARISH") else final_bias,
             "confidence": confidence,
@@ -2140,6 +2240,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "breakout_level": breakout_level,
             "breakdown_level": breakdown_level,
             "spot_diff": spot_diff,
+            "market_vector": market_vector,
         },
         "option_buying": {
             "decision": decision,  # BUY CE, BUY PE, WAIT

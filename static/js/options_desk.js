@@ -415,6 +415,31 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
+        // Market Vector & Seller Action (Card 2)
+        const mv = data.market_vector || (levels && levels.market_vector) || {};
+        const vectorBox = document.getElementById("market-vector-box");
+        const vectorHeadText = document.getElementById("vector-head-text");
+        const vectorModePill = document.getElementById("vector-mode-pill");
+        const vectorSellerAction = document.getElementById("vector-seller-action");
+        const vectorPlaybookText = document.getElementById("vector-playbook-text");
+
+        if (vectorBox) {
+            const modeCls = mv.mode_class || "neutral";
+            vectorBox.className = `market-vector-box mode-${modeCls}`;
+        }
+        if (vectorHeadText) {
+            vectorHeadText.textContent = mv.title || "ANALYZING FLOW...";
+        }
+        if (vectorModePill) {
+            vectorModePill.textContent = mv.mode_pill || "--";
+        }
+        if (vectorSellerAction) {
+            vectorSellerAction.textContent = mv.seller_action || "Evaluating institutional writing flow...";
+        }
+        if (vectorPlaybookText) {
+            vectorPlaybookText.textContent = mv.playbook || "Awaiting boundary confirmation.";
+        }
+
         // 4. Card 3: Option Buying Focus & Execution Plan
         const optBuying = data.option_buying || data.option_focus || {};
         const tradePlan = optBuying.trade_plan || {};

@@ -198,3 +198,66 @@ def test_tomorrow_trade_bias_bearish_call_writing():
     assert "22,700 CE" in result["detail"]
     assert "22,500 PE" in result["detail"]
 
+
+def test_market_vector_bearish_and_bullish():
+    """Verifies compute_market_vector generates consistent and non-conflicting directives."""
+    from app.services.options_engine import compute_market_vector
+
+    # 1. Bearish vector
+    mv_b = compute_market_vector(
+        bias="BEARISH",
+        bullish_score=0.0,
+        bearish_score=95.0,
+        pcr=0.68,
+        spot=22625.0,
+        atm=22600.0,
+        r1=22700.0,
+        r2=22800.0,
+        s1=22600.0,
+        s2=22500.0,
+        trending_oi={"diff_pct": -83.0, "sentiment": "Strong Bearish"}
+    )
+    assert "BEARISH VECTOR" in mv_b["title"]
+    assert "PURE PE PLAY" in mv_b["mode_pill"]
+    assert mv_b["mode_class"] == "bearish"
+    assert "22,700 CE" in mv_b["seller_action"]
+    assert "Sell-on-Rise" in mv_b["playbook"]
+
+    # 2. Bullish vector
+    mv_bull = compute_market_vector(
+        bias="BULLISH",
+        bullish_score=85.0,
+        bearish_score=10.0,
+        pcr=1.35,
+        spot=22600.0,
+        atm=22600.0,
+        r1=22700.0,
+        r2=22800.0,
+        s1=22500.0,
+        s2=22400.0,
+        trending_oi={"diff_pct": 75.0, "sentiment": "Strong Bullish"}
+    )
+    assert "BULLISH VECTOR" in mv_bull["title"]
+    assert "PURE CE PLAY" in mv_bull["mode_pill"]
+    assert mv_bull["mode_class"] == "bullish"
+    assert "Buy-on-Dip" in mv_bull["playbook"]
+
+    # 3. Rangebound vector
+    mv_range = compute_market_vector(
+        bias="NEUTRAL",
+        bullish_score=35.0,
+        bearish_score=35.0,
+        pcr=1.02,
+        spot=22600.0,
+        atm=22600.0,
+        r1=22700.0,
+        r2=22800.0,
+        s1=22500.0,
+        s2=22400.0,
+        trending_oi={"diff_pct": 10.0, "sentiment": "Neutral"}
+    )
+    assert "RANGEBOUND VECTOR" in mv_range["title"]
+    assert "AVOID NAKED BUYING" in mv_range["mode_pill"]
+    assert mv_range["mode_class"] == "neutral"
+
+
