@@ -68,11 +68,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const levelR2Val = document.getElementById("level-r2-val");
     const levelsOuterTargets = document.getElementById("levels-outer-targets");
 
-    // Institutional Stance Dominance Elements
-    const instDomTitle = document.getElementById("inst-dom-title");
-    const instDomPct = document.getElementById("inst-dom-pct");
-    const domBarCe = document.getElementById("dom-bar-ce");
-    const domBarPe = document.getElementById("dom-bar-pe");
+    // Top Ticker / OI Totals Elements
+    const totalCeOi = document.getElementById("total-ce-oi");
+    const totalCeChg = document.getElementById("total-ce-chg");
+    const totalPeOi = document.getElementById("total-pe-oi");
+    const totalPeChg = document.getElementById("total-pe-chg");
 
     // Option Buying & Setup Score Elements
     const cardOptionFocus = document.getElementById("card-option-focus");
@@ -89,30 +89,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const checklistSummary = document.getElementById("checklist-summary");
     const checklistGrid = document.getElementById("checklist-grid");
 
-    // OI Activity Elements
-    const actCallWriting = document.getElementById("act-call-writing");
-    const actPutWriting = document.getElementById("act-put-writing");
-    const actCallUnwinding = document.getElementById("act-call-unwinding");
-    const actPutUnwinding = document.getElementById("act-put-unwinding");
-    const totalCeOi = document.getElementById("total-ce-oi");
-    const totalCeChg = document.getElementById("total-ce-chg");
-    const totalPeOi = document.getElementById("total-pe-oi");
-    const totalPeChg = document.getElementById("total-pe-chg");
-
-    // Lists & Tables
-    const bigOiList = document.getElementById("big-oi-list");
-    const oiTrendTbody = document.getElementById("oi-trend-tbody");
-    const optionChainTbody = document.getElementById("option-chain-tbody");
-    const btnExportCsv = document.getElementById("btn-export-csv");
+    // Helper function for sentiment badge class
+    function getSentimentBadgeClass(sentimentStr) {
+        const s = (sentimentStr || "").toLowerCase();
+        if (s.includes("strong bullish")) return "badge-sentiment-strong-bullish";
+        if (s.includes("strong bearish")) return "badge-sentiment-strong-bearish";
+        if (s.includes("bullish")) return "badge-sentiment-bullish";
+        if (s.includes("bearish")) return "badge-sentiment-bearish";
+        return "badge-sentiment-neutral";
+    }
 
     // Trending OI Elements
-    const btnTabTrendingOi = document.getElementById("btn-tab-trending-oi");
-    const btnTabStrikeBreakdown = document.getElementById("btn-tab-strike-breakdown");
     const trendingIntervalSelect = document.getElementById("trending-interval-select");
     const trendingSelectedStrikesContainer = document.getElementById("trending-selected-strikes-container");
     const trendingLiveCapsuleSummary = document.getElementById("trending-live-capsule-summary");
     const trendingOiTimeseriesContainer = document.getElementById("trending-oi-timeseries-container");
-    const trendingStrikeBreakdownContainer = document.getElementById("trending-strike-breakdown-container");
     const trendingPulseTbody = document.getElementById("trending-pulse-tbody");
 
     // Initial state setup
@@ -541,21 +532,13 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
-        // 5. Card 4: OI Activity Summary
-        if (actCallWriting) actCallWriting.textContent = formatIndianNumber(summary.call_writing_strike);
-        if (actPutWriting) actPutWriting.textContent = formatIndianNumber(summary.put_writing_strike);
-        if (actCallUnwinding) actCallUnwinding.textContent = formatIndianNumber(summary.call_unwinding_strike);
-        if (actPutUnwinding) actPutUnwinding.textContent = formatIndianNumber(summary.put_unwinding_strike);
-
+        // 5. Total OI Totals (Top Ticker)
         if (totalCeOi) totalCeOi.textContent = summary.total_ce_oi || "--";
         if (totalCeChg) totalCeChg.textContent = `(${summary.total_ce_change_oi || "--"})`;
         if (totalPeOi) totalPeOi.textContent = summary.total_pe_oi || "--";
         if (totalPeChg) totalPeChg.textContent = `(${summary.total_pe_change_oi || "--"})`;
 
-        // 6. Card 5: Big OI Movements
-        renderBigOiMovements(data.big_oi_movements || []);
-
-        // 7. Section 3: Trending OI & Strike Breakdown (ATM ± 5 strikes)
+        // 6. Section 3: Trending OI (ATM ± 5 strikes)
         // Refresh Trending OI ONLY at selected interval; manual desk refresh preserves Trending OI table
         const currentIntervalMins = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
         const intervalMs = currentIntervalMins * 60 * 1000;
@@ -570,124 +553,11 @@ document.addEventListener("DOMContentLoaded", () => {
         if (state.trendingData) {
             renderTrendingOiTable(state.trendingData, levels.atm_strike, bias.spot_price);
         }
-        renderOiTrendTable(data.oi_trend || [], levels.atm_strike, bias.spot_price);
 
-        // 8. Section 4: Detailed Option Chain
-        renderOptionChainTable(data.detailed_chain || [], levels.atm_strike, levels.resistance_1, levels.support_1, bias.spot_price);
+
     }
 
-    /**
-     * Renders Big OI Movements
-     */
-    function renderBigOiMovements(movements) {
-        if (!bigOiList) return;
-        if (movements.length === 0) {
-            bigOiList.innerHTML = `<div class="empty-state">No large OI movements meeting threshold.</div>`;
-            if (instDomPct) instDomPct.textContent = "No large movements";
-            return;
-        }
 
-        // Calculate Directional Positioning (% Bearish vs % Bullish weight)
-        let bearOiSum = 0;
-        let bullOiSum = 0;
-        movements.forEach((item) => {
-            const chg = Math.abs(item.change_oi || 0);
-            const sent = item.sentiment || "";
-            const act = (item.activity || "").toUpperCase();
-            const isBear = sent === "BEARISH" || act.includes("CALL WRITING") || act.includes("LONG PUT") || act.includes("PUT UNWINDING");
-            if (isBear) {
-                bearOiSum += chg;
-            } else {
-                bullOiSum += chg;
-            }
-        });
-
-        const totalMove = bearOiSum + bullOiSum;
-        const bearPct = totalMove > 0 ? Math.round((bearOiSum / totalMove) * 100) : 50;
-        const bullPct = 100 - bearPct;
-
-        if (domBarCe) domBarCe.style.width = `${bearPct}%`;
-        if (domBarPe) domBarPe.style.width = `${bullPct}%`;
-
-        if (instDomPct) {
-            if (bearPct >= 65) {
-                instDomPct.textContent = `🔴 Bears Dominating (${bearPct}% Bearish Flow)`;
-                instDomPct.className = "inst-dom-pct val-loss";
-            } else if (bullPct >= 65) {
-                instDomPct.textContent = `🟢 Bulls Dominating (${bullPct}% Bullish Flow)`;
-                instDomPct.className = "inst-dom-pct val-win";
-            } else {
-                instDomPct.textContent = `🟡 Balanced Stance (${bearPct}% Bear / ${bullPct}% Bull)`;
-                instDomPct.className = "inst-dom-pct";
-            }
-        }
-
-        const maxOi = Math.max(...movements.map((m) => Math.abs(m.change_oi || 1)), 1);
-
-        bigOiList.innerHTML = "";
-        movements.forEach((item) => {
-            const row = document.createElement("div");
-            row.className = "big-oi-item";
-
-            const sideClass = (item.side || (item.activity && item.activity.includes("CALL") ? "CE" : "PE"));
-            const chgVal = item.change_oi !== undefined ? item.change_oi : (item.ce_change_oi || item.pe_change_oi || 0);
-            const isAddition = chgVal >= 0;
-            const deltaClass = isAddition ? "pos" : "neg";
-            const deltaSign = isAddition ? "▲ +" : "▼ ";
-            const widthPct = Math.min(100, Math.max(10, Math.round((Math.abs(chgVal) / maxOi) * 100)));
-            row.style.setProperty("--bar-width", `${widthPct}%`);
-
-            // Format directional impact tag based on actual activity & sentiment
-            let tagClass = "tag-neutral";
-            const act = (item.activity || "").toUpperCase();
-            const sent = (item.sentiment || "").toUpperCase();
-            let tagHtml = item.activity || act;
-            let rowTitle = "";
-
-            if (act.includes("LONG PUT") || (sideClass === "PE" && isAddition && sent === "BEARISH")) {
-                tagClass = "tag-bearish";
-                tagHtml = `<span class="dir-icon">🔻</span> Put Buying (Bearish)`;
-                rowTitle = "Long Put Buildup: Downside hedging / Bearish put buying";
-            } else if (act.includes("CALL WRITING") || (sideClass === "CE" && isAddition && sent === "BEARISH")) {
-                tagClass = "tag-bearish";
-                tagHtml = `<span class="dir-icon">🔻</span> Resistance Build`;
-                rowTitle = "Call Writing: Institutional resistance building (Bearish Ceiling)";
-            } else if (act.includes("PUT WRITING") || (sideClass === "PE" && isAddition && sent === "BULLISH")) {
-                tagClass = "tag-bullish";
-                tagHtml = `<span class="dir-icon">🔺</span> Support Build`;
-                rowTitle = "Put Writing: Institutional support building (Bullish Floor)";
-            } else if (act.includes("LONG CALL") || (sideClass === "CE" && isAddition && sent === "BULLISH")) {
-                tagClass = "tag-bullish";
-                tagHtml = `<span class="dir-icon">🔺</span> Call Buying (Bullish)`;
-                rowTitle = "Long Call Buildup: Upside momentum buying";
-            } else if (act.includes("CALL UNWINDING") || (sideClass === "CE" && chgVal < 0)) {
-                tagClass = "tag-bullish";
-                tagHtml = `<span class="dir-icon">↗️</span> Short Covering`;
-                rowTitle = "Call Unwinding: Call sellers exiting (Bulls pushing higher)";
-            } else if (act.includes("PUT UNWINDING") || (sideClass === "PE" && chgVal < 0)) {
-                tagClass = "tag-bearish";
-                tagHtml = `<span class="dir-icon">↘️</span> Support Cracking`;
-                rowTitle = "Put Unwinding: Put sellers exiting (Downside risk increasing)";
-            }
-
-            const formattedChg = item.change_oi_formatted ? item.change_oi_formatted.replace("+", "").replace("-", "") : formatIndianNumber(Math.abs(chgVal));
-
-            row.setAttribute("title", rowTitle);
-            row.innerHTML = `
-                <div class="big-oi-strike-side">
-                    <span class="side-pill ${sideClass}">${sideClass}</span>
-                    <span class="big-oi-strike font-mono">${formatIndianNumber(item.strike)}</span>
-                </div>
-                <div class="big-oi-delta ${deltaClass} font-mono">
-                    ${deltaSign}${formattedChg} OI
-                </div>
-                <div class="big-oi-tag ${tagClass}">
-                    ${tagHtml}
-                </div>
-            `;
-            bigOiList.appendChild(row);
-        });
-    }
 
     /**
      * Renders Trending OI Oi Pulse Table (ATM ± 5 strikes)
@@ -695,7 +565,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderTrendingOiTable(trendingTimeseries, atmStrike, spotPrice) {
         if (!trendingPulseTbody) return;
         if (!trendingTimeseries || !trendingTimeseries.rows || trendingTimeseries.rows.length === 0) {
-            trendingPulseTbody.innerHTML = `<tr><td colspan="14" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
+            trendingPulseTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
             return;
         }
 
@@ -738,7 +608,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span>${pctSign}${latest.strength_pct}%</span>
                         ${dotsStr ? `<span class="strength-dots">${dotsStr}</span>` : ''}
                     </span>
-                    <span class="badge ${latest.sentiment === 'Bullish' ? 'badge-sentiment-bullish' : (latest.sentiment === 'Bearish' ? 'badge-sentiment-bearish' : 'badge-sentiment-neutral')}" style="margin-left:0.3rem;">
+                    <span class="badge ${getSentimentBadgeClass(latest.sentiment)}" style="margin-left:0.3rem;">
                         ${latest.sentiment}
                     </span>
                     <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.5rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
@@ -751,9 +621,17 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
         }
 
-        // Render table rows
+        // Render table rows (Strictly within market hours 09:10:00 - 15:30:00)
         trendingPulseTbody.innerHTML = "";
+        let displayedCount = 0;
         trendingTimeseries.rows.forEach(r => {
+            if (r.time) {
+                const timeNorm = r.time.length === 5 ? r.time + ":00" : r.time;
+                if (timeNorm < "09:10:00" || timeNorm > "15:30:00") {
+                    return;
+                }
+            }
+            displayedCount++;
             const tr = document.createElement("tr");
 
             // Format Day H/L Break
@@ -773,7 +651,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const peChgHtml = formatOiFlowCell(r.pe_change_oi, 'PE');
             const diffOiHtml = formatOiFlowCell(r.diff_oi, 'DIFF');
             const chngDirHtml = formatOiFlowCell(r.chng_in_direction, 'DIR');
-            const sentClass = r.sentiment === 'Bullish' ? 'badge badge-sentiment-bullish' : (r.sentiment === 'Bearish' ? 'badge badge-sentiment-bearish' : 'badge badge-sentiment-neutral');
+            const sentClass = getSentimentBadgeClass(r.sentiment);
 
             // Strength capsule
             const pctSign = r.strength_pct >= 0 ? "+" : "";
@@ -786,14 +664,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 </span>
             `;
 
-            // Direction arrow pill
-            const dirClass = r.direction_color === "green" ? "dir-green" : "dir-red";
-            const dirArrowHtml = `<span class="dir-arrow-pill ${dirClass}">${r.direction_arrow}</span>`;
-
-            // Direction of Chng %
-            const dirPctClass = r.direction_chng_pct >= 0 ? "val-pos" : "val-neg";
-            const dirPctSign = r.direction_chng_pct >= 0 ? "+" : "";
-
             // Day High/Low Diff in OI badge
             let dayHlDiffHtml = "-";
             if (r.day_hl_diff_oi === "Day Low Break") {
@@ -803,8 +673,11 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             // Build-up Badge & Sub-activity
-            const buildupClass = r.buildup_class || "buildup-neutral";
+            let buildupClass = r.buildup_class || "buildup-neutral";
             const buildupLabel = r.buildup_label || "Neutral";
+            if (buildupLabel === "Consolidation" || (r.buildup_type && r.buildup_type.includes("CONSOLIDATION"))) {
+                buildupClass = "buildup-consolidation";
+            }
             const subActText = r.sub_activity || "";
 
             const buildupHtml = `
@@ -822,8 +695,6 @@ document.addEventListener("DOMContentLoaded", () => {
             ` : '';
 
             const ltpVal = typeof r.ltp === "number" ? r.ltp.toFixed(2) : (r.ltp || "--");
-            const dirPctVal = typeof r.direction_chng_pct === "number" ? r.direction_chng_pct.toFixed(2) : (r.direction_chng_pct || "0.00");
-            const netPcrVal = typeof r.net_pcr === "number" ? r.net_pcr.toFixed(2) : (r.net_pcr || "--");
 
             tr.innerHTML = `
                 <td class="text-center font-mono">
@@ -836,10 +707,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td class="text-right font-mono">${peChgHtml}</td>
                 <td class="text-right font-mono">${diffOiHtml}</td>
                 <td class="text-center">${strengthHtml}</td>
-                <td class="text-center">${dirArrowHtml}</td>
-                <td class="text-right font-mono">${chngDirHtml}</td>
-                <td class="text-right font-mono ${dirPctClass}">${dirPctSign}${dirPctVal}%</td>
-                <td class="text-center font-mono"><strong>${netPcrVal}</strong></td>
                 <td class="text-center">${dayHlDiffHtml}</td>
                 <td class="text-center">${buildupHtml}</td>
                 <td class="text-center">
@@ -852,160 +719,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
             trendingPulseTbody.appendChild(tr);
         });
-    }
 
-    /**
-     * Renders OI Trend Table (ATM ± 5 strikes)
-     */
-    function renderOiTrendTable(rows, atmStrike, spotPrice) {
-        if (!oiTrendTbody) return;
-        if (rows.length === 0) {
-            oiTrendTbody.innerHTML = `<tr><td colspan="8" class="text-center">No strike trend available.</td></tr>`;
-            return;
+        if (displayedCount === 0) {
+            trendingPulseTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available during market hours (09:10 - 15:30).</td></tr>`;
         }
-
-        oiTrendTbody.innerHTML = "";
-        rows.forEach((r) => {
-            const tr = document.createElement("tr");
-            const isAtm = Math.abs(r.strike - atmStrike) < 1.0;
-            const isItmCe = spotPrice ? r.strike < spotPrice : false;
-            const isItmPe = spotPrice ? r.strike > spotPrice : false;
-
-            if (isAtm) tr.classList.add("row-atm");
-
-            const ceChgClass = r.ce_change_oi >= 0 ? "val-pos" : "val-neg";
-            const peChgClass = r.pe_change_oi >= 0 ? "val-pos" : "val-neg";
-
-            let actBadgeClass = "badge-neutral";
-            let actText = r.ce_activity !== "NO CLEAR SIGNAL" ? r.ce_activity : r.pe_activity;
-            if (actText === "CALL WRITING") actBadgeClass = "badge-call-writing";
-            else if (actText === "PUT WRITING") actBadgeClass = "badge-put-writing";
-            else if (actText === "CALL UNWINDING") actBadgeClass = "badge-call-unwinding";
-            else if (actText === "PUT UNWINDING") actBadgeClass = "badge-put-unwinding";
-
-            const atmTag = isAtm ? `<span class="atm-marker-tag">ATM</span>` : "";
-
-            tr.innerHTML = `
-                <td class="text-right ${isItmCe ? 'cell-itm' : ''}">${r.ce_oi_formatted || "--"}</td>
-                <td class="text-right ${ceChgClass} ${isItmCe ? 'cell-itm' : ''}">${r.ce_change_oi_formatted || "--"}</td>
-                <td class="text-right ${isItmCe ? 'cell-itm' : ''}">₹${r.ce_ltp ? r.ce_ltp.toFixed(2) : "0.00"}</td>
-                <td class="text-center highlight-col strike-cell-container">
-                    <span class="strike-pill ${isAtm ? 'strike-pill-atm' : ''}">${formatIndianNumber(r.strike)}</span>
-                    ${atmTag}
-                </td>
-                <td class="text-left ${isItmPe ? 'cell-itm' : ''}">₹${r.pe_ltp ? r.pe_ltp.toFixed(2) : "0.00"}</td>
-                <td class="text-left ${peChgClass} ${isItmPe ? 'cell-itm' : ''}">${r.pe_change_oi_formatted || "--"}</td>
-                <td class="text-left ${isItmPe ? 'cell-itm' : ''}">${r.pe_oi_formatted || "--"}</td>
-                <td class="text-center">
-                    <span class="act-badge ${actBadgeClass}">${actText}</span>
-                </td>
-            `;
-            oiTrendTbody.appendChild(tr);
-        });
     }
 
-    /**
-     * Renders Full Detailed Option Chain (Filtered to ATM ± 5 strikes by default)
-     */
-    function renderOptionChainTable(chain, atmStrike, r1, s1, spotPrice, strikeStep = 50) {
-        if (!optionChainTbody) return;
-        if (chain.length === 0) {
-            optionChainTbody.innerHTML = `<tr><td colspan="9" class="text-center">No option chain strikes loaded.</td></tr>`;
-            return;
-        }
 
-        let filteredChain = chain;
-        if (state.strikeRange > 0 && atmStrike) {
-            const maxDiff = (strikeStep || 50) * state.strikeRange;
-            filteredChain = chain.filter((r) => Math.abs(r.strike - atmStrike) <= maxDiff + 0.1);
-        }
 
-        optionChainTbody.innerHTML = "";
-        filteredChain.forEach((r) => {
-            const tr = document.createElement("tr");
-            const isAtm = Math.abs(r.strike - atmStrike) < 1.0;
-            const isItmCe = spotPrice ? r.strike < spotPrice : false;
-            const isItmPe = spotPrice ? r.strike > spotPrice : false;
 
-            if (isAtm) tr.classList.add("row-atm");
-
-            const isR1 = Math.abs(r.strike - r1) < 1.0;
-            const isS1 = Math.abs(r.strike - s1) < 1.0;
-
-            const ceChgClass = r.ce_change_oi >= 0 ? "val-pos" : "val-neg";
-            const peChgClass = r.pe_change_oi >= 0 ? "val-pos" : "val-neg";
-
-            let strikeTag = "";
-            if (isAtm) strikeTag = ` <span class="atm-badge-tag-lg">★ ATM ★</span>`;
-            else if (isR1) strikeTag = ` <span class="res-badge" style="font-size:0.6rem;padding:0.1rem 0.3rem;">R1</span>`;
-            else if (isS1) strikeTag = ` <span class="sup-badge" style="font-size:0.6rem;padding:0.1rem 0.3rem;">S1</span>`;
-
-            tr.innerHTML = `
-                <td class="text-right ${isItmCe ? 'cell-itm' : ''}">${r.ce_oi_formatted || formatIndianNumber(r.ce_oi)}</td>
-                <td class="text-right ${ceChgClass} ${isItmCe ? 'cell-itm' : ''}">${r.ce_change_oi_formatted || formatIndianNumber(r.ce_change_oi)}</td>
-                <td class="text-right ${isItmCe ? 'cell-itm' : ''}">${formatIndianNumber(r.ce_volume)}</td>
-                <td class="text-right ${isItmCe ? 'cell-itm' : ''}">₹${r.ce_ltp ? r.ce_ltp.toFixed(2) : "0.00"}</td>
-                <td class="text-center highlight-col strike-cell-container">
-                    <span class="strike-pill ${isAtm ? 'strike-pill-atm' : ''}">${formatIndianNumber(r.strike)}</span>${strikeTag}
-                </td>
-                <td class="text-left ${isItmPe ? 'cell-itm' : ''}">₹${r.pe_ltp ? r.pe_ltp.toFixed(2) : "0.00"}</td>
-                <td class="text-left ${isItmPe ? 'cell-itm' : ''}">${formatIndianNumber(r.pe_volume)}</td>
-                <td class="text-left ${peChgClass} ${isItmPe ? 'cell-itm' : ''}">${r.pe_change_oi_formatted || formatIndianNumber(r.pe_change_oi)}</td>
-                <td class="text-left ${isItmPe ? 'cell-itm' : ''}">${r.pe_oi_formatted || formatIndianNumber(r.pe_oi)}</td>
-            `;
-            optionChainTbody.appendChild(tr);
-        });
-    }
-
-    /**
-     * Exports current option chain table to CSV file
-     */
-    function exportChainToCsv() {
-        if (!state.lastData || !state.lastData.detailed_chain) return;
-        const chain = state.lastData.detailed_chain;
-
-        const headers = ["CE_OI", "CE_CHG_OI", "CE_VOLUME", "CE_LTP", "STRIKE", "PE_LTP", "PE_VOLUME", "PE_CHG_OI", "PE_OI"];
-        const rows = chain.map((r) => [
-            r.ce_oi,
-            r.ce_change_oi,
-            r.ce_volume,
-            r.ce_ltp,
-            r.strike,
-            r.pe_ltp,
-            r.pe_volume,
-            r.pe_change_oi,
-            r.pe_oi,
-        ]);
-
-        const csvString = [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-        const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `Option_Desk_${state.symbol}_${state.expiry || "Chain"}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-
-    // Event Listeners
-    const strikeRangeSelect = document.getElementById("strike-range-select");
-    if (strikeRangeSelect) {
-        strikeRangeSelect.addEventListener("change", (e) => {
-            state.strikeRange = parseInt(e.target.value, 10);
-            if (state.lastData) {
-                renderOptionChainTable(
-                    state.lastData.detailed_chain || [],
-                    state.lastData.key_levels?.atm_strike,
-                    state.lastData.key_levels?.resistance_1,
-                    state.lastData.key_levels?.support_1,
-                    state.lastData.market_bias?.spot_price,
-                    state.lastData.meta?.strike_step || 50
-                );
-            }
-        });
-    }
 
     // Event Listeners
     if (symbolSelect) {
@@ -1853,35 +1575,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Export Chain CSV Handler
-    if (btnExportCsv) {
-        btnExportCsv.addEventListener("click", exportChainToCsv);
-    }
 
-    // Trending OI View Tab Switching
-    if (btnTabTrendingOi && btnTabStrikeBreakdown) {
-        btnTabTrendingOi.addEventListener("click", () => {
-            btnTabTrendingOi.classList.add("active");
-            btnTabTrendingOi.style.background = "var(--accent-color, #3b82f6)";
-            btnTabTrendingOi.style.color = "#fff";
-            btnTabStrikeBreakdown.classList.remove("active");
-            btnTabStrikeBreakdown.style.background = "transparent";
-            btnTabStrikeBreakdown.style.color = "var(--text-muted, #94a3b8)";
-            if (trendingOiTimeseriesContainer) trendingOiTimeseriesContainer.style.display = "block";
-            if (trendingStrikeBreakdownContainer) trendingStrikeBreakdownContainer.style.display = "none";
-        });
 
-        btnTabStrikeBreakdown.addEventListener("click", () => {
-            btnTabStrikeBreakdown.classList.add("active");
-            btnTabStrikeBreakdown.style.background = "var(--accent-color, #3b82f6)";
-            btnTabStrikeBreakdown.style.color = "#fff";
-            btnTabTrendingOi.classList.remove("active");
-            btnTabTrendingOi.style.background = "transparent";
-            btnTabTrendingOi.style.color = "var(--text-muted, #94a3b8)";
-            if (trendingOiTimeseriesContainer) trendingOiTimeseriesContainer.style.display = "none";
-            if (trendingStrikeBreakdownContainer) trendingStrikeBreakdownContainer.style.display = "block";
-        });
-    }
+
 
     // Dedicated Trending OI Interval Fetcher & Timer
     async function fetchTrendingOiData(force = false) {

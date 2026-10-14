@@ -25,6 +25,26 @@
         <div class="ticker-divider"></div>
 
         <div class="ticker-col">
+            <span class="ticker-label">TOTAL CE OI</span>
+            <div class="spot-val-group">
+                <span class="ticker-data font-mono" id="total-ce-oi">--</span>
+                <span id="total-ce-chg" class="chg-val font-mono" style="font-size:0.7rem;color:var(--text-muted);">(--)</span>
+            </div>
+        </div>
+
+        <div class="ticker-divider"></div>
+
+        <div class="ticker-col">
+            <span class="ticker-label">TOTAL PE OI</span>
+            <div class="spot-val-group">
+                <span class="ticker-data font-mono" id="total-pe-oi">--</span>
+                <span id="total-pe-chg" class="chg-val font-mono" style="font-size:0.7rem;color:var(--text-muted);">(--)</span>
+            </div>
+        </div>
+
+        <div class="ticker-divider"></div>
+
+        <div class="ticker-col">
             <span class="ticker-label">PUT-CALL RATIO (PCR)</span>
             <span class="ticker-data font-mono" id="pcr-display">--</span>
         </div>
@@ -749,19 +769,6 @@
                     change &amp; sentiment analysis</span>
             </div>
             <div class="strip-controls">
-                <!-- Sub-view tabs -->
-                <div class="trending-view-tabs" role="tablist"
-                    style="display:flex;gap:0.25rem;background:rgba(255,255,255,0.04);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);">
-                    <button type="button" class="btn-tab-pill active" id="btn-tab-trending-oi" role="tab"
-                        aria-selected="true"
-                        style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:var(--accent-color, #3b82f6);color:#fff;cursor:pointer;font-weight:600;">Trending
-                        OI (Time Series)</button>
-                    <button type="button" class="btn-tab-pill" id="btn-tab-strike-breakdown" role="tab"
-                        aria-selected="false"
-                        style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:transparent;color:var(--text-muted, #94a3b8);cursor:pointer;font-weight:500;">Strike
-                        Breakdown</button>
-                </div>
-
                 <!-- Interval Selector -->
                 <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
                     <label for="trending-interval-select" class="control-label"
@@ -777,11 +784,9 @@
         </div>
 
         <!-- Selected Strikes Bar & Live Capsule KPI (matching Oi Pulse header bar) -->
-        <div class="trending-oi-meta-strip"
-            style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:0.6rem 1rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:6px;margin-bottom:0.75rem;gap:0.5rem;">
+        <div class="trending-oi-meta-strip">
             <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-                <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);font-weight:600;">Selected Strike Prices
-                    (ATM &plusmn; 5):</span>
+                <span style="font-size:0.75rem;color:var(--text-secondary, #475569);font-weight:700;">Selected Strike Prices (ATM &plusmn; 5):</span>
                 <div id="trending-selected-strikes-container"
                     style="display:flex;gap:0.25rem;flex-wrap:wrap;align-items:center;">
                     <span style="color:var(--text-muted,#94a3b8);font-size:0.75rem;">Loading strikes...</span>
@@ -801,16 +806,12 @@
                 <thead>
                     <tr>
                         <th class="text-center">Time</th>
-                        <th class="text-right">LTP</th>
+                        <th class="text-right">SPOT</th>
                         <th class="text-center">Day H/L</th>
                         <th class="text-right">Call &Delta;OI</th>
                         <th class="text-right">Put &Delta;OI</th>
                         <th class="text-right">Diff OI</th>
                         <th class="text-center">Str</th>
-                        <th class="text-center">Dir</th>
-                        <th class="text-right">&Delta; Dir</th>
-                        <th class="text-right">Dir %</th>
-                        <th class="text-center">PCR</th>
                         <th class="text-center">Diff H/L</th>
                         <th class="text-center">Build-up</th>
                         <th class="text-center">Sentiment</th>
@@ -818,205 +819,15 @@
                 </thead>
                 <tbody id="trending-pulse-tbody">
                     <tr>
-                        <td colspan="14" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">
+                        <td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">
                             Loading Trending OI data...</td>
                     </tr>
                 </tbody>
             </table>
         </div>
-
-        <!-- VIEW 2: Strike Breakdown Table (ATM ± 5 Strikes) -->
-        <div id="trending-strike-breakdown-container" class="table-responsive" style="display:none;">
-            <table class="desk-table trend-table" id="oi-trend-table">
-                <thead>
-                    <tr>
-                        <th class="text-right">CE OI</th>
-                        <th class="text-right">CE &Delta;OI</th>
-                        <th class="text-right">CE LTP</th>
-                        <th class="text-center highlight-col">STRIKE</th>
-                        <th class="text-left">PE LTP</th>
-                        <th class="text-left">PE &Delta;OI</th>
-                        <th class="text-left">PE OI</th>
-                        <th class="text-center">CLASSIFICATION</th>
-                    </tr>
-                </thead>
-                <tbody id="oi-trend-tbody">
-                    <tr>
-                        <td colspan="8" class="text-center">Loading OI trend data...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
     </section>
 
-    <!-- SECTION: OI ACTIVITY & BIG MOVEMENTS (2-COLUMN GRID) -->
-    <section class="secondary-grid" aria-label="OI Activity and Large Orders">
 
-        <!-- CARD 4: OI ACTIVITY SUMMARY -->
-        <article class="desk-card card-activity">
-            <div class="card-header">
-                <div class="card-title-group">
-                    <span class="card-subtitle">WRITING & UNWINDING CLUSTERS</span>
-                    <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
-                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                        </svg>
-                        OI ACTIVITY
-                    </h2>
-                </div>
-            </div>
-
-            <div class="activity-grid">
-                <div class="activity-tile tile-call-write"
-                    title="Call Writing: Heavy sellers adding resistance (Ceiling). Caps market upside.">
-                    <div class="act-header-row">
-                        <span class="act-label">CALL WRITING</span>
-                        <span class="act-dir-pill dir-bearish">🔻 Ceiling</span>
-                    </div>
-                    <span class="act-strike font-mono" id="act-call-writing">--</span>
-                    <span class="act-desc">Major Call Resistance</span>
-                </div>
-                <div class="activity-tile tile-put-write"
-                    title="Put Writing: Heavy sellers adding support (Floor). Protects market downside.">
-                    <div class="act-header-row">
-                        <span class="act-label">PUT WRITING</span>
-                        <span class="act-dir-pill dir-bullish">🔺 Floor</span>
-                    </div>
-                    <span class="act-strike font-mono" id="act-put-writing">--</span>
-                    <span class="act-desc">Major Put Support</span>
-                </div>
-                <div class="activity-tile tile-call-unwind"
-                    title="Call Unwinding: Call sellers exiting shorts. Resistance breaking, unlocking upward room.">
-                    <div class="act-header-row">
-                        <span class="act-label">CALL UNWINDING</span>
-                        <span class="act-dir-pill dir-bullish">↗️ Clearing</span>
-                    </div>
-                    <span class="act-strike font-mono" id="act-call-unwinding">--</span>
-                    <span class="act-desc">Resistance Weakening</span>
-                </div>
-                <div class="activity-tile tile-put-unwind"
-                    title="Put Unwinding: Put sellers cutting losses. Support cracking, signaling breakdown risk.">
-                    <div class="act-header-row">
-                        <span class="act-label">PUT UNWINDING</span>
-                        <span class="act-dir-pill dir-bearish">↘️ Cracking</span>
-                    </div>
-                    <span class="act-strike font-mono" id="act-put-unwinding">--</span>
-                    <span class="act-desc">Support Weakening</span>
-                </div>
-            </div>
-
-            <div class="oi-totals-strip">
-                <div class="total-item">
-                    <span>Total CE OI:</span>
-                    <strong class="font-mono" id="total-ce-oi">--</strong>
-                    <small id="total-ce-chg" class="chg-val">(--)</small>
-                </div>
-                <div class="total-item">
-                    <span>Total PE OI:</span>
-                    <strong class="font-mono" id="total-pe-oi">--</strong>
-                    <small id="total-pe-chg" class="chg-val">(--)</small>
-                </div>
-            </div>
-        </article>
-
-        <!-- CARD 5: BIG OI MOVEMENT -->
-        <article class="desk-card card-big-oi">
-            <div class="card-header">
-                <div class="card-title-group">
-                    <span class="card-subtitle">LARGE TRADER POSITIONING</span>
-                    <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                        </svg>
-                        BIG OI MOVEMENT
-                    </h2>
-                </div>
-                <span class="badge-threshold">Sorted by |&Delta;OI|</span>
-            </div>
-
-            <!-- Institutional Stance Dominance Meter -->
-            <div class="inst-dominance-strip" id="inst-dominance-strip">
-                <div class="inst-dom-header">
-                    <span class="inst-dom-title" id="inst-dom-title">INSTITUTIONAL POSITIONING</span>
-                    <span class="inst-dom-pct font-mono" id="inst-dom-pct">Analyzing flow...</span>
-                </div>
-                <div class="inst-dom-bar-wrap">
-                    <div class="dom-bar-ce" id="dom-bar-ce" style="width: 50%;"
-                        title="Call Writing / Bearish Resistance Positioning"></div>
-                    <div class="dom-bar-pe" id="dom-bar-pe" style="width: 50%;"
-                        title="Put Writing / Bullish Support Positioning"></div>
-                </div>
-            </div>
-
-            <div class="big-oi-list" id="big-oi-list">
-                <div class="empty-state">Loading large OI movements...</div>
-            </div>
-        </article>
-
-    </section>
-
-    <!-- SECTION 4: FOCUSED OPTION CHAIN (ATM ± 5 STRIKES) -->
-    <section class="desk-section" aria-label="Detailed Option Chain">
-        <div class="section-header-strip">
-            <div class="strip-left">
-                <h3 class="section-title">OPTION CHAIN</h3>
-                <span class="section-subtitle">Core strike data with volume, open interest, price change, and sentiment
-                    tags</span>
-            </div>
-            <div class="strip-controls">
-                <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
-                    <label for="strike-range-select" class="control-label" style="font-size:0.75rem;">STRIKES:</label>
-                    <select id="strike-range-select" class="desk-select" aria-label="Filter Strike Range">
-                        <option value="5" selected>ATM &plusmn; 5 (5 Up, 5 Down)</option>
-                        <option value="10">ATM &plusmn; 10</option>
-                        <option value="0">All Strikes</option>
-                    </select>
-                </div>
-
-                <button type="button" class="btn-action" id="btn-export-csv" aria-label="Export Option Chain to CSV">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    <span>Export CSV</span>
-                </button>
-            </div>
-        </div>
-
-        <div class="table-responsive">
-            <table class="desk-table chain-table" id="option-chain-table">
-                <thead>
-                    <tr class="table-group-header">
-                        <th colspan="4" class="group-call">CALLS (CE)</th>
-                        <th class="group-strike">STRIKE</th>
-                        <th colspan="4" class="group-put">PUTS (PE)</th>
-                    </tr>
-                    <tr class="table-col-header">
-                        <th class="text-right">OI</th>
-                        <th class="text-right">&Delta;OI</th>
-                        <th class="text-right">Volume</th>
-                        <th class="text-right">LTP (₹)</th>
-                        <th class="text-center highlight-col">STRIKE PRICE</th>
-                        <th class="text-left">LTP (₹)</th>
-                        <th class="text-left">Volume</th>
-                        <th class="text-left">&Delta;OI</th>
-                        <th class="text-left">OI</th>
-                    </tr>
-                </thead>
-                <tbody id="option-chain-tbody">
-                    <tr>
-                        <td colspan="9" class="text-center">Loading full option chain...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </section>
 
 </div>
 {% endblock %}

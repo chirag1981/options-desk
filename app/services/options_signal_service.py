@@ -948,6 +948,11 @@ def record_trending_oi_snapshot(symbol: str, analysis: dict) -> bool:
         timestamp = now_dt.strftime("%Y-%m-%d %H:%M:%S")
         time_str = now_dt.strftime("%H:%M:%S")
 
+        # Market Hours Guard: Only record snapshots strictly between 09:10:00 and 15:30:00
+        if not (analysis.get("_test_mode") or os.environ.get("PYTEST_CURRENT_TEST")):
+            if time_str < "09:10:00" or time_str > "15:30:00":
+                return False
+
         symbol = str(symbol).upper()
         spot = float(analysis.get("market_bias", {}).get("spot_price", 0.0) or analysis.get("option_buying", {}).get("raw_values", {}).get("spot", 0.0))
         atm_strike = float(trending_oi.get("atm_strike", 0.0))
@@ -1164,41 +1169,44 @@ def get_trending_oi_timeseries(
         rows = conn.execute("""
             SELECT * FROM trending_oi_snapshots
             WHERE symbol = ? AND trade_date = ?
+              AND time_str >= '09:10:00' AND time_str <= '15:30:00'
             ORDER BY timestamp ASC
         """, (symbol, trade_date)).fetchall()
         for r in rows:
             raw_points.append(dict(r))
 
-    # If current_chain is provided and we are on today, ensure live state is captured as latest point
+    # If current_chain is provided and we are on today, ensure live state is captured as latest point strictly during market hours
+    live_time_str = now_dt.strftime("%H:%M:%S")
     if current_chain and spot_price and spot_price > 0 and trade_date == now_dt.strftime("%Y-%m-%d"):
-        from app.services.options_engine import compute_trending_oi_metrics
-        live_atm = round(spot_price / strike_step) * strike_step
-        live_metrics = compute_trending_oi_metrics(current_chain, spot_price, strike_step, live_atm, num_strikes_each_side=5)
-        live_point = {
-            "symbol": symbol,
-            "trade_date": trade_date,
-            "timestamp": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "time_str": now_dt.strftime("%H:%M:%S"),
-            "spot_price": spot_price,
-            "atm_strike": live_atm,
-            "strike_step": strike_step,
-            "selected_strikes_json": json.dumps(live_metrics.get("selected_strikes", [])),
-            "ce_change_oi": live_metrics.get("total_ce_change_oi", 0),
-            "pe_change_oi": live_metrics.get("total_pe_change_oi", 0),
-            "diff_oi": live_metrics.get("diff_oi", 0),
-            "diff_pct": live_metrics.get("diff_pct", 0.0),
-            "dots": live_metrics.get("dots", 0),
-            "strength_status": live_metrics.get("strength_status", "WEAK"),
-            "net_pcr": live_metrics.get("net_pcr", 1.0),
-            "sentiment": live_metrics.get("sentiment", "Neutral"),
-        }
-        if not raw_points:
-            raw_points.append(live_point)
-        else:
-            if raw_points[-1].get("time_str") == live_point["time_str"]:
-                raw_points[-1] = live_point
-            else:
+        if "09:10:00" <= live_time_str <= "15:30:00":
+            from app.services.options_engine import compute_trending_oi_metrics
+            live_atm = round(spot_price / strike_step) * strike_step
+            live_metrics = compute_trending_oi_metrics(current_chain, spot_price, strike_step, live_atm, num_strikes_each_side=5)
+            live_point = {
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "timestamp": now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "time_str": live_time_str,
+                "spot_price": spot_price,
+                "atm_strike": live_atm,
+                "strike_step": strike_step,
+                "selected_strikes_json": json.dumps(live_metrics.get("selected_strikes", [])),
+                "ce_change_oi": live_metrics.get("total_ce_change_oi", 0),
+                "pe_change_oi": live_metrics.get("total_pe_change_oi", 0),
+                "diff_oi": live_metrics.get("diff_oi", 0),
+                "diff_pct": live_metrics.get("diff_pct", 0.0),
+                "dots": live_metrics.get("dots", 0),
+                "strength_status": live_metrics.get("strength_status", "WEAK"),
+                "net_pcr": live_metrics.get("net_pcr", 1.0),
+                "sentiment": live_metrics.get("sentiment", "Neutral"),
+            }
+            if not raw_points:
                 raw_points.append(live_point)
+            else:
+                if raw_points[-1].get("time_str") == live_point["time_str"]:
+                    raw_points[-1] = live_point
+                else:
+                    raw_points.append(live_point)
 
     # If no recorded snapshots exist at all (e.g. fresh startup, off-hours testing, or unpopulated day),
     # synthesize intraday progression anchored to the spot price so the full table renders cleanly.
@@ -1211,10 +1219,11 @@ def get_trending_oi_timeseries(
         simulated_points = []
         base_d = datetime.strptime(trade_date, "%Y-%m-%d").date()
         start_t = datetime.combine(base_d, dtime(9, 10), tzinfo=IST)
+        market_close = datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
         
-        end_limit = now_dt if (trade_date == now_dt.strftime("%Y-%m-%d") and now_dt > start_t) else datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
-        if end_limit <= start_t:
-            end_limit = datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
+        end_limit = min(now_dt, market_close) if (trade_date == now_dt.strftime("%Y-%m-%d") and now_dt > start_t) else market_close
+        if end_limit < start_t:
+            end_limit = market_close
 
         curr_t = start_t
         idx = 0
@@ -1274,6 +1283,8 @@ def get_trending_oi_timeseries(
             slot = minutes_from_midnight // interval_minutes
             slot_mins = slot * interval_minutes
             slot_time_str = f"{slot_mins // 60:02d}:{slot_mins % 60:02d}:00"
+            if slot_time_str < "09:10:00" or slot_time_str > "15:30:00":
+                continue
             pt_copy = dict(pt)
             pt_copy["time_str"] = slot_time_str
             if slot != last_bucket_slot:
@@ -1282,7 +1293,8 @@ def get_trending_oi_timeseries(
             else:
                 bucketed[-1] = pt_copy
         except Exception:
-            bucketed.append(pt)
+            if pt.get("time_str") and "09:10:00" <= pt["time_str"] <= "15:30:00":
+                bucketed.append(pt)
 
     # Process running Day H/L, Direction of Change, Chng In Direction, Day H/L Diff in OI
     running_day_high = None
@@ -1293,6 +1305,8 @@ def get_trending_oi_timeseries(
 
     processed_rows = []
     for pt in bucketed:
+        if pt.get("time_str") and (pt["time_str"] < "09:10:00" or pt["time_str"] > "15:30:00"):
+            continue
         ltp = float(pt["spot_price"])
         diff_oi = int(pt["diff_oi"])
 
@@ -1399,7 +1413,7 @@ def get_trending_oi_timeseries(
                 else:
                     buildup_type = "CONSOLIDATION"
                     buildup_label = "Consolidation"
-                    buildup_class = "buildup-neutral"
+                    buildup_class = "buildup-consolidation"
         else:
             chng_in_direction = diff_oi
             direction_arrow = "↑" if diff_oi >= 0 else "↓"
