@@ -42,8 +42,8 @@ ENGINE_CONFIG = {
     "PRIME_WINDOW_START_MINS": 570,   # 09:30 IST
     "PRIME_WINDOW_END_MINS": int(os.environ.get("PRIME_WINDOW_END_MINS", 870)),     # 14:30 IST (02:30 PM default cutoff, extended from 14:00)
     "BREAKOUT_WINDOW_END_MINS": int(os.environ.get("BREAKOUT_WINDOW_END_MINS", 885)), # 14:45 IST (02:45 PM on valid high-conviction breakouts)
-    "MARKET_SESSION_START_MINS": 555, # 09:15 IST
-    "MARKET_SESSION_END_MINS": 930,   # 15:30 IST
+    "MARKET_SESSION_START_MINS": int(os.environ.get("MARKET_SESSION_START_MINS", 550)), # 09:10 IST
+    "MARKET_SESSION_END_MINS": int(os.environ.get("MARKET_SESSION_END_MINS", 930)),   # 15:30 IST
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
     "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
     "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
@@ -443,8 +443,8 @@ def evaluate_iv_and_time_filter(atm_iv: float | None, now_dt: datetime | None = 
     end_str = f"{end_h:02d}:{end_m:02d}"
 
     # Trading Session Windows (IST)
-    if total_mins < ENGINE_CONFIG["PRIME_WINDOW_START_MINS"]:  # 09:15 - 09:30
-        time_status = "OPENING CHOP (09:15-09:30)"
+    if total_mins < ENGINE_CONFIG["PRIME_WINDOW_START_MINS"]:  # 09:10 - 09:30
+        time_status = "OPENING CHOP (09:10-09:30)"
         time_favorable = False
         time_note = "Opening volatility window. Allow market structure to settle."
     elif total_mins >= end_mins:  # Post cutoff

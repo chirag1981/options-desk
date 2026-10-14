@@ -1,7 +1,7 @@
 """
 app/services/options_scheduler.py — Background Telemetry, Signal Dispatcher & Review Scheduler
 - Enforces single-instance process lock.
-- Operates strictly in Asia/Kolkata timezone, skipping cycles outside 09:15-15:30 IST, on market holidays, or when data_status != LIVE.
+- Operates strictly in Asia/Kolkata timezone, skipping cycles outside 09:10-15:30 IST, on market holidays, or when data_status != LIVE.
 - Executes analyze_option_desk per cycle for each primary index symbol.
 - Logs decision evaluation telemetry (every cycle including WAIT) with full pillar flags, raw values, and data quality.
 - Records signals only when high-conviction criteria are met and bid/ask quotes are valid.
@@ -149,7 +149,7 @@ def _release_process_lock():
 
 
 def is_market_hours(now_dt: datetime | None = None) -> bool:
-    """Checks if current time is within Indian Market Hours (Mon-Fri 09:15 - 15:30 IST), accounting for holidays and special sessions."""
+    """Checks if current time is within Indian Market Hours & Data Fetching window (Mon-Fri 09:10 - 15:30 IST), accounting for holidays and special sessions."""
     if now_dt is None:
         now_dt = datetime.now(IST)
 
@@ -169,7 +169,7 @@ def is_market_hours(now_dt: datetime | None = None) -> bool:
     if is_market_holiday(today):
         return False
 
-    return dtime(9, 15) <= cur_time <= dtime(15, 30)
+    return dtime(9, 10) <= cur_time <= dtime(15, 30)
 
 
 def persist_daily_report(report_data: dict) -> bool:

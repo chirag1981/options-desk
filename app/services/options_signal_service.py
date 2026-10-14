@@ -1210,7 +1210,7 @@ def get_trending_oi_timeseries(
 
         simulated_points = []
         base_d = datetime.strptime(trade_date, "%Y-%m-%d").date()
-        start_t = datetime.combine(base_d, dtime(9, 15), tzinfo=IST)
+        start_t = datetime.combine(base_d, dtime(9, 10), tzinfo=IST)
         
         end_limit = now_dt if (trade_date == now_dt.strftime("%Y-%m-%d") and now_dt > start_t) else datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
         if end_limit <= start_t:

@@ -587,34 +587,37 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // Calculate Institutional Dominance (% CE vs % PE)
-        let ceOiSum = 0;
-        let peOiSum = 0;
+        // Calculate Directional Positioning (% Bearish vs % Bullish weight)
+        let bearOiSum = 0;
+        let bullOiSum = 0;
         movements.forEach((item) => {
             const chg = Math.abs(item.change_oi || 0);
-            if (item.side === "CE" || (item.activity && item.activity.includes("CALL"))) {
-                ceOiSum += chg;
+            const sent = item.sentiment || "";
+            const act = (item.activity || "").toUpperCase();
+            const isBear = sent === "BEARISH" || act.includes("CALL WRITING") || act.includes("LONG PUT") || act.includes("PUT UNWINDING");
+            if (isBear) {
+                bearOiSum += chg;
             } else {
-                peOiSum += chg;
+                bullOiSum += chg;
             }
         });
 
-        const totalMove = ceOiSum + peOiSum;
-        const cePct = totalMove > 0 ? Math.round((ceOiSum / totalMove) * 100) : 50;
-        const pePct = 100 - cePct;
+        const totalMove = bearOiSum + bullOiSum;
+        const bearPct = totalMove > 0 ? Math.round((bearOiSum / totalMove) * 100) : 50;
+        const bullPct = 100 - bearPct;
 
-        if (domBarCe) domBarCe.style.width = `${cePct}%`;
-        if (domBarPe) domBarPe.style.width = `${pePct}%`;
+        if (domBarCe) domBarCe.style.width = `${bearPct}%`;
+        if (domBarPe) domBarPe.style.width = `${bullPct}%`;
 
         if (instDomPct) {
-            if (cePct >= 65) {
-                instDomPct.textContent = `🔴 Bears Dominating (${cePct}% Call Resistance)`;
+            if (bearPct >= 65) {
+                instDomPct.textContent = `🔴 Bears Dominating (${bearPct}% Bearish Flow)`;
                 instDomPct.className = "inst-dom-pct val-loss";
-            } else if (pePct >= 65) {
-                instDomPct.textContent = `🟢 Bulls Dominating (${pePct}% Put Support)`;
+            } else if (bullPct >= 65) {
+                instDomPct.textContent = `🟢 Bulls Dominating (${bullPct}% Bullish Flow)`;
                 instDomPct.className = "inst-dom-pct val-win";
             } else {
-                instDomPct.textContent = `🟡 Balanced Stance (${cePct}% CE / ${pePct}% PE)`;
+                instDomPct.textContent = `🟡 Balanced Stance (${bearPct}% Bear / ${bullPct}% Bull)`;
                 instDomPct.className = "inst-dom-pct";
             }
         }
@@ -634,20 +637,29 @@ document.addEventListener("DOMContentLoaded", () => {
             const widthPct = Math.min(100, Math.max(10, Math.round((Math.abs(chgVal) / maxOi) * 100)));
             row.style.setProperty("--bar-width", `${widthPct}%`);
 
-            // Format directional impact tag
+            // Format directional impact tag based on actual activity & sentiment
             let tagClass = "tag-neutral";
-            const act = item.activity || "";
-            let tagHtml = act;
+            const act = (item.activity || "").toUpperCase();
+            const sent = (item.sentiment || "").toUpperCase();
+            let tagHtml = item.activity || act;
             let rowTitle = "";
 
-            if (act.includes("CALL WRITING") || (sideClass === "CE" && chgVal > 0)) {
+            if (act.includes("LONG PUT") || (sideClass === "PE" && isAddition && sent === "BEARISH")) {
+                tagClass = "tag-bearish";
+                tagHtml = `<span class="dir-icon">🔻</span> Put Buying (Bearish)`;
+                rowTitle = "Long Put Buildup: Downside hedging / Bearish put buying";
+            } else if (act.includes("CALL WRITING") || (sideClass === "CE" && isAddition && sent === "BEARISH")) {
                 tagClass = "tag-bearish";
                 tagHtml = `<span class="dir-icon">🔻</span> Resistance Build`;
                 rowTitle = "Call Writing: Institutional resistance building (Bearish Ceiling)";
-            } else if (act.includes("PUT WRITING") || (sideClass === "PE" && chgVal > 0)) {
+            } else if (act.includes("PUT WRITING") || (sideClass === "PE" && isAddition && sent === "BULLISH")) {
                 tagClass = "tag-bullish";
                 tagHtml = `<span class="dir-icon">🔺</span> Support Build`;
                 rowTitle = "Put Writing: Institutional support building (Bullish Floor)";
+            } else if (act.includes("LONG CALL") || (sideClass === "CE" && isAddition && sent === "BULLISH")) {
+                tagClass = "tag-bullish";
+                tagHtml = `<span class="dir-icon">🔺</span> Call Buying (Bullish)`;
+                rowTitle = "Long Call Buildup: Upside momentum buying";
             } else if (act.includes("CALL UNWINDING") || (sideClass === "CE" && chgVal < 0)) {
                 tagClass = "tag-bullish";
                 tagHtml = `<span class="dir-icon">↗️</span> Short Covering`;
