@@ -624,187 +624,337 @@ body.desk-body {
     line-height: 1.35;
 }
 
-/* CARD 2: Key Levels (Compact) */
-.badge-levels-info {
-    font-size: 0.62rem;
-    color: var(--text-muted);
-    font-weight: 600;
+/* CARD 2: Key Levels (OI walls) - Compact */
+.levels-spot-display {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--gold-dark);
 }
 
-.levels-container {
+.levels-spot-display .spot-label {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.levels-spot-display strong {
+    font-weight: 800;
+    color: var(--gold-dark);
+}
+
+.levels-compact-body {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.55rem;
+    margin-top: 0.35rem;
 }
 
-.level-section {
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 0.45rem 0.65rem;
+.levels-meta-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.5rem;
 }
 
-.level-badge {
-    font-size: 0.65rem;
+.levels-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
     font-weight: 800;
-    letter-spacing: 0.05em;
-    padding: 0.15rem 0.4rem;
-    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.65rem;
+    border-radius: 9999px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    transition: all 0.2s ease;
 }
 
-.res-badge {
-    background: var(--bearish-surface);
-    color: var(--bearish-red);
-    border: 1px solid var(--bearish-border);
+.levels-status-chip .chip-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
 }
 
-.sup-badge {
+.levels-status-chip.chip-near-support {
     background: var(--bullish-surface);
     color: var(--bullish-green);
     border: 1px solid var(--bullish-border);
 }
 
-.atm-badge {
-    background: var(--gold-light);
-    color: var(--gold-dark);
-    border: 1px solid var(--border-subtle);
+.levels-status-chip.chip-near-resistance {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
 }
 
-.level-values {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+.levels-status-chip.chip-mid-range {
+    background: var(--neutral-surface);
+    color: var(--neutral-amber);
+    border: 1px solid var(--neutral-border);
 }
 
-.level-row {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
+.levels-status-chip.chip-breakout {
+    background: rgba(139, 92, 246, 0.12);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.35);
 }
 
-.lvl-tag {
-    font-size: 0.65rem;
-    font-weight: 700;
+.levels-status-chip.chip-breakdown {
+    background: rgba(225, 29, 72, 0.12);
+    color: #e11d48;
+    border: 1px solid rgba(225, 29, 72, 0.35);
+}
+
+.levels-status-chip.chip-unavailable {
+    background: var(--bg-surface-alt);
     color: var(--text-muted);
-}
-
-.lvl-val {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.lvl-val.strong {
-    font-weight: 800;
-    color: var(--gold-dark);
-}
-
-.atm-section {
-    background: var(--bg-surface-alt);
-    border-color: var(--border-strong);
-}
-
-.atm-center-val {
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: var(--gold-dark);
-}
-
-.atm-sub {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-}
-
-.badge-expected-range {
-    font-size: 0.65rem;
-    font-weight: 700;
-    color: var(--gold-dark);
-    background: var(--gold-light);
-    border: 1px solid var(--gold-primary);
-    padding: 0.12rem 0.4rem;
-    border-radius: var(--radius-sm);
-}
-
-.price-ladder-container {
-    margin-top: 0.5rem;
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 0.45rem 0.65rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-}
-
-.ladder-labels {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 0.65rem;
-    font-weight: 700;
-}
-
-.ladder-lbl-s { color: var(--bullish-green); }
-.ladder-lbl-spot { color: var(--gold-dark); font-weight: 800; }
-.ladder-lbl-r { color: var(--bearish-red); }
-
-.ladder-track {
-    position: relative;
-    height: 8px;
-    background: var(--bg-surface-alt);
-    border-radius: 4px;
-    display: flex;
-    overflow: hidden;
-    border: 1px solid var(--border-subtle);
-}
-
-.ladder-zone-sup {
-    width: 25%;
-    background: linear-gradient(90deg, rgba(16, 185, 129, 0.4), rgba(16, 185, 129, 0.1));
-}
-
-.ladder-zone-mid {
-    width: 50%;
-    background: rgba(217, 119, 6, 0.08);
-}
-
-.ladder-zone-res {
-    width: 25%;
-    background: linear-gradient(90deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.4));
-}
-
-.ladder-spot-pin {
-    position: absolute;
-    top: -2px;
-    width: 12px;
-    height: 12px;
-    background: var(--gold-primary);
-    border: 2px solid #ffffff;
-    border-radius: 50%;
-    transform: translateX(-50%);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-    transition: left 0.3s ease;
-}
-
-.levels-summary-strip {
-    margin-top: 0.45rem;
-    font-size: 0.68rem;
-    color: var(--text-secondary);
-    background: var(--bg-surface-alt);
     border: 1px dashed var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 0.35rem 0.55rem;
+}
+
+.levels-room-metric {
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    line-height: 1.35;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    padding: 0.2rem 0.55rem;
+    border-radius: var(--radius-sm);
 }
 
-.levels-summary-strip strong {
+.levels-room-metric .metric-lbl {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.levels-room-metric .metric-val {
     color: var(--gold-dark);
+    font-weight: 800;
+}
+
+.oi-walls-unavailable {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.85rem;
+    background: var(--bg-surface-elevated);
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+.oi-walls-bar-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.65rem 0.45rem 0.65rem;
+}
+
+.oi-bar-strikes {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+}
+
+.strike-end {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.wall-tag {
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.wall-tag.sup-tag {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.wall-tag.res-tag {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
+}
+
+.strike-val {
+    color: var(--text-primary);
+    font-weight: 800;
+}
+
+.oi-bar-track {
+    position: relative;
+    height: 10px;
+    border-radius: 5px;
+    background: var(--bg-surface-alt);
+    border: 1px solid var(--border-subtle);
+    margin: 0.45rem 0 0.55rem 0;
+    overflow: visible;
+    display: flex;
+}
+
+.oi-track-zone {
+    height: 100%;
+}
+
+.oi-track-zone.zone-sup {
+    width: 25%;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.35), rgba(16, 185, 129, 0.08));
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+}
+
+.oi-track-zone.zone-mid {
+    width: 50%;
+    background: rgba(217, 119, 6, 0.06);
+}
+
+.oi-track-zone.zone-res {
+    width: 25%;
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.35));
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}
+
+.oi-bar-atm-tick {
+    position: absolute;
+    top: -5px;
+    bottom: -5px;
+    width: 2px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.oi-bar-atm-tick .atm-tick-line {
+    display: block;
+    width: 2px;
+    height: 100%;
+    background: var(--gold-primary);
+    opacity: 0.85;
+}
+
+.oi-bar-atm-tick .atm-tick-label {
+    position: absolute;
+    bottom: -13px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: var(--gold-dark);
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.oi-bar-spot-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 3;
+    pointer-events: none;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.spot-marker-pin {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--gold-primary);
+    border: 2.5px solid #ffffff;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+}
+
+.spot-marker-label {
+    position: absolute;
+    top: -16px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    color: var(--gold-dark);
+    background: var(--bg-surface);
+    padding: 0.05rem 0.3rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.oi-bar-distances {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.68rem;
+    margin-top: 0.2rem;
+}
+
+.dist-end {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--text-muted);
+}
+
+.dist-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.dist-val {
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+.dist-s1 .dist-val {
+    color: var(--bullish-green);
+}
+
+.dist-r1 .dist-val {
+    color: var(--bearish-red);
+}
+
+.levels-outer-targets {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0;
+}
+
+.levels-outer-targets strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.outer-sep {
+    opacity: 0.45;
 }
 
 /* Card 2: Market Vector & Seller Action Box */

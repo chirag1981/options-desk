@@ -261,3 +261,72 @@ def test_market_vector_bearish_and_bullish():
     assert mv_range["mode_class"] == "neutral"
 
 
+def test_compute_oi_wall_metrics_all_cases():
+    """Unit tests for compute_oi_wall_metrics: mid-range, near support, near resistance, breakout, breakdown, missing data."""
+    from app.services.options_engine import compute_oi_wall_metrics
+
+    # 1. Mid-range (50%)
+    m_mid = compute_oi_wall_metrics(spot=22500.0, s1=22400.0, r1=22600.0, atm=22500.0, strike_step=50.0)
+    assert m_mid["is_available"] is True
+    assert m_mid["position_pct"] == 50.0
+    assert m_mid["status_chip"] == "MID-RANGE"
+    assert m_mid["room_ratio"] == 1.0
+    assert m_mid["dist_to_s1"] == 100.0
+    assert m_mid["dist_to_r1"] == 100.0
+    assert m_mid["atm_tick_pct"] == 50.0
+
+    # 2. Near Support (<= 25%)
+    m_sup = compute_oi_wall_metrics(spot=22425.0, s1=22400.0, r1=22600.0, atm=22450.0, strike_step=50.0)
+    assert m_sup["is_available"] is True
+    assert m_sup["position_pct"] == 12.5
+    assert m_sup["status_chip"] == "NEAR SUPPORT"
+    assert m_sup["room_ratio"] == 7.0  # (22600 - 22425) / max(25, 5) = 175 / 25 = 7.0
+    assert m_sup["dist_to_s1"] == 25.0
+    assert m_sup["dist_to_r1"] == 175.0
+
+    # 3. Near Resistance (>= 75%)
+    m_res = compute_oi_wall_metrics(spot=22560.0, s1=22400.0, r1=22600.0, atm=22550.0, strike_step=50.0)
+    assert m_res["is_available"] is True
+    assert m_res["position_pct"] == 80.0
+    assert m_res["status_chip"] == "NEAR RESISTANCE"
+    assert m_res["room_ratio"] == 0.2  # 40 / 160 = 0.25 -> 0.2
+
+    # 4. Breakout (Spot > R1)
+    m_bo = compute_oi_wall_metrics(spot=22650.0, s1=22400.0, r1=22600.0, atm=22600.0, strike_step=50.0)
+    assert m_bo["is_available"] is True
+    assert m_bo["position_pct"] == 100.0  # clamped to bar max
+    assert m_bo["status_chip"] == "BREAKOUT"
+    assert m_bo["dist_to_r1"] == -50.0
+    assert m_bo["dist_to_s1"] == 250.0
+
+    # 5. Breakdown (Spot < S1)
+    m_bd = compute_oi_wall_metrics(spot=22350.0, s1=22400.0, r1=22600.0, atm=22400.0, strike_step=50.0)
+    assert m_bd["is_available"] is True
+    assert m_bd["position_pct"] == 0.0  # clamped to bar min
+    assert m_bd["status_chip"] == "BREAKDOWN"
+    assert m_bd["dist_to_s1"] == -50.0
+    assert m_bd["dist_to_r1"] == 250.0
+    # Room/risk denominator uses max(spot - s1, step_floor) = max(-50, 5) = 5 -> safe!
+    assert m_bd["room_ratio"] == 50.0
+
+    # 6. Edge cases: Missing or invalid S1 / R1
+    m_none = compute_oi_wall_metrics(spot=22500.0, s1=None, r1=22600.0)
+    assert m_none["is_available"] is False
+    assert m_none["status_chip"] == "UNAVAILABLE"
+    assert m_none["status_text"] == "OI walls unavailable"
+    assert m_none["position_pct"] is None
+    assert m_none["room_ratio"] is None
+
+    m_inverted = compute_oi_wall_metrics(spot=22500.0, s1=22600.0, r1=22400.0)
+    assert m_inverted["is_available"] is False
+    assert m_inverted["status_chip"] == "UNAVAILABLE"
+
+    # 7. ATM tick is omitted when ATM equals S1 or R1
+    m_atm_s1 = compute_oi_wall_metrics(spot=22500.0, s1=22400.0, r1=22600.0, atm=22400.0)
+    assert m_atm_s1["atm_tick_pct"] is None
+
+    m_atm_r1 = compute_oi_wall_metrics(spot=22500.0, s1=22400.0, r1=22600.0, atm=22600.0)
+    assert m_atm_r1["atm_tick_pct"] is None
+
+
+

@@ -49,19 +49,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const tomorrowBiasPill = document.getElementById("tomorrow-bias-pill");
     const tomorrowBiasDetail = document.getElementById("tomorrow-bias-detail");
 
-    // Key Levels Elements
-    const levelR2 = document.getElementById("level-r2");
-    const levelR1 = document.getElementById("level-r1");
-    const levelAtm = document.getElementById("level-atm");
-    const levelAtmDist = document.getElementById("level-atm-dist");
-    const levelS1 = document.getElementById("level-s1");
-    const levelS2 = document.getElementById("level-s2");
-    const badgeExpectedRange = document.getElementById("badge-expected-range");
-    const ladderSLbl = document.getElementById("ladder-s-lbl");
-    const ladderSpotLbl = document.getElementById("ladder-spot-lbl");
-    const ladderRLbl = document.getElementById("ladder-r-lbl");
-    const ladderSpotPin = document.getElementById("ladder-spot-pin");
-    const levelsSummaryText = document.getElementById("levels-summary-text");
+    // Key Levels Elements (OI walls - Compact)
+    const levelsSpotVal = document.getElementById("levels-spot-val");
+    const levelsStatusChip = document.getElementById("levels-status-chip");
+    const levelsStatusText = document.getElementById("levels-status-text");
+    const levelsRoomVal = document.getElementById("levels-room-val");
+    const oiWallsUnavailable = document.getElementById("oi-walls-unavailable");
+    const oiWallsBarContainer = document.getElementById("oi-walls-bar-container");
+    const barS1Val = document.getElementById("bar-s1-val");
+    const barR1Val = document.getElementById("bar-r1-val");
+    const oiBarTrack = document.getElementById("oi-bar-track");
+    const oiBarAtmTick = document.getElementById("oi-bar-atm-tick");
+    const oiBarSpotMarker = document.getElementById("oi-bar-spot-marker");
+    const oiBarSpotLabel = document.getElementById("oi-bar-spot-label");
+    const distS1Val = document.getElementById("dist-s1-val");
+    const distR1Val = document.getElementById("dist-r1-val");
+    const levelS2Val = document.getElementById("level-s2-val");
+    const levelR2Val = document.getElementById("level-r2-val");
+    const levelsOuterTargets = document.getElementById("levels-outer-targets");
 
     // Institutional Stance Dominance Elements
     const instDomTitle = document.getElementById("inst-dom-title");
@@ -365,53 +370,92 @@ document.addEventListener("DOMContentLoaded", () => {
             tomorrowBiasDetail.textContent = tomorrow.detail || `Next Pivot: ${formatIndianNumber(tomorrow.pivot || levels.atm_strike)}`;
         }
 
-        // 3. Card 2: Key Levels
-        const r1 = levels.resistance_1 || 0;
-        const r2 = levels.resistance_2 || 0;
-        const s1 = levels.support_1 || 0;
-        const s2 = levels.support_2 || 0;
-        const atm = levels.atm_strike || 0;
+        // 3. Card 2: Key Levels (OI walls - Compact)
         const spot = bias.spot_price || 0;
+        const s1 = levels.support_1;
+        const r1 = levels.resistance_1;
+        const s2 = levels.support_2;
+        const r2 = levels.resistance_2;
+        const isAvailable = levels.is_available === true;
 
-        if (levelR2) levelR2.textContent = formatIndianNumber(r2);
-        if (levelR1) levelR1.textContent = formatIndianNumber(r1);
-        if (levelAtm) levelAtm.textContent = formatIndianNumber(atm);
-        if (levelS1) levelS1.textContent = formatIndianNumber(s1);
-        if (levelS2) levelS2.textContent = formatIndianNumber(s2);
-
-        if (levelAtmDist && spot && atm) {
-            const dist = (spot - atm).toFixed(1);
-            const distSign = dist >= 0 ? "+" : "";
-            levelAtmDist.textContent = `Spot Distance: ${distSign}${dist} pts`;
+        if (levelsSpotVal) {
+            levelsSpotVal.textContent = spot > 0 ? `₹${formatIndianNumber(spot)}` : "₹--";
         }
 
-        // Visual Price Range Ladder & Expected Range
-        const rangePts = Math.abs(r1 - s1);
-        if (badgeExpectedRange) {
-            badgeExpectedRange.textContent = `Range: ${formatIndianNumber(s1)} - ${formatIndianNumber(r1)} (${rangePts} pts)`;
-        }
-        if (ladderSLbl) ladderSLbl.textContent = `S1: ${formatIndianNumber(s1)}`;
-        if (ladderRLbl) ladderRLbl.textContent = `R1: ${formatIndianNumber(r1)}`;
-        if (ladderSpotLbl) ladderSpotLbl.textContent = `📍 Spot: ${formatIndianNumber(spot)}`;
+        if (levelS2Val) levelS2Val.textContent = s2 ? formatIndianNumber(s2) : "--";
+        if (levelR2Val) levelR2Val.textContent = r2 ? formatIndianNumber(r2) : "--";
 
-        if (ladderSpotPin && r1 > s1 && spot > 0) {
-            let pinPct = ((spot - s1) / (r1 - s1)) * 100;
-            pinPct = Math.max(0, Math.min(100, pinPct));
-            ladderSpotPin.style.left = `${pinPct}%`;
-        }
+        if (!isAvailable) {
+            if (oiWallsUnavailable) oiWallsUnavailable.style.display = "flex";
+            if (oiWallsBarContainer) oiWallsBarContainer.style.display = "none";
+            if (levelsOuterTargets) levelsOuterTargets.style.display = "none";
+            if (levelsStatusChip) {
+                levelsStatusChip.className = "levels-status-chip font-mono chip-unavailable";
+            }
+            if (levelsStatusText) levelsStatusText.textContent = "OI WALLS UNAVAILABLE";
+            if (levelsRoomVal) levelsRoomVal.textContent = "--";
+        } else {
+            if (oiWallsUnavailable) oiWallsUnavailable.style.display = "none";
+            if (oiWallsBarContainer) oiWallsBarContainer.style.display = "flex";
+            if (levelsOuterTargets) levelsOuterTargets.style.display = "flex";
 
-        // Plain English 1-Liner Takeaway
-        if (levelsSummaryText) {
-            if (spot >= r1 && r1 > 0) {
-                levelsSummaryText.innerHTML = `<strong>Breakout Alert:</strong> Spot (${formatIndianNumber(spot)}) is crossing R1 (${formatIndianNumber(r1)}). Upside target is R2 (${formatIndianNumber(r2)}).`;
-            } else if (spot <= s1 && s1 > 0) {
-                levelsSummaryText.innerHTML = `<strong>Breakdown Alert:</strong> Spot (${formatIndianNumber(spot)}) is breaching S1 (${formatIndianNumber(s1)}). Downside slide towards S2 (${formatIndianNumber(s2)}).`;
-            } else if (r1 > 0 && s1 > 0) {
-                const distR = (r1 - spot).toFixed(1);
-                const distS = (spot - s1).toFixed(1);
-                levelsSummaryText.innerHTML = `<strong>Channel:</strong> Spot is ${distS} pts above S1 Support (${formatIndianNumber(s1)}) and ${distR} pts below R1 Ceiling (${formatIndianNumber(r1)}).`;
-            } else {
-                levelsSummaryText.textContent = "Analyzing key level breakout & support zones...";
+            // Strikes
+            if (barS1Val) barS1Val.textContent = formatIndianNumber(s1);
+            if (barR1Val) barR1Val.textContent = formatIndianNumber(r1);
+
+            // Status Chip & Class
+            const chipStatus = levels.status_chip || "MID-RANGE";
+            if (levelsStatusText) levelsStatusText.textContent = chipStatus;
+            if (levelsStatusChip) {
+                let chipCls = "chip-mid-range";
+                if (chipStatus === "NEAR SUPPORT") chipCls = "chip-near-support";
+                else if (chipStatus === "NEAR RESISTANCE") chipCls = "chip-near-resistance";
+                else if (chipStatus === "BREAKOUT") chipCls = "chip-breakout";
+                else if (chipStatus === "BREAKDOWN") chipCls = "chip-breakdown";
+                levelsStatusChip.className = `levels-status-chip font-mono ${chipCls}`;
+            }
+
+            // Room / Risk metric
+            if (levelsRoomVal) {
+                const ratio = levels.room_ratio;
+                levelsRoomVal.textContent = (ratio !== undefined && ratio !== null && !isNaN(ratio)) ? `${Number(ratio).toFixed(1)}x` : "--";
+            }
+
+            // Proportional position & clamping
+            const posPct = levels.position_pct !== undefined && levels.position_pct !== null
+                ? Math.max(0, Math.min(100, Number(levels.position_pct)))
+                : 50;
+
+            if (oiBarSpotMarker) {
+                oiBarSpotMarker.style.left = `${posPct}%`;
+            }
+            if (oiBarSpotLabel) {
+                oiBarSpotLabel.textContent = spot > 0 ? formatIndianNumber(spot) : "--";
+            }
+
+            // ATM Tick on bar (only when it differs from S1/R1)
+            if (oiBarAtmTick) {
+                if (levels.atm_tick_pct !== undefined && levels.atm_tick_pct !== null) {
+                    const atmPct = Math.max(0, Math.min(100, Number(levels.atm_tick_pct)));
+                    oiBarAtmTick.style.left = `${atmPct}%`;
+                    oiBarAtmTick.style.display = "block";
+                } else {
+                    oiBarAtmTick.style.display = "none";
+                }
+            }
+
+            // Distances in points under each end
+            if (distS1Val) {
+                const dS1 = levels.dist_to_s1;
+                distS1Val.textContent = (dS1 !== undefined && dS1 !== null)
+                    ? `${dS1 >= 0 ? "+" : ""}${dS1} pts`
+                    : "-- pts";
+            }
+            if (distR1Val) {
+                const dR1 = levels.dist_to_r1;
+                distR1Val.textContent = (dR1 !== undefined && dR1 !== null)
+                    ? `${dR1 >= 0 ? "+" : ""}${dR1} pts`
+                    : "-- pts";
             }
         }
 

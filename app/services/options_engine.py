@@ -51,6 +51,8 @@ ENGINE_CONFIG = {
     "POST_EXPANSION_MIN_GAIN_PCT": 70.0,      # Minimum % expansion required to flag post-expansion regime
     "POST_EXPANSION_DROP_FROM_HIGH_PCT": 18.0,# % drop from intraday high indicating exhaustion / distribution
     "MAX_DAILY_TRADES": int(os.environ.get("MAX_DAILY_TRADES", 25)), # Maximum completed/entered trades allowed per trading day (raised for testing)
+    "KEY_LEVELS_NEAR_SUPPORT_THRESHOLD": float(os.environ.get("KEY_LEVELS_NEAR_SUPPORT_THRESHOLD", 0.25)), # <= 25% of S1-R1 range
+    "KEY_LEVELS_NEAR_RESISTANCE_THRESHOLD": float(os.environ.get("KEY_LEVELS_NEAR_RESISTANCE_THRESHOLD", 0.75)), # >= 75% of S1-R1 range
     "OI_THRESHOLDS": {
         "DEFAULT": {
             "ACTIVITY": 40000,
@@ -939,6 +941,107 @@ def compute_tomorrow_trade_bias(
     }
 
 
+def compute_oi_wall_metrics(
+    spot: float | None,
+    s1: float | None,
+    r1: float | None,
+    s2: float | None = None,
+    r2: float | None = None,
+    atm: float | None = None,
+    strike_step: float = 50.0,
+) -> dict:
+    """
+    Computes deterministic Key Levels (OI walls) display metrics:
+    - position_pct: proportional position of spot between S1 (0%) and R1 (100%), clamped [0.0, 100.0]
+    - room_ratio: (R1 - spot) / max(spot - S1, strike_step * 0.1), rounded to 1 decimal
+    - status_chip: BREAKOUT, BREAKDOWN, NEAR SUPPORT, NEAR RESISTANCE, MID-RANGE, or UNAVAILABLE
+    - status_text: human-readable status explanation
+    - dist_to_s1: round(spot - S1, 1) in points
+    - dist_to_r1: round(R1 - spot, 1) in points
+    - atm_tick_pct: proportional position of ATM if it differs from S1 and R1, else None
+    - is_available: True if S1 and R1 are valid numbers with R1 > S1, else False
+    """
+    near_sup_thresh = float(ENGINE_CONFIG.get("KEY_LEVELS_NEAR_SUPPORT_THRESHOLD", 0.25))
+    near_res_thresh = float(ENGINE_CONFIG.get("KEY_LEVELS_NEAR_RESISTANCE_THRESHOLD", 0.75))
+
+    # Edge cases: missing S1/R1 or non-positive / invalid ordering
+    if (
+        spot is None
+        or s1 is None
+        or r1 is None
+        or s1 <= 0
+        or r1 <= 0
+        or r1 <= s1
+    ):
+        return {
+            "is_available": False,
+            "position_pct": None,
+            "room_ratio": None,
+            "status_chip": "UNAVAILABLE",
+            "status_text": "OI walls unavailable",
+            "dist_to_s1": None,
+            "dist_to_r1": None,
+            "atm_tick_pct": None,
+            "s1": s1,
+            "r1": r1,
+            "s2": s2,
+            "r2": r2,
+            "atm": atm,
+        }
+
+    range_pts = r1 - s1
+    dist_s1 = round(spot - s1, 1)
+    dist_r1 = round(r1 - spot, 1)
+
+    raw_pos = (spot - s1) / range_pts
+    clamped_pos = max(0.0, min(1.0, raw_pos))
+    pos_pct = round(clamped_pos * 100.0, 1)
+
+    # Status chip calculation
+    if spot > r1:
+        status_chip = "BREAKOUT"
+        status_text = f"Spot is trading above R1 ({r1:,.0f}) in breakout territory"
+    elif spot < s1:
+        status_chip = "BREAKDOWN"
+        status_text = f"Spot is trading below S1 ({s1:,.0f}) in breakdown territory"
+    elif raw_pos <= near_sup_thresh:
+        status_chip = "NEAR SUPPORT"
+        status_text = f"Spot is within {int(near_sup_thresh * 100)}% of S1 Support ({s1:,.0f})"
+    elif raw_pos >= near_res_thresh:
+        status_chip = "NEAR RESISTANCE"
+        status_text = f"Spot is within {int((1.0 - near_res_thresh) * 100)}% of R1 Resistance ({r1:,.0f})"
+    else:
+        status_chip = "MID-RANGE"
+        status_text = f"Spot is trading in the mid-range channel between S1 ({s1:,.0f}) and R1 ({r1:,.0f})"
+
+    # Room/risk metric: (R1 - spot) / max(spot - S1, strike_step * 0.1); 1 decimal
+    step_floor = max(0.1, strike_step * 0.1)
+    denom = max(spot - s1, step_floor)
+    room_ratio = round((r1 - spot) / denom, 1)
+
+    # ATM tick on bar only when it differs from S1 and R1
+    atm_tick_pct = None
+    if atm is not None and atm > 0 and abs(atm - s1) > 0.01 and abs(atm - r1) > 0.01:
+        atm_pos = max(0.0, min(1.0, (atm - s1) / range_pts))
+        atm_tick_pct = round(atm_pos * 100.0, 1)
+
+    return {
+        "is_available": True,
+        "position_pct": pos_pct,
+        "room_ratio": room_ratio,
+        "status_chip": status_chip,
+        "status_text": status_text,
+        "dist_to_s1": dist_s1,
+        "dist_to_r1": dist_r1,
+        "atm_tick_pct": atm_tick_pct,
+        "s1": s1,
+        "r1": r1,
+        "s2": s2,
+        "r2": r2,
+        "atm": atm,
+    }
+
+
 def compute_market_vector(
     bias: str,
     bullish_score: float,
@@ -1054,14 +1157,22 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                 "net_interpretation": "Data Unavailable: Strategy fail-closed mode active."
             },
             "key_levels": {
-                "resistance_1": spot + step,
-                "resistance_2": spot + 2 * step,
+                "resistance_1": None,
+                "resistance_2": None,
                 "atm_strike": round(spot / step) * step if step else spot,
-                "support_1": spot - step,
-                "support_2": spot - 2 * step,
-                "breakout_level": spot + step,
-                "breakdown_level": spot - step,
+                "support_1": None,
+                "support_2": None,
+                "breakout_level": None,
+                "breakdown_level": None,
                 "spot_diff": 0.0,
+                "is_available": False,
+                "position_pct": None,
+                "room_ratio": None,
+                "status_chip": "UNAVAILABLE",
+                "status_text": "OI walls unavailable",
+                "dist_to_s1": None,
+                "dist_to_r1": None,
+                "atm_tick_pct": None,
             },
             "option_buying": {
                 "decision": "WAIT",
@@ -2211,6 +2322,16 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         trending_oi=trending_oi,
     )
 
+    oi_wall_metrics = compute_oi_wall_metrics(
+        spot=spot,
+        s1=s1,
+        r1=r1,
+        s2=s2,
+        r2=r2,
+        atm=atm_strike,
+        strike_step=step,
+    )
+
     return {
         "morning_bias": morning_bias,
         "tomorrow_bias": tomorrow_bias,
@@ -2241,6 +2362,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "breakdown_level": breakdown_level,
             "spot_diff": spot_diff,
             "market_vector": market_vector,
+            "is_available": oi_wall_metrics["is_available"],
+            "position_pct": oi_wall_metrics["position_pct"],
+            "room_ratio": oi_wall_metrics["room_ratio"],
+            "status_chip": oi_wall_metrics["status_chip"],
+            "status_text": oi_wall_metrics["status_text"],
+            "dist_to_s1": oi_wall_metrics["dist_to_s1"],
+            "dist_to_r1": oi_wall_metrics["dist_to_r1"],
+            "atm_tick_pct": oi_wall_metrics["atm_tick_pct"],
         },
         "option_buying": {
             "decision": decision,  # BUY CE, BUY PE, WAIT

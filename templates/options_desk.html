@@ -39,177 +39,7 @@
 
     <!-- SECTION 1: PRIMARY DECISION CARDS (3-COLUMN GRID) -->
     <section class="decision-grid" aria-label="Core Market Decisions">
-        
-        <!-- CARD 1: MARKET VIEW / BIAS -->
-        <article class="desk-card card-bias" id="card-market-bias">
-            <div class="card-header">
-                <div class="card-title-group">
-                    <span class="card-subtitle">PRIMARY MARKET VIEW</span>
-                    <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
-                        </svg>
-                        MARKET BIAS
-                    </h2>
-                </div>
-                <div class="bias-time-badge" id="bias-time-badge" title="Timestamp when bias last formed">
-                    <span>Changed: </span><strong id="bias-last-changed">--:--</strong>
-                </div>
-            </div>
 
-            <div class="bias-centerpiece">
-                <div class="bias-badge-large" id="bias-badge">
-                    <span class="bias-dot" id="bias-dot"></span>
-                    <span class="bias-text" id="bias-text">ANALYZING...</span>
-                </div>
-
-                <div class="bias-strike-box" id="bias-strike-box">
-                    <span class="bias-strike-label">STRIKE TO TRADE</span>
-                    <span class="bias-strike-pill font-mono" id="bias-strike-pill">--</span>
-                </div>
-
-                <div class="bias-meta-row">
-                    <span class="confidence-pill" id="confidence-pill">Confidence: --</span>
-                    <span class="score-pill" id="score-pill">Score: <strong class="font-mono" id="score-pill-val">0</strong>/100</span>
-                </div>
-            </div>
-
-            <!-- Explainability: Why this bias? -->
-            <div class="why-bias-box">
-                <div class="why-header">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="16" x2="12" y2="12"></line>
-                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                    </svg>
-                    <span>WHY THIS BIAS?</span>
-                </div>
-                <ul class="why-list" id="why-bias-list">
-                    <li>Evaluating previous day boundaries, CPR structure, and opening flow...</li>
-                </ul>
-            </div>
-
-            <!-- Tomorrow Outlook Strip (Option 1) -->
-            <div class="tomorrow-bias-strip" id="tomorrow-bias-strip">
-                <div class="tomorrow-bias-header">
-                    <span class="tomorrow-badge-label">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.3rem;vertical-align:-1px;color:var(--gold-primary);">
-                            <circle cx="12" cy="12" r="5"></circle>
-                            <line x1="12" y1="1" x2="12" y2="3"></line>
-                            <line x1="12" y1="21" x2="12" y2="23"></line>
-                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                            <line x1="1" y1="12" x2="3" y2="12"></line>
-                            <line x1="21" y1="12" x2="23" y2="12"></line>
-                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                        </svg>
-                        TOMORROW'S BIAS
-                    </span>
-                    <span class="tomorrow-bias-pill font-mono" id="tomorrow-bias-pill">ANALYZING...</span>
-                </div>
-                <div class="tomorrow-bias-detail" id="tomorrow-bias-detail">
-                    Next Pivot: -- | Resistance: -- | Base: --
-                </div>
-            </div>
-        </article>
-
-        <!-- CARD 2: KEY LEVELS -->
-        <article class="desk-card card-levels" id="card-key-levels">
-            <div class="card-header">
-                <div class="card-title-group">
-                    <span class="card-subtitle">OI WEIGHTED TARGETS</span>
-                    <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
-                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                            <polyline points="2 17 12 22 22 17"></polyline>
-                            <polyline points="2 12 12 17 22 12"></polyline>
-                        </svg>
-                        KEY LEVELS
-                    </h2>
-                </div>
-                <span class="badge-expected-range font-mono" id="badge-expected-range">Range: S1 - R1</span>
-            </div>
-
-            <div class="levels-container">
-                <!-- Resistance -->
-                <div class="level-section res-section">
-                    <div class="level-badge res-badge">RESISTANCE</div>
-                    <div class="level-values">
-                        <div class="level-row">
-                            <span class="lvl-tag">R2</span>
-                            <span class="lvl-val font-mono" id="level-r2">--</span>
-                        </div>
-                        <div class="level-row">
-                            <span class="lvl-tag">R1</span>
-                            <span class="lvl-val font-mono strong" id="level-r1">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ATM Strike -->
-                <div class="level-section atm-section">
-                    <div class="level-badge atm-badge">ATM STRIKE</div>
-                    <div class="atm-center-val font-mono" id="level-atm">--</div>
-                    <span class="atm-sub" id="level-atm-dist">Spot Distance: 0 pts</span>
-                </div>
-
-                <!-- Support -->
-                <div class="level-section sup-section">
-                    <div class="level-badge sup-badge">SUPPORT</div>
-                    <div class="level-values">
-                        <div class="level-row">
-                            <span class="lvl-tag">S1</span>
-                            <span class="lvl-val font-mono strong" id="level-s1">--</span>
-                        </div>
-                        <div class="level-row">
-                            <span class="lvl-tag">S2</span>
-                            <span class="lvl-val font-mono" id="level-s2">--</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Visual Price Range Ladder Bar -->
-            <div class="price-ladder-container">
-                <div class="ladder-labels">
-                    <span class="ladder-lbl-s font-mono" id="ladder-s-lbl">S1: --</span>
-                    <span class="ladder-lbl-spot font-mono" id="ladder-spot-lbl">📍 Spot: --</span>
-                    <span class="ladder-lbl-r font-mono" id="ladder-r-lbl">R1: --</span>
-                </div>
-                <div class="ladder-track">
-                    <div class="ladder-zone-sup" title="Support Base Zone"></div>
-                    <div class="ladder-zone-mid" title="Intraday Trading Channel"></div>
-                    <div class="ladder-zone-res" title="Resistance Ceiling Zone"></div>
-                    <div class="ladder-spot-pin" id="ladder-spot-pin" style="left: 50%;" title="Current Spot Price Relative to Channel"></div>
-                </div>
-            </div>
-
-            <!-- Plain English 1-Liner Takeaway -->
-            <div class="levels-summary-strip" id="levels-summary-strip">
-                <span class="summary-icon">💡</span>
-                <span id="levels-summary-text">Evaluating key level breakout & support zones...</span>
-            </div>
-
-            <!-- Market Vector & Seller Action Box -->
-            <div class="market-vector-box" id="market-vector-box">
-                <div class="vector-top-row">
-                    <div class="vector-title-group">
-                        <span class="vector-dot" id="vector-dot"></span>
-                        <strong class="vector-head-text" id="vector-head-text">ANALYZING FLOW...</strong>
-                    </div>
-                    <span class="vector-mode-pill font-mono" id="vector-mode-pill">--</span>
-                </div>
-                <div class="vector-seller-action" id="vector-seller-action">
-                    Correlating ATM position, Key Levels, and institutional writing...
-                </div>
-                <div class="vector-playbook" id="vector-playbook">
-                    <span class="playbook-tag">🎯 Playbook:</span>
-                    <span id="vector-playbook-text">Awaiting boundary confirmation.</span>
-                </div>
-            </div>
-        </article>
 
         <!-- CARD 3: OPTION BUYING DECISION & EXECUTION PLAN -->
         <article class="desk-card card-focus" id="card-option-focus">
@@ -217,7 +47,9 @@
                 <div class="card-title-group">
                     <span class="card-subtitle">SELECTIVE DISCIPLINE</span>
                     <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
                             <circle cx="12" cy="12" r="10"></circle>
                             <line x1="22" y1="12" x2="18" y2="12"></line>
                             <line x1="6" y1="12" x2="2" y2="12"></line>
@@ -227,7 +59,8 @@
                         OPTION BUYING
                     </h2>
                 </div>
-                <div class="setup-score-badge" id="setup-score-badge" title="Multi-factor setup quality score (Threshold >= 75)">
+                <div class="setup-score-badge" id="setup-score-badge"
+                    title="Multi-factor setup quality score (Threshold >= 75)">
                     <span>Score: </span><strong class="font-mono" id="setup-score-val">0</strong><span>/100</span>
                 </div>
             </div>
@@ -286,10 +119,13 @@
                 <div class="paper-trade-action-bar">
                     <div class="lots-selector-group">
                         <label for="paper-lots-input" class="paper-lots-label">LOTS:</label>
-                        <input type="number" id="paper-lots-input" min="1" max="50" value="1" class="desk-input-small" aria-label="Trade Lot Quantity">
+                        <input type="number" id="paper-lots-input" min="1" max="50" value="1" class="desk-input-small"
+                            aria-label="Trade Lot Quantity">
                     </div>
-                    <button type="button" class="btn-paper-trade" id="btn-log-paper-trade" title="Log this setup as a paper trade in the journal">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <button type="button" class="btn-paper-trade" id="btn-log-paper-trade"
+                        title="Log this setup as a paper trade in the journal">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="12" y1="5" x2="12" y2="19"></line>
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                         </svg>
@@ -300,20 +136,226 @@
             </div>
         </article>
 
+
+        <!-- CARD 1: MARKET VIEW / BIAS -->
+        <article class="desk-card card-bias" id="card-market-bias">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">PRIMARY MARKET VIEW</span>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                        </svg>
+                        MARKET BIAS
+                    </h2>
+                </div>
+                <div class="bias-time-badge" id="bias-time-badge" title="Timestamp when bias last formed">
+                    <span>Changed: </span><strong id="bias-last-changed">--:--</strong>
+                </div>
+            </div>
+
+            <div class="bias-centerpiece">
+                <div class="bias-badge-large" id="bias-badge">
+                    <span class="bias-dot" id="bias-dot"></span>
+                    <span class="bias-text" id="bias-text">ANALYZING...</span>
+                </div>
+
+                <div class="bias-strike-box" id="bias-strike-box">
+                    <span class="bias-strike-label">STRIKE TO TRADE</span>
+                    <span class="bias-strike-pill font-mono" id="bias-strike-pill">--</span>
+                </div>
+
+                <div class="bias-meta-row">
+                    <span class="confidence-pill" id="confidence-pill">Confidence: --</span>
+                    <span class="score-pill" id="score-pill">Score: <strong class="font-mono"
+                            id="score-pill-val">0</strong>/100</span>
+                </div>
+            </div>
+
+            <!-- Explainability: Why this bias? -->
+            <div class="why-bias-box">
+                <div class="why-header">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span>WHY THIS BIAS?</span>
+                </div>
+                <ul class="why-list" id="why-bias-list">
+                    <li>Evaluating previous day boundaries, CPR structure, and opening flow...</li>
+                </ul>
+            </div>
+
+            <!-- Tomorrow Outlook Strip (Option 1) -->
+            <div class="tomorrow-bias-strip" id="tomorrow-bias-strip">
+                <div class="tomorrow-bias-header">
+                    <span class="tomorrow-badge-label">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.3rem;vertical-align:-1px;color:var(--gold-primary);">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                        TOMORROW'S BIAS
+                    </span>
+                    <span class="tomorrow-bias-pill font-mono" id="tomorrow-bias-pill">ANALYZING...</span>
+                </div>
+                <div class="tomorrow-bias-detail" id="tomorrow-bias-detail">
+                    Next Pivot: -- | Resistance: -- | Base: --
+                </div>
+            </div>
+        </article>
+
+        <!-- CARD 2: KEY LEVELS (OI walls) -->
+        <article class="desk-card card-levels" id="card-key-levels">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">OI WALLS</span>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                            <polyline points="2 17 12 22 22 17"></polyline>
+                            <polyline points="2 12 12 17 22 12"></polyline>
+                        </svg>
+                        KEY LEVELS (OI walls)
+                    </h2>
+                </div>
+                <div class="levels-spot-display font-mono" id="levels-spot-display" title="Current Spot Price">
+                    <span class="spot-label">Spot:</span> <strong id="levels-spot-val">₹--</strong>
+                </div>
+            </div>
+
+            <!-- Single Compact Body for Key Levels -->
+            <div class="levels-compact-body">
+                <!-- Meta Row: Status Chip on left, Room/Risk on right -->
+                <div class="levels-meta-bar">
+                    <div class="levels-status-chip font-mono chip-mid-range" id="levels-status-chip" role="status" aria-live="polite">
+                        <span class="chip-dot" aria-hidden="true"></span>
+                        <span class="chip-text" id="levels-status-text">MID-RANGE</span>
+                    </div>
+                    <div class="levels-room-metric font-mono" id="levels-room-metric" title="Room/Risk = (R1 - Spot) / max(Spot - S1, step * 0.1)">
+                        <span class="metric-lbl">Room/risk:</span>
+                        <strong class="metric-val" id="levels-room-val">--</strong>
+                    </div>
+                </div>
+
+                <!-- Unavailable State Notice (hidden when available) -->
+                <div class="oi-walls-unavailable" id="oi-walls-unavailable" style="display: none;" role="alert">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <span>OI walls unavailable</span>
+                </div>
+
+                <!-- Single Horizontal Bar Container -->
+                <div class="oi-walls-bar-container" id="oi-walls-bar-container">
+                    <!-- S1 at left end, R1 at right end -->
+                    <div class="oi-bar-strikes font-mono">
+                        <div class="strike-end strike-s1">
+                            <span class="wall-tag sup-tag">S1</span>
+                            <strong class="strike-val" id="bar-s1-val">--</strong>
+                        </div>
+                        <div class="strike-end strike-r1">
+                            <strong class="strike-val" id="bar-r1-val">--</strong>
+                            <span class="wall-tag res-tag">R1</span>
+                        </div>
+                    </div>
+
+                    <!-- Horizontal Track with ATM Tick & Spot Marker -->
+                    <div class="oi-bar-track" id="oi-bar-track" aria-label="OI Range Visualizer" role="img">
+                        <div class="oi-track-zone zone-sup" title="Support Territory (0-25%)"></div>
+                        <div class="oi-track-zone zone-mid" title="Mid-Range Territory (25-75%)"></div>
+                        <div class="oi-track-zone zone-res" title="Resistance Territory (75-100%)"></div>
+
+                        <!-- ATM Tick: small tick on the bar when it differs from S1/R1 -->
+                        <div class="oi-bar-atm-tick" id="oi-bar-atm-tick" title="ATM Strike" style="display: none; left: 50%;">
+                            <span class="atm-tick-line"></span>
+                            <span class="atm-tick-label font-mono" id="oi-bar-atm-label">ATM</span>
+                        </div>
+
+                        <!-- Spot Marker: proportional position clamped 0% to 100% -->
+                        <div class="oi-bar-spot-marker" id="oi-bar-spot-marker" style="left: 50%;" title="Current Spot Position">
+                            <div class="spot-marker-pin"></div>
+                            <div class="spot-marker-label font-mono" id="oi-bar-spot-label">--</div>
+                        </div>
+                    </div>
+
+                    <!-- Under each end: distance in points (spot - S1, R1 - spot) -->
+                    <div class="oi-bar-distances font-mono">
+                        <div class="dist-end dist-s1" title="Distance from Spot to S1 Support">
+                            <span class="dist-label">Spot - S1:</span>
+                            <strong class="dist-val" id="dist-s1-val">-- pts</strong>
+                        </div>
+                        <div class="dist-end dist-r1" title="Distance from Spot to R1 Resistance">
+                            <span class="dist-label">R1 - Spot:</span>
+                            <strong class="dist-val" id="dist-r1-val">-- pts</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- R2 and S2 as small grey text under the card -->
+                <div class="levels-outer-targets font-mono" id="levels-outer-targets">
+                    <span>S2: <strong id="level-s2-val">--</strong></span>
+                    <span class="outer-sep">•</span>
+                    <span>R2: <strong id="level-r2-val">--</strong></span>
+                </div>
+            </div>
+
+            <!-- Market Vector & Seller Action Box -->
+            <div class="market-vector-box" id="market-vector-box">
+                <div class="vector-top-row">
+                    <div class="vector-title-group">
+                        <span class="vector-dot" id="vector-dot"></span>
+                        <strong class="vector-head-text" id="vector-head-text">ANALYZING FLOW...</strong>
+                    </div>
+                    <span class="vector-mode-pill font-mono" id="vector-mode-pill">--</span>
+                </div>
+                <div class="vector-seller-action" id="vector-seller-action">
+                    Correlating ATM position, Key Levels, and institutional writing...
+                </div>
+                <div class="vector-playbook" id="vector-playbook">
+                    <span class="playbook-tag">🎯 Playbook:</span>
+                    <span id="vector-playbook-text">Awaiting boundary confirmation.</span>
+                </div>
+            </div>
+        </article>
+
+
+
     </section>
 
     <!-- SECTION: AUTOMATED SIGNAL TRACKER & PAPER TRADING JOURNAL -->
-    <section class="desk-section signal-journal-section" id="signal-journal-section" aria-label="Signal Performance Tracker and Journal">
+    <section class="desk-section signal-journal-section" id="signal-journal-section"
+        aria-label="Signal Performance Tracker and Journal">
         <div class="section-header-strip">
             <div class="strip-left">
                 <div class="section-title-wrap">
                     <span class="pulse-dot green"></span>
                     <h3 class="section-title">SIGNAL TRACKER & JOURNAL</h3>
-                    <span class="badge badge-live-pill" style="font-size:0.68rem;padding:2px 7px;background:rgba(34,197,94,0.12);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:4px;font-weight:600;margin-left:0.5rem;" title="Signal Tracker auto-refreshes every 30 seconds">30s LIVE</span>
+                    <span class="badge badge-live-pill"
+                        style="font-size:0.68rem;padding:2px 7px;background:rgba(34,197,94,0.12);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:4px;font-weight:600;margin-left:0.5rem;"
+                        title="Signal Tracker auto-refreshes every 30 seconds">30s LIVE</span>
                 </div>
-                <span class="section-subtitle">Realtime signal monitoring, profit/loss evaluation, target hits, and paper trade performance analytics</span>
+                <span class="section-subtitle">Realtime signal monitoring, profit/loss evaluation, target hits, and
+                    paper trade performance analytics</span>
             </div>
-            
+
             <div class="strip-controls">
                 <div class="tab-pill-group">
                     <button type="button" class="tab-pill active" id="tab-btn-active-signals" data-tab="active">
@@ -325,8 +367,12 @@
                         <span class="tab-badge" id="history-signals-count-badge">0</span>
                     </button>
                     <button type="button" class="tab-pill" id="tab-btn-analysis" data-tab="analysis">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.2rem;vertical-align:-1px;color:var(--gold-primary);">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.2rem;vertical-align:-1px;color:var(--gold-primary);">
+                            <path
+                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                            </path>
                             <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
                             <line x1="12" y1="22.08" x2="12" y2="12"></line>
                         </svg>
@@ -335,8 +381,10 @@
                     </button>
                 </div>
 
-                <a href="/api/options-desk/trade-analysis" target="_blank" class="btn-action" id="btn-view-analysis-api" aria-label="View Analysis JSON API" title="View Direct JSON Analysis">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <a href="/api/options-desk/trade-analysis" target="_blank" class="btn-action" id="btn-view-analysis-api"
+                    aria-label="View Analysis JSON API" title="View Direct JSON Analysis">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
                         <line x1="16" y1="13" x2="8" y2="13"></line>
@@ -346,8 +394,10 @@
                     <span>Analysis JSON</span>
                 </a>
 
-                <button type="button" class="btn-action" id="btn-export-journal-csv" aria-label="Export Trade Journal to CSV" title="Export Journal to CSV">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <button type="button" class="btn-action" id="btn-export-journal-csv"
+                    aria-label="Export Trade Journal to CSV" title="Export Journal to CSV">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -419,7 +469,9 @@
                         </tr>
                     </thead>
                     <tbody id="active-signals-tbody">
-                        <tr><td colspan="10" class="text-center">No active signals currently open.</td></tr>
+                        <tr>
+                            <td colspan="10" class="text-center">No active signals currently open.</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -444,7 +496,9 @@
                         </tr>
                     </thead>
                     <tbody id="history-signals-tbody">
-                        <tr><td colspan="10" class="text-center">No completed trades in journal.</td></tr>
+                        <tr>
+                            <td colspan="10" class="text-center">No completed trades in journal.</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -453,11 +507,12 @@
         <!-- Tab 3: AI Strategy Diagnostics & Parameter Optimization View -->
         <div class="journal-tab-pane" id="pane-analysis">
             <div class="analysis-agent-container">
-                
+
                 <!-- Advisory Banner -->
                 <div class="analysis-advisory-banner">
                     <div class="advisory-icon">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="10"></circle>
                             <line x1="12" y1="16" x2="12" y2="12"></line>
                             <line x1="12" y1="8" x2="12.01" y2="8"></line>
@@ -465,10 +520,13 @@
                     </div>
                     <div class="advisory-text">
                         <strong>DIAGNOSTIC MODE (OBSERVE &rarr; ANALYZE &rarr; FIND PATTERNS &rarr; RECOMMEND):</strong>
-                        <span>This agent never modifies live trading rules automatically. All identified leaks and proposed adjustments require manual review.</span>
+                        <span>This agent never modifies live trading rules automatically. All identified leaks and
+                            proposed adjustments require manual review.</span>
                     </div>
-                    <button type="button" class="btn-action btn-gold btn-sm" id="btn-run-diagnostics" aria-label="Rerun Post-Mortem Diagnostics">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <button type="button" class="btn-action btn-gold btn-sm" id="btn-run-diagnostics"
+                        aria-label="Rerun Post-Mortem Diagnostics">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <polyline points="23 4 23 10 17 10"></polyline>
                             <polyline points="1 20 1 14 7 14"></polyline>
                             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -523,14 +581,16 @@
 
                 <!-- 2 & 3. BEST & WORST CONDITIONS GRID -->
                 <div class="analysis-grid-two-col">
-                    
+
                     <!-- 2. BEST CONDITIONS -->
                     <div class="analysis-card card-best-conditions">
                         <div class="a-card-header">
                             <div class="a-card-title-group">
                                 <span class="a-card-subtitle text-bullish">HIGH EXPECTANCY SEGMENTS</span>
                                 <h4 class="a-card-title text-bullish">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                        aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
                                         <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
                                         <polyline points="17 6 23 6 23 12"></polyline>
                                     </svg>
@@ -549,7 +609,9 @@
                             <div class="a-card-title-group">
                                 <span class="a-card-subtitle text-bearish">LOW EXPECTANCY & DRAG</span>
                                 <h4 class="a-card-title text-bearish">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                                        aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;">
                                         <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline>
                                         <polyline points="17 18 23 18 23 12"></polyline>
                                     </svg>
@@ -570,8 +632,12 @@
                         <div class="a-card-title-group">
                             <span class="a-card-subtitle text-amber">RANKED ROOT CAUSE ATTRIBUTION</span>
                             <h4 class="a-card-title">
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--amber-accent);margin-right:0.35rem;vertical-align:-2px;">
-                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                                    style="color:var(--amber-accent);margin-right:0.35rem;vertical-align:-2px;">
+                                    <path
+                                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
+                                    </path>
                                     <line x1="12" y1="9" x2="12" y2="13"></line>
                                     <line x1="12" y1="17" x2="12.01" y2="17"></line>
                                 </svg>
@@ -590,9 +656,13 @@
                         <div class="a-card-title-group">
                             <span class="a-card-subtitle text-emerald">PROPOSED PARAMETER & RULE ADJUSTMENTS</span>
                             <h4 class="a-card-title">
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--emerald-accent);margin-right:0.35rem;vertical-align:-2px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                                    style="color:var(--emerald-accent);margin-right:0.35rem;vertical-align:-2px;">
                                     <circle cx="12" cy="12" r="3"></circle>
-                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                    </path>
                                 </svg>
                                 5. RECOMMENDED CHANGES (REQUIRES MANUAL APPROVAL)
                             </h4>
@@ -606,7 +676,7 @@
 
                 <!-- Segmentation Breakdown Tables: Moneyness & Time of Day -->
                 <div class="analysis-tables-grid">
-                    
+
                     <!-- Moneyness Performance Table -->
                     <div class="analysis-sub-card">
                         <div class="sub-card-header">
@@ -625,7 +695,9 @@
                                     </tr>
                                 </thead>
                                 <tbody id="diag-moneyness-tbody">
-                                    <tr><td colspan="5" class="text-center">No moneyness data yet.</td></tr>
+                                    <tr>
+                                        <td colspan="5" class="text-center">No moneyness data yet.</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -648,7 +720,9 @@
                                     </tr>
                                 </thead>
                                 <tbody id="diag-timewindow-tbody">
-                                    <tr><td colspan="4" class="text-center">No session window data yet.</td></tr>
+                                    <tr>
+                                        <td colspan="4" class="text-center">No session window data yet.</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -666,21 +740,34 @@
             <div class="strip-left">
                 <div style="display:flex;align-items:center;gap:0.75rem;">
                     <h3 class="section-title">TRENDING OI</h3>
-                    <span class="badge badge-primary font-mono" style="font-size:0.7rem;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">ATM &plusmn; 5 STRIKES</span>
+                    <span class="badge badge-primary font-mono"
+                        style="font-size:0.7rem;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">ATM &plusmn; 5
+                        STRIKES</span>
                 </div>
-                <span class="section-subtitle">Automatic 5 strikes up &amp; 5 strikes down from ATM (11 strikes). Real-time &Delta;OI difference percentage, strength dots (&ge;40% conviction rule), direction of change &amp; sentiment analysis</span>
+                <span class="section-subtitle">Automatic 5 strikes up &amp; 5 strikes down from ATM (11 strikes).
+                    Real-time &Delta;OI difference percentage, strength dots (&ge;40% conviction rule), direction of
+                    change &amp; sentiment analysis</span>
             </div>
             <div class="strip-controls">
                 <!-- Sub-view tabs -->
-                <div class="trending-view-tabs" role="tablist" style="display:flex;gap:0.25rem;background:rgba(255,255,255,0.04);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);">
-                    <button type="button" class="btn-tab-pill active" id="btn-tab-trending-oi" role="tab" aria-selected="true" style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:var(--accent-color, #3b82f6);color:#fff;cursor:pointer;font-weight:600;">Trending OI (Time Series)</button>
-                    <button type="button" class="btn-tab-pill" id="btn-tab-strike-breakdown" role="tab" aria-selected="false" style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:transparent;color:var(--text-muted, #94a3b8);cursor:pointer;font-weight:500;">Strike Breakdown</button>
+                <div class="trending-view-tabs" role="tablist"
+                    style="display:flex;gap:0.25rem;background:rgba(255,255,255,0.04);padding:2px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);">
+                    <button type="button" class="btn-tab-pill active" id="btn-tab-trending-oi" role="tab"
+                        aria-selected="true"
+                        style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:var(--accent-color, #3b82f6);color:#fff;cursor:pointer;font-weight:600;">Trending
+                        OI (Time Series)</button>
+                    <button type="button" class="btn-tab-pill" id="btn-tab-strike-breakdown" role="tab"
+                        aria-selected="false"
+                        style="padding:4px 10px;font-size:0.75rem;border-radius:4px;border:none;background:transparent;color:var(--text-muted, #94a3b8);cursor:pointer;font-weight:500;">Strike
+                        Breakdown</button>
                 </div>
 
                 <!-- Interval Selector -->
                 <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
-                    <label for="trending-interval-select" class="control-label" style="font-size:0.75rem;">INTERVAL:</label>
-                    <select id="trending-interval-select" class="desk-select" aria-label="Select Time Interval" style="padding:0.25rem 0.5rem;font-size:0.75rem;">
+                    <label for="trending-interval-select" class="control-label"
+                        style="font-size:0.75rem;">INTERVAL:</label>
+                    <select id="trending-interval-select" class="desk-select" aria-label="Select Time Interval"
+                        style="padding:0.25rem 0.5rem;font-size:0.75rem;">
                         <option value="5" selected>5 min</option>
                         <option value="15">15 min</option>
                         <option value="3">3 min</option>
@@ -690,10 +777,13 @@
         </div>
 
         <!-- Selected Strikes Bar & Live Capsule KPI (matching Oi Pulse header bar) -->
-        <div class="trending-oi-meta-strip" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:0.6rem 1rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:6px;margin-bottom:0.75rem;gap:0.5rem;">
+        <div class="trending-oi-meta-strip"
+            style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:0.6rem 1rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:6px;margin-bottom:0.75rem;gap:0.5rem;">
             <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-                <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);font-weight:600;">Selected Strike Prices (ATM &plusmn; 5):</span>
-                <div id="trending-selected-strikes-container" style="display:flex;gap:0.25rem;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);font-weight:600;">Selected Strike Prices
+                    (ATM &plusmn; 5):</span>
+                <div id="trending-selected-strikes-container"
+                    style="display:flex;gap:0.25rem;flex-wrap:wrap;align-items:center;">
                     <span style="color:var(--text-muted,#94a3b8);font-size:0.75rem;">Loading strikes...</span>
                 </div>
             </div>
@@ -727,7 +817,10 @@
                     </tr>
                 </thead>
                 <tbody id="trending-pulse-tbody">
-                    <tr><td colspan="14" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">Loading Trending OI data...</td></tr>
+                    <tr>
+                        <td colspan="14" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">
+                            Loading Trending OI data...</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -748,7 +841,9 @@
                     </tr>
                 </thead>
                 <tbody id="oi-trend-tbody">
-                    <tr><td colspan="8" class="text-center">Loading OI trend data...</td></tr>
+                    <tr>
+                        <td colspan="8" class="text-center">Loading OI trend data...</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -756,14 +851,16 @@
 
     <!-- SECTION: OI ACTIVITY & BIG MOVEMENTS (2-COLUMN GRID) -->
     <section class="secondary-grid" aria-label="OI Activity and Large Orders">
-        
+
         <!-- CARD 4: OI ACTIVITY SUMMARY -->
         <article class="desk-card card-activity">
             <div class="card-header">
                 <div class="card-title-group">
                     <span class="card-subtitle">WRITING & UNWINDING CLUSTERS</span>
                     <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
                             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                         </svg>
                         OI ACTIVITY
@@ -772,7 +869,8 @@
             </div>
 
             <div class="activity-grid">
-                <div class="activity-tile tile-call-write" title="Call Writing: Heavy sellers adding resistance (Ceiling). Caps market upside.">
+                <div class="activity-tile tile-call-write"
+                    title="Call Writing: Heavy sellers adding resistance (Ceiling). Caps market upside.">
                     <div class="act-header-row">
                         <span class="act-label">CALL WRITING</span>
                         <span class="act-dir-pill dir-bearish">🔻 Ceiling</span>
@@ -780,7 +878,8 @@
                     <span class="act-strike font-mono" id="act-call-writing">--</span>
                     <span class="act-desc">Major Call Resistance</span>
                 </div>
-                <div class="activity-tile tile-put-write" title="Put Writing: Heavy sellers adding support (Floor). Protects market downside.">
+                <div class="activity-tile tile-put-write"
+                    title="Put Writing: Heavy sellers adding support (Floor). Protects market downside.">
                     <div class="act-header-row">
                         <span class="act-label">PUT WRITING</span>
                         <span class="act-dir-pill dir-bullish">🔺 Floor</span>
@@ -788,7 +887,8 @@
                     <span class="act-strike font-mono" id="act-put-writing">--</span>
                     <span class="act-desc">Major Put Support</span>
                 </div>
-                <div class="activity-tile tile-call-unwind" title="Call Unwinding: Call sellers exiting shorts. Resistance breaking, unlocking upward room.">
+                <div class="activity-tile tile-call-unwind"
+                    title="Call Unwinding: Call sellers exiting shorts. Resistance breaking, unlocking upward room.">
                     <div class="act-header-row">
                         <span class="act-label">CALL UNWINDING</span>
                         <span class="act-dir-pill dir-bullish">↗️ Clearing</span>
@@ -796,7 +896,8 @@
                     <span class="act-strike font-mono" id="act-call-unwinding">--</span>
                     <span class="act-desc">Resistance Weakening</span>
                 </div>
-                <div class="activity-tile tile-put-unwind" title="Put Unwinding: Put sellers cutting losses. Support cracking, signaling breakdown risk.">
+                <div class="activity-tile tile-put-unwind"
+                    title="Put Unwinding: Put sellers cutting losses. Support cracking, signaling breakdown risk.">
                     <div class="act-header-row">
                         <span class="act-label">PUT UNWINDING</span>
                         <span class="act-dir-pill dir-bearish">↘️ Cracking</span>
@@ -826,7 +927,9 @@
                 <div class="card-title-group">
                     <span class="card-subtitle">LARGE TRADER POSITIONING</span>
                     <h2 class="card-title">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                         </svg>
                         BIG OI MOVEMENT
@@ -842,8 +945,10 @@
                     <span class="inst-dom-pct font-mono" id="inst-dom-pct">Analyzing flow...</span>
                 </div>
                 <div class="inst-dom-bar-wrap">
-                    <div class="dom-bar-ce" id="dom-bar-ce" style="width: 50%;" title="Call Writing / Bearish Resistance Positioning"></div>
-                    <div class="dom-bar-pe" id="dom-bar-pe" style="width: 50%;" title="Put Writing / Bullish Support Positioning"></div>
+                    <div class="dom-bar-ce" id="dom-bar-ce" style="width: 50%;"
+                        title="Call Writing / Bearish Resistance Positioning"></div>
+                    <div class="dom-bar-pe" id="dom-bar-pe" style="width: 50%;"
+                        title="Put Writing / Bullish Support Positioning"></div>
                 </div>
             </div>
 
@@ -859,7 +964,8 @@
         <div class="section-header-strip">
             <div class="strip-left">
                 <h3 class="section-title">OPTION CHAIN</h3>
-                <span class="section-subtitle">Core strike data with volume, open interest, price change, and sentiment tags</span>
+                <span class="section-subtitle">Core strike data with volume, open interest, price change, and sentiment
+                    tags</span>
             </div>
             <div class="strip-controls">
                 <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
@@ -872,7 +978,8 @@
                 </div>
 
                 <button type="button" class="btn-action" id="btn-export-csv" aria-label="Export Option Chain to CSV">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -903,7 +1010,9 @@
                     </tr>
                 </thead>
                 <tbody id="option-chain-tbody">
-                    <tr><td colspan="9" class="text-center">Loading full option chain...</td></tr>
+                    <tr>
+                        <td colspan="9" class="text-center">Loading full option chain...</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
