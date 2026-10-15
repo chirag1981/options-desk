@@ -644,8 +644,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Render table rows (Strictly within market hours 09:10:00 - 15:30:00)
         trendingPulseTbody.innerHTML = "";
+        const rowsSelect = document.getElementById("trending-rows-select");
+        const rowLimit = rowsSelect && rowsSelect.value !== "all" ? parseInt(rowsSelect.value, 10) : Infinity;
         let displayedCount = 0;
         trendingTimeseries.rows.forEach(r => {
+            if (displayedCount >= rowLimit) {
+                return;
+            }
             if (r.time) {
                 const timeNorm = r.time.length === 5 ? r.time + ":00" : r.time;
                 if (timeNorm < "09:10:00" || timeNorm > "15:30:00") {
@@ -1670,6 +1675,25 @@ document.addEventListener("DOMContentLoaded", () => {
             state.trendingLastFetchTime = 0;
             fetchTrendingOiData(true);
             setupTrendingOiTimer();
+        });
+    }
+
+    // Trending OI Rows Selection (Instant no-scroll compact view)
+    const trendingRowsSelect = document.getElementById("trending-rows-select");
+    if (trendingRowsSelect) {
+        const savedRows = localStorage.getItem("options_desk_trending_rows");
+        if (savedRows) {
+            trendingRowsSelect.value = savedRows;
+        }
+        trendingRowsSelect.addEventListener("change", () => {
+            localStorage.setItem("options_desk_trending_rows", trendingRowsSelect.value);
+            if (state.trendingData && state.trendingData.timeseries) {
+                renderTrendingOiTable(
+                    state.trendingData.timeseries,
+                    state.trendingData.atm_strike,
+                    state.trendingData.spot_price
+                );
+            }
         });
     }
 

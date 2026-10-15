@@ -771,7 +771,7 @@
                     Real-time &Delta;OI difference percentage, strength dots (&ge;40% conviction rule), direction of
                     change &amp; sentiment analysis</span>
             </div>
-            <div class="strip-controls">
+            <div class="strip-controls" style="display:flex;align-items:center;gap:0.75rem;">
                 <!-- Interval Selector -->
                 <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
                     <label for="trending-interval-select" class="control-label"
@@ -781,6 +781,18 @@
                         <option value="5" selected>5 min</option>
                         <option value="15">15 min</option>
                         <option value="3">3 min</option>
+                    </select>
+                </div>
+                <!-- Rows Selector (Instant no-scroll compact view) -->
+                <div class="control-item" style="flex-direction:row;align-items:center;gap:0.4rem;">
+                    <label for="trending-rows-select" class="control-label"
+                        style="font-size:0.75rem;">ROWS:</label>
+                    <select id="trending-rows-select" class="desk-select" aria-label="Select Visible Rows"
+                        style="padding:0.25rem 0.5rem;font-size:0.75rem;font-weight:600;">
+                        <option value="10" selected>10 rows</option>
+                        <option value="15">15 rows</option>
+                        <option value="25">25 rows</option>
+                        <option value="all">All rows</option>
                     </select>
                 </div>
             </div>
