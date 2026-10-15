@@ -33,16 +33,6 @@ INDEX_CONFIGS = {
         "exchange": "NSE",
         "exch_code": "NSE",
     },
-    "SENSEX": {
-        "token_symbol": "SENSEX",
-        "fyers_symbol": "BSE:SENSEX-INDEX",
-        "name": "BSE SENSEX",
-        "lot_size": 20,
-        "strike_step": 100,
-        "default_spot": 72000.0,
-        "exchange": "BSE",
-        "exch_code": "BSE",
-    },
 }
 
 
@@ -231,10 +221,6 @@ def get_upcoming_expiries(symbol: str = "NIFTY") -> list[str]:
     # Fallback schedules
     FALLBACK_SCHEDULES = {
         "NIFTY": ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"],
-        "SENSEX": ["08-OCT-2026", "15-OCT-2026", "22-OCT-2026", "29-OCT-2026"],
-        "BANKNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
-        "FINNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
-        "MIDCPNIFTY": ["27-OCT-2026", "23-NOV-2026", "29-DEC-2026"],
     }
     return FALLBACK_SCHEDULES.get(sym, ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"])
 

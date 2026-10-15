@@ -66,12 +66,6 @@ ENGINE_CONFIG = {
             "UNWINDING": 50000,
             "BIG_MOVEMENT": 75000,
         },
-        "SENSEX": {
-            "ACTIVITY": 8000,
-            "WRITING": 6000,
-            "UNWINDING": 10000,
-            "BIG_MOVEMENT": 15000,
-        },
     }
 }
 
@@ -1825,8 +1819,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     active_trade_str = "YES" if has_active_trade else "NO"
 
     # Major Round Strike Defense (Psychological Wall & Century Barrier Protection)
-    major_round_step = 1000.0 if symbol == "SENSEX" else 500.0
-    century_step = 500.0 if symbol == "SENSEX" else 100.0
+    major_round_step = 500.0
+    century_step = 100.0
 
     nearest_round_ceil = math.ceil(spot / major_round_step) * major_round_step
     nearest_round_floor = math.floor(spot / major_round_step) * major_round_step
