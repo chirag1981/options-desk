@@ -633,7 +633,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="badge ${getSentimentBadgeClass(latest.sentiment)}" style="margin-left:0.2rem;">
                         ${latest.sentiment}
                     </span>
-                    <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.3rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
                     ${latest.divergence_badge ? `
                         <span class="badge-divergence-pill ${latest.divergence === 'BULL_TRAP' ? 'pill-bull-trap' : 'pill-bear-trap'}" style="margin-left:0.3rem;" title="${latest.divergence_detail || ''}">
                             ${latest.divergence_badge}
