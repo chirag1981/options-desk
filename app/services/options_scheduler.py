@@ -15,12 +15,11 @@ app/services/options_scheduler.py — Background Telemetry, Signal Dispatcher & 
 import os
 import time
 import json
-import sqlite3
 import threading
 import logging
-from datetime import datetime, date, time as dtime
+from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
-from config.trading_holidays import NSE_HOLIDAYS, is_market_holiday, is_special_session
+from config.trading_holidays import is_market_holiday, is_special_session
 from app.services.fyers_options_service import fetch_option_chain_data, INDEX_CONFIGS
 from app.services.options_engine import analyze_option_desk, ENGINE_CONFIG
 from app.services.options_signal_service import (

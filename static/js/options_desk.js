@@ -160,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!resp.ok) {
                 throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
             }
-            result = await resp.json();
+            const result = await resp.json();
 
             if (result && result.success && result.data) {
                 state.lastData = result.data;
@@ -358,7 +358,13 @@ document.addEventListener("DOMContentLoaded", () => {
             tomorrowBiasPill.className = `tomorrow-bias-pill font-mono ${tomorrow.badge_class || "neutral"}`;
         }
         if (tomorrowBiasDetail) {
-            tomorrowBiasDetail.textContent = tomorrow.detail || `Next Pivot: ${formatIndianNumber(tomorrow.pivot || levels.atm_strike)}`;
+            if (tomorrow.detail) {
+                tomorrowBiasDetail.textContent = tomorrow.detail;
+            } else if (tomorrow.pivot) {
+                tomorrowBiasDetail.textContent = `Next Pivot: ${formatIndianNumber(tomorrow.pivot)} | CPR: ${tomorrow.cpr_type || 'NORMAL'} | Resist: ${tomorrow.key_wall || '--'} | Base: ${tomorrow.key_support || '--'}`;
+            } else {
+                tomorrowBiasDetail.textContent = `Next Pivot: ${formatIndianNumber(levels.atm_strike || 0)} | Resistance: ${levels.resistance_1 || '--'} | Base: ${levels.support_1 || '--'}`;
+            }
         }
 
         // 3. Card 2: Key Levels (OI walls - Compact)
@@ -565,7 +571,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderTrendingOiTable(trendingTimeseries, atmStrike, spotPrice) {
         if (!trendingPulseTbody) return;
         if (!trendingTimeseries || !trendingTimeseries.rows || trendingTimeseries.rows.length === 0) {
-            trendingPulseTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
+            trendingPulseTbody.innerHTML = `<tr><td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available yet.</td></tr>`;
             return;
         }
 
@@ -584,9 +590,24 @@ document.addEventListener("DOMContentLoaded", () => {
         // Render live capsule in header strip
         if (trendingLiveCapsuleSummary && trendingTimeseries.latest_summary) {
             const latest = trendingTimeseries.latest_summary;
-            const pctSign = latest.strength_pct >= 0 ? "+" : "";
-            const dotChar = "●";
-            const dotsStr = dotChar.repeat(latest.strength_dots || 0);
+            const pctSign = latest.strength_pct > 0 ? "+" : "";
+            const dots = latest.strength_dots || 0;
+            const absPct = Math.abs(latest.strength_pct || 0);
+            const isGrayed = absPct < 30 || latest.strength_class === "strength-weak";
+
+            let dotPillHtml = "";
+            if (dots >= 2) {
+                dotPillHtml = `<span class="strength-dots-pill">${'<span class="strength-dot"></span>'.repeat(dots)}</span>`;
+            } else if (dots === 1) {
+                dotPillHtml = `<span class="strength-dots-pill pill-weak"><span class="strength-dot"></span></span>`;
+            }
+
+            const convictionBadge = dots >= 2 ?
+                `<span class="badge-conviction-status status-confirmed" title="Oi Pulse Conviction Rule met: >=40% diff with 2+ dots">✓ Confirmed (&ge;40%, ${dots} dots)</span>` :
+                (absPct >= 30 ?
+                    `<span class="badge-conviction-status status-weak" title="Weak sentiment (<40% or <2 dots) — Avoid trading action">⚠️ Weak Trend (&lt;40%)</span>` :
+                    `<span class="badge-conviction-status status-grayed" title="Grayed out (<30%) — Indecisive / noise zone">○ Grayed Out (&lt;30%)</span>`
+                );
 
             // Handle Divergence Alert Banner
             const divAlertEl = document.getElementById("trending-divergence-alert-container");
@@ -602,18 +623,19 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             trendingLiveCapsuleSummary.innerHTML = `
-                <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;" title="Oi Pulse Conviction Rule: >=40% diff with 2+ dots indicates trading conviction. <30% is noise/chop.">
-                    <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);">Live Strength:</span>
-                    <span class="strength-capsule ${latest.strength_class || 'strength-weak'}">
-                        <span>${pctSign}${latest.strength_pct}%</span>
-                        ${dotsStr ? `<span class="strength-dots">${dotsStr}</span>` : ''}
-                    </span>
-                    <span class="badge ${getSentimentBadgeClass(latest.sentiment)}" style="margin-left:0.3rem;">
+                <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;" title="Oi Pulse Conviction Rule: >=40% diff with 2+ dots indicates trading conviction. Below 30% is grayed out noise.">
+                    <span style="font-size:0.75rem;color:var(--text-muted,#94a3b8);font-weight:600;">Live Strength:</span>
+                    <div class="strength-capsule ${latest.strength_class || 'strength-weak'} ${isGrayed ? 'is-grayed' : ''}">
+                        <span class="strength-pct">${pctSign}${latest.strength_pct}%</span>
+                        ${dotPillHtml}
+                    </div>
+                    ${convictionBadge}
+                    <span class="badge ${getSentimentBadgeClass(latest.sentiment)}" style="margin-left:0.2rem;">
                         ${latest.sentiment}
                     </span>
-                    <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.5rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
+                    <span style="font-size:0.72rem;color:var(--text-muted,#94a3b8);font-family:var(--font-mono);margin-left:0.3rem;">Net PCR: <strong>${latest.net_pcr}</strong></span>
                     ${latest.divergence_badge ? `
-                        <span class="badge-divergence-pill ${latest.divergence === 'BULL_TRAP' ? 'pill-bull-trap' : 'pill-bear-trap'}" style="margin-left:0.4rem;" title="${latest.divergence_detail || ''}">
+                        <span class="badge-divergence-pill ${latest.divergence === 'BULL_TRAP' ? 'pill-bull-trap' : 'pill-bear-trap'}" style="margin-left:0.3rem;" title="${latest.divergence_detail || ''}">
                             ${latest.divergence_badge}
                         </span>
                     ` : ''}
@@ -634,7 +656,14 @@ document.addEventListener("DOMContentLoaded", () => {
             displayedCount++;
             const tr = document.createElement("tr");
 
-            // Format Day H/L Break
+            // 1. Date & Time
+            const dateStr = r.date || "--";
+            const timeStr = r.time || "--";
+
+            // 2. LTP
+            const ltpVal = typeof r.ltp === "number" ? r.ltp.toFixed(2) : (r.ltp || "--");
+
+            // 3. Format Day H/L Break
             let dlbHtml = "-";
             if (r.day_hl_break && r.day_hl_break !== "-") {
                 if (r.day_hl_break.startsWith("D.L.B.")) {
@@ -646,25 +675,48 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
-            // Compact & formatted values
+            // 4. Compact & formatted values
             const ceChgHtml = formatOiFlowCell(r.ce_change_oi, 'CE');
             const peChgHtml = formatOiFlowCell(r.pe_change_oi, 'PE');
             const diffOiHtml = formatOiFlowCell(r.diff_oi, 'DIFF');
-            const chngDirHtml = formatOiFlowCell(r.chng_in_direction, 'DIR');
-            const sentClass = getSentimentBadgeClass(r.sentiment);
 
-            // Strength capsule
-            const pctSign = r.strength_pct >= 0 ? "+" : "";
-            const dotChar = "●";
-            const dotsStr = dotChar.repeat(r.strength_dots || 0);
+            // 5. Strength capsule matching Oi Pulse specification
+            const pctSign = r.strength_pct > 0 ? "+" : "";
+            const dots = r.strength_dots || 0;
+            const absPct = Math.abs(r.strength_pct || 0);
+            const isGrayed = absPct < 30 || r.strength_class === "strength-weak";
+
+            let dotPillHtml = "";
+            if (dots >= 2) {
+                dotPillHtml = `<span class="strength-dots-pill">${'<span class="strength-dot"></span>'.repeat(dots)}</span>`;
+            } else if (dots === 1) {
+                dotPillHtml = `<span class="strength-dots-pill pill-weak"><span class="strength-dot"></span></span>`;
+            }
+
             const strengthHtml = `
-                <span class="strength-capsule ${r.strength_class}">
-                    <span>${pctSign}${r.strength_pct}%</span>
-                    ${dotsStr ? `<span class="strength-dots">${dotsStr}</span>` : ''}
-                </span>
+                <div class="strength-capsule ${r.strength_class || 'strength-weak'} ${isGrayed ? 'is-grayed' : ''}" title="${r.strength_pct}% (${dots} dots) - ${dots >= 2 ? 'Confirmed trend conviction' : (dots === 1 ? 'Weak sentiment' : 'Grayed out noise zone')}">
+                    <span class="strength-pct">${pctSign}${r.strength_pct}%</span>
+                    ${dotPillHtml}
+                </div>
             `;
 
-            // Day High/Low Diff in OI badge
+            // 6. Direction of chng. (Square button with Up/Down arrow)
+            const isUp = r.direction_arrow === "↑" || r.direction_color === "green" || (r.chng_in_direction >= 0);
+            const dirBtnHtml = isUp
+                ? `<span class="direction-btn dir-up" title="Direction: Up">↑</span>`
+                : `<span class="direction-btn dir-down" title="Direction: Down">↓</span>`;
+
+            // 7. Chng. In Direction & %
+            const chngDirHtml = formatOiFlowCell(r.chng_in_direction, 'DIR');
+            const dirPctVal = typeof r.direction_chng_pct === "number" ? r.direction_chng_pct : Number(r.direction_chng_pct || 0);
+            const dirPctSign = dirPctVal > 0 ? "+" : "";
+            const dirPctClass = dirPctVal > 0 ? "val-bullish" : (dirPctVal < 0 ? "val-bearish" : "val-zero");
+            const dirPctHtml = `<span class="oi-val ${dirPctClass} font-mono">${dirPctSign}${dirPctVal.toFixed(2)}%</span>`;
+
+            // 8. Net PCR
+            const netPcrVal = r.net_pcr != null ? Number(r.net_pcr).toFixed(2) : "--";
+
+            // 9. Day High/Low Diff in OI badge
             let dayHlDiffHtml = "-";
             if (r.day_hl_diff_oi === "Day Low Break") {
                 dayHlDiffHtml = `<span class="badge-diff-break-low">Day Low Break</span>`;
@@ -672,20 +724,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 dayHlDiffHtml = `<span class="badge-diff-break-high">Day High Break</span>`;
             }
 
-            // Build-up Badge & Sub-activity
+            // 10. Build-up Badge & Sub-activity
             let buildupClass = r.buildup_class || "buildup-neutral";
             const buildupLabel = r.buildup_label || "Neutral";
             if (buildupLabel === "Consolidation" || (r.buildup_type && r.buildup_type.includes("CONSOLIDATION"))) {
                 buildupClass = "buildup-consolidation";
             }
             const subActText = r.sub_activity || "";
-
-            const buildupHtml = `
-                <div class="buildup-cell-wrap" title="${subActText}">
-                    <span class="badge-buildup ${buildupClass}">${buildupLabel}</span>
-                    ${subActText ? `<span class="buildup-sub-action">${subActText}</span>` : ''}
-                </div>
-            `;
+            const sentClass = getSentimentBadgeClass(r.sentiment);
 
             // Divergence badge in sentiment cell
             const divBadgeHtml = r.divergence_badge ? `
@@ -694,24 +740,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 </span>
             ` : '';
 
-            const ltpVal = typeof r.ltp === "number" ? r.ltp.toFixed(2) : (r.ltp || "--");
-
             tr.innerHTML = `
-                <td class="text-center font-mono">
-                    <strong style="font-size:0.75rem;">${r.time || "--"}</strong>
-                    <span class="sub-date">${r.date || ""}</span>
-                </td>
-                <td class="text-right font-mono">₹${ltpVal}</td>
+                <td class="text-center font-mono" style="font-size:0.75rem;color:var(--text-secondary,#64748b);">${dateStr}</td>
+                <td class="text-center font-mono"><strong style="font-size:0.75rem;">${timeStr}</strong></td>
+                <td class="text-right font-mono font-semibold">₹${ltpVal}</td>
                 <td class="text-center">${dlbHtml}</td>
                 <td class="text-right font-mono">${ceChgHtml}</td>
                 <td class="text-right font-mono">${peChgHtml}</td>
-                <td class="text-right font-mono">${diffOiHtml}</td>
+                <td class="text-right font-mono font-bold">${diffOiHtml}</td>
                 <td class="text-center">${strengthHtml}</td>
+                <td class="text-center">${dirBtnHtml}</td>
+                <td class="text-right font-mono">${chngDirHtml}</td>
+                <td class="text-right font-mono">${dirPctHtml}</td>
                 <td class="text-center">${dayHlDiffHtml}</td>
-                <td class="text-center">${buildupHtml}</td>
                 <td class="text-center">
                     <div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;">
                         <span class="${sentClass}">${r.sentiment || "--"}</span>
+                        ${buildupLabel !== "Neutral" ? `<span class="badge-buildup ${buildupClass}" title="${subActText}" style="font-size:0.62rem;padding:1px 5px;">${buildupLabel}</span>` : ''}
                         ${divBadgeHtml}
                     </div>
                 </td>
@@ -721,7 +766,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         if (displayedCount === 0) {
-            trendingPulseTbody.innerHTML = `<tr><td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available during market hours (09:10 - 15:30).</td></tr>`;
+            trendingPulseTbody.innerHTML = `<tr><td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">No Trending OI data available during market hours (09:10 - 15:30).</td></tr>`;
         }
     }
 
@@ -1539,14 +1584,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 diagMoneynessTbody.innerHTML = "";
                 mList.forEach((m) => {
                     const tr = document.createElement("tr");
-                    const ptsClass = m.total_pts >= 0 ? "val-pos" : "val-neg";
-                    const ptsSign = m.total_pts >= 0 ? "+" : "";
+                    const mPts = typeof m.total_pts === 'number' ? m.total_pts : (parseFloat(m.total_pts) || 0);
+                    const ptsClass = mPts >= 0 ? "val-pos" : "val-neg";
+                    const ptsSign = mPts >= 0 ? "+" : "";
                     tr.innerHTML = `
-                        <td class="text-left font-mono"><strong>${m.moneyness}</strong></td>
-                        <td class="text-center font-mono">${m.count}</td>
-                        <td class="text-right font-mono ${m.win_rate_pct >= 50 ? 'val-pos' : 'val-neg'}">${m.win_rate_pct}%</td>
-                        <td class="text-right font-mono">${m.profit_factor}</td>
-                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${m.total_pts.toFixed(1)} pts</td>
+                        <td class="text-left font-mono"><strong>${m.moneyness || '--'}</strong></td>
+                        <td class="text-center font-mono">${m.count || 0}</td>
+                        <td class="text-right font-mono ${(m.win_rate_pct || 0) >= 50 ? 'val-pos' : 'val-neg'}">${m.win_rate_pct || 0}%</td>
+                        <td class="text-right font-mono">${m.profit_factor || 0}</td>
+                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${mPts.toFixed(1)} pts</td>
                     `;
                     diagMoneynessTbody.appendChild(tr);
                 });
@@ -1561,13 +1607,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 diagTimewindowTbody.innerHTML = "";
                 wList.forEach((w) => {
                     const tr = document.createElement("tr");
-                    const ptsClass = w.total_pts >= 0 ? "val-pos" : "val-neg";
-                    const ptsSign = w.total_pts >= 0 ? "+" : "";
+                    const wPts = typeof w.total_pts === 'number' ? w.total_pts : (parseFloat(w.total_pts) || 0);
+                    const ptsClass = wPts >= 0 ? "val-pos" : "val-neg";
+                    const ptsSign = wPts >= 0 ? "+" : "";
                     tr.innerHTML = `
-                        <td class="text-left font-mono">${w.window || w.label}</td>
-                        <td class="text-center font-mono">${w.count}</td>
-                        <td class="text-right font-mono ${w.win_rate_pct >= 50 ? 'val-pos' : 'val-neg'}">${w.win_rate_pct}%</td>
-                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${w.total_pts.toFixed(1)} pts</td>
+                        <td class="text-left font-mono">${w.window || w.label || '--'}</td>
+                        <td class="text-center font-mono">${w.count || 0}</td>
+                        <td class="text-right font-mono ${(w.win_rate_pct || 0) >= 50 ? 'val-pos' : 'val-neg'}">${w.win_rate_pct || 0}%</td>
+                        <td class="text-right font-mono ${ptsClass}">${ptsSign}${wPts.toFixed(1)} pts</td>
                     `;
                     diagTimewindowTbody.appendChild(tr);
                 });

@@ -14,8 +14,6 @@ Evaluates options buying strategy parameter variations using strictly empirical 
 import os
 import math
 import random
-import json
-import sqlite3
 import logging
 from datetime import datetime
 from app.services.fyers_options_service import INDEX_CONFIGS

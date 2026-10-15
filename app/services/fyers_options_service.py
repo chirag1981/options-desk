@@ -6,19 +6,16 @@ in a single sub-second API call via FYERS API v3.
 
 import os
 import json
-import time
 import math
 import logging
 import threading
-from datetime import datetime, timedelta, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.fyers_auth import (
     get_fyers_index_spot,
     get_fyers_index_ohlc_details,
     get_fyers_model,
-    get_fyers_token,
     invalidate_cached_token,
-    FYERS_INDEX_SYMBOLS,
 )
 
 log = logging.getLogger("fyers_options_service")

@@ -14,7 +14,6 @@ Enforces Strict Segment Invariant:
 
 import math
 import os
-import sys
 import socket
 import csv
 import gzip
@@ -23,7 +22,7 @@ import json
 import sqlite3
 import threading
 import logging
-from datetime import datetime, date, timedelta, time as dtime
+from datetime import datetime, timedelta, time as dtime
 from zoneinfo import ZoneInfo
 from app.services.fyers_options_service import fetch_option_chain_data, INDEX_CONFIGS
 
@@ -1218,10 +1217,12 @@ def get_trending_oi_timeseries(
 
         simulated_points = []
         base_d = datetime.strptime(trade_date, "%Y-%m-%d").date()
-        start_t = datetime.combine(base_d, dtime(9, 10), tzinfo=IST)
+        start_t = datetime.combine(base_d, dtime(9, 15), tzinfo=IST)
         market_close = datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
         
-        end_limit = min(now_dt, market_close) if (trade_date == now_dt.strftime("%Y-%m-%d") and now_dt > start_t) else market_close
+        # Ensure we generate points: if today is just opening or off-hours, ensure at least enough points
+        has_adequate_live_span = (trade_date == now_dt.strftime("%Y-%m-%d") and (now_dt - start_t).total_seconds() >= interval_minutes * 60 * 2)
+        end_limit = min(now_dt, market_close) if has_adequate_live_span else market_close
         if end_limit < start_t:
             end_limit = market_close
 
@@ -1501,6 +1502,8 @@ def get_trending_oi_timeseries(
             "ce_action": ce_action,
             "pe_action": pe_action,
             "sub_activity": f"{ce_action} • {pe_action}",
+            "conviction_confirmed": bool(abs_pct >= 40 and dots >= 2),
+            "is_grayed_out": bool(abs_pct < 30),
             "divergence": divergence,
             "divergence_badge": divergence_badge,
             "divergence_detail": divergence_detail,
@@ -2216,7 +2219,7 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
         # [APPROVAL] Execution / Trailing behavior flags (default preserves current behavior)
         use_bid_mfe = SIGNAL_EXEC_CONFIG.get("USE_BID_FOR_MFE_TRAILING", False)
         credit_bid_targets = SIGNAL_EXEC_CONFIG.get("CREDIT_T1_T2_AT_OBSERVED_BID", False)
-        consistent_slippage = SIGNAL_EXEC_CONFIG.get("APPLY_CONSISTENT_SLIPPAGE", False)
+        _consistent_slippage = SIGNAL_EXEC_CONFIG.get("APPLY_CONSISTENT_SLIPPAGE", False)
 
         mfe_quote = current_bid if (use_bid_mfe and current_bid is not None and current_bid > 0.05) else current_ltp
         highest = max(float(sig["highest_price"]), mfe_quote) if has_valid_new_quote else float(sig["highest_price"])
@@ -2533,6 +2536,8 @@ def get_signals_summary() -> dict:
             "avg_r_multiple": avg_r,
             "iv_missing_count": iv_missing_count,
             "clean_closed_count": len(clean_history),
+            "clean_wins": clean_wins,
+            "clean_losses": clean_losses,
             "clean_win_rate_pct": clean_win_rate,
         }
     }

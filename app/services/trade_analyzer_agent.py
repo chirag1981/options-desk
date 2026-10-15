@@ -24,19 +24,26 @@ import json
 import math
 import random
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.fyers_options_service import INDEX_CONFIGS
 from app.services.options_engine import ENGINE_CONFIG
 from app.services.options_signal_service import _get_db
-from app.services.options_replay_backtest import calculate_trade_costs, run_walk_forward_evaluation, replay_trade_on_ticks
+from app.services.options_replay_backtest import (
+    calculate_trade_costs,
+    run_walk_forward_evaluation,
+    replay_trade_on_ticks,
+)
 
 log = logging.getLogger("trade_analyzer_agent")
 
 IST = ZoneInfo("Asia/Kolkata")
-MIN_SAMPLE_SIZE = 30  # Minimum sample size required per segment for statistical inference
+MIN_SAMPLE_SIZE = (
+    30  # Minimum sample size required per segment for statistical inference
+)
 CONFIDENCE_LEVEL = 0.95
 Z_SCORE_95 = 1.96
+
 
 def validate_index_configs_against_circulars() -> bool:
     """
@@ -48,12 +55,16 @@ def validate_index_configs_against_circulars() -> bool:
     for sym in required_indices:
         cfg = INDEX_CONFIGS.get(sym)
         if not cfg:
-            log.warning(f"[INDEX_CONFIG_MISMATCH] Missing configuration for index {sym} in INDEX_CONFIGS.")
+            log.warning(
+                f"[INDEX_CONFIG_MISMATCH] Missing configuration for index {sym} in INDEX_CONFIGS."
+            )
             all_valid = False
             continue
         cfg_lot = cfg.get("lot_size")
         if not cfg_lot or cfg_lot <= 0:
-            log.warning(f"[INDEX_CONFIG_MISMATCH] {sym} has invalid lot size {cfg_lot} in INDEX_CONFIGS.")
+            log.warning(
+                f"[INDEX_CONFIG_MISMATCH] {sym} has invalid lot size {cfg_lot} in INDEX_CONFIGS."
+            )
             all_valid = False
     return all_valid
 
@@ -68,37 +79,51 @@ except Exception as e:
 # Per-Trade Automated Review System (Single Trade Review)
 # ==============================================================================
 
+
 def review_closed_trade(signal_id: int) -> dict | None:
     """
     Evaluates a completed paper trade immediately upon reaching terminal status.
     Idempotent: Returns existing review if already evaluated.
     """
     with _get_db() as conn:
-        existing = conn.execute("SELECT * FROM trade_reviews WHERE signal_id = ?", (signal_id,)).fetchone()
+        existing = conn.execute(
+            "SELECT * FROM trade_reviews WHERE signal_id = ?", (signal_id,)
+        ).fetchone()
         if existing:
             res = dict(existing)
-            res["is_data_quality_flagged"] = bool(json.loads(res.get("data_quality_flags_json") or "[]"))
+            res["is_data_quality_flagged"] = bool(
+                json.loads(res.get("data_quality_flags_json") or "[]")
+            )
             res["counterfactual_results_json"] = res.get("counterfactuals_json")
             return res
 
-        sig_row = conn.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+        sig_row = conn.execute(
+            "SELECT * FROM signals WHERE id = ?", (signal_id,)
+        ).fetchone()
         if not sig_row:
             log.warning(f"review_closed_trade: signal #{signal_id} not found.")
             return None
         sig = dict(sig_row)
 
-        ticks_rows = conn.execute("SELECT * FROM trade_ticks WHERE signal_id = ? ORDER BY id ASC", (signal_id,)).fetchall()
+        ticks_rows = conn.execute(
+            "SELECT * FROM trade_ticks WHERE signal_id = ? ORDER BY id ASC",
+            (signal_id,),
+        ).fetchall()
         ticks = [dict(t) for t in ticks_rows]
 
     # 1. Trade Parameters
     symbol = (sig.get("symbol") or "NIFTY").upper()
-    contract_name = sig.get("contract_name") or f"{sig.get('strike')} {sig.get('signal_type')}"
+    contract_name = sig.get(
+        "contract_name"
+    ) or f"{sig.get('strike')} {sig.get('signal_type')}"
     sig_type = (sig.get("signal_type") or "CE").upper()
     entry_p = float(sig.get("ask_at_entry") or sig.get("entry_price") or 0.0)
     exit_p = float(sig.get("bid_at_exit") or sig.get("exit_price") or entry_p)
 
     # Risk denominator strictly uses immutable initial_stop_loss
-    init_sl = float(sig.get("initial_stop_loss") or sig.get("stop_loss") or (entry_p * 0.85))
+    init_sl = float(
+        sig.get("initial_stop_loss") or sig.get("stop_loss") or (entry_p * 0.85)
+    )
     initial_risk = max(entry_p - init_sl, 0.1)
 
     t1_p = float(sig.get("target_1") or (entry_p + initial_risk * 1.5))
@@ -142,8 +167,14 @@ def review_closed_trade(signal_id: int) -> dict | None:
     has_inferred_initial_sl = False
     if sig.get("data_quality_json"):
         try:
-            dq = json.loads(sig["data_quality_json"]) if isinstance(sig["data_quality_json"], str) else sig["data_quality_json"]
-            if isinstance(dq, dict) and (dq.get("inferred_initial_sl") or dq.get("flag") == "INFERRED_INITIAL_SL"):
+            dq = (
+                json.loads(sig["data_quality_json"])
+                if isinstance(sig["data_quality_json"], str)
+                else sig["data_quality_json"]
+            )
+            if isinstance(dq, dict) and (
+                dq.get("inferred_initial_sl") or dq.get("flag") == "INFERRED_INITIAL_SL"
+            ):
                 has_inferred_initial_sl = True
         except Exception:
             pass
@@ -151,23 +182,37 @@ def review_closed_trade(signal_id: int) -> dict | None:
         data_quality_flags.append("INFERRED_INITIAL_STOP_LOSS")
 
     # Note: SHORT_DURATION, MISSING_OR_ZERO_IV, MISSING_BID_ASK_QUOTES, and INFERRED_INITIAL_STOP_LOSS are soft flags, not hard invalidations
-    is_hard_data_quality_issue = any(f in ("INVALID_OR_FABRICATED_ENTRY_PRICE", "INVALID_EXIT_PRICE") for f in data_quality_flags)
+    is_hard_data_quality_issue = any(
+        f in ("INVALID_OR_FABRICATED_ENTRY_PRICE", "INVALID_EXIT_PRICE")
+        for f in data_quality_flags
+    )
 
     # 3. Whole-Lot Transaction Costs & R-Multiple
     status = (sig.get("status") or "").upper()
     stored_partial_lots = int(sig.get("partial_exit_lots") or 0)
-    stored_partial_price = float(sig.get("partial_exit_price") or t1_p) if stored_partial_lots > 0 else t1_p
-    inferred_partial = False
-
+    stored_partial_price = (
+        float(sig.get("partial_exit_price") or t1_p)
+        if stored_partial_lots > 0
+        else t1_p
+    )
     if stored_partial_lots > 0:
         has_partial_t1 = True
         close_lots = stored_partial_lots
         partial_price = stored_partial_price
-    elif lots >= 2 and (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and (status == "TARGET_1_HIT" or float(sig.get("highest_price") or 0.0) >= t1_p))):
+    elif lots >= 2 and (
+        status == "TARGET_1_HIT"
+        or exit_reason == "TARGET_2_HIT"
+        or (
+            exit_reason == "TRAILING_STOP_HIT"
+            and (
+                status == "TARGET_1_HIT"
+                or float(sig.get("highest_price") or 0.0) >= t1_p
+            )
+        )
+    ):
         has_partial_t1 = True
         close_lots = lots // 2
         partial_price = t1_p
-        inferred_partial = True
         data_quality_flags.append("INFERRED_PARTIAL_EXIT")
     else:
         has_partial_t1 = False
@@ -179,17 +224,20 @@ def review_closed_trade(signal_id: int) -> dict | None:
         f_t1 = close_lots / lots
         f_rem = rem_lots / lots
         exit_legs = [(partial_price, f_t1), (exit_p, f_rem)]
-        gross_pts = (close_lots * (partial_price - entry_p) + rem_lots * (exit_p - entry_p)) / lots
+        gross_pts = (
+            close_lots * (partial_price - entry_p) + rem_lots * (exit_p - entry_p)
+        ) / lots
     else:
         exit_legs = [(exit_p, 1.0)]
         gross_pts = exit_p - entry_p
 
-    costs = calculate_trade_costs(entry_p, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol)
+    costs = calculate_trade_costs(
+        entry_p, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol
+    )
     net_pts = round(gross_pts - costs["cost_points"], 2)
     net_inr = round(net_pts * lot_size * lots, 2)
     r_multiple = round(net_pts / initial_risk, 3)
     pnl_pct = round((net_pts / entry_p * 100.0), 2) if entry_p > 0 else 0.0
-
 
     # 4. Excursion & Trajectory Metrics
     high_p = float(sig.get("highest_price") or entry_p)
@@ -197,7 +245,9 @@ def review_closed_trade(signal_id: int) -> dict | None:
     mfe_pts = max(0.0, round(high_p - entry_p, 2))
     mae_pts = max(0.0, round(entry_p - low_p, 2))
 
-    mfe_capture_pct = round((net_pts / mfe_pts * 100.0), 1) if (mfe_pts > 0 and net_pts > 0) else 0.0
+    mfe_capture_pct = (
+        round((net_pts / mfe_pts * 100.0), 1) if (mfe_pts > 0 and net_pts > 0) else 0.0
+    )
     mae_vs_stop_pct = round((mae_pts / initial_risk * 100.0), 1)
 
     # Compute time to MFE from real trade_ticks
@@ -221,11 +271,14 @@ def review_closed_trade(signal_id: int) -> dict | None:
         with _get_db() as conn:
             exit_time_str = sig.get("exit_time") or sig.get("updated_at")
             if exit_time_str:
-                post_ticks = conn.execute("""
+                post_ticks = conn.execute(
+                    """
                     SELECT contract_ltp, timestamp FROM decision_log
                     WHERE symbol = ? AND chosen_contract = ? AND timestamp > ?
                     ORDER BY id ASC LIMIT 15
-                """, (symbol, contract_name, exit_time_str)).fetchall()
+                """,
+                    (symbol, contract_name, exit_time_str),
+                ).fetchall()
 
                 for pt in post_ticks:
                     pltp = float(pt["contract_ltp"] or 0.0)
@@ -240,7 +293,10 @@ def review_closed_trade(signal_id: int) -> dict | None:
     if is_hard_data_quality_issue:
         classification = "DATA_QUALITY_ISSUE"
     elif net_pts > 0:
-        if post_exit_max_price >= (exit_p * 1.5) or (exit_reason in ("TARGET_1_HIT", "MANUALLY_CLOSED", "MANUAL_EXIT") and post_exit_max_price >= t2_p):
+        if post_exit_max_price >= (exit_p * 1.5) or (
+            exit_reason in ("TARGET_1_HIT", "MANUALLY_CLOSED", "MANUAL_EXIT")
+            and post_exit_max_price >= t2_p
+        ):
             classification = "EARLY_EXIT"
         else:
             classification = "CLEAN_WIN"
@@ -259,7 +315,9 @@ def review_closed_trade(signal_id: int) -> dict | None:
     raw_flags = sig.get("pillar_flags_json")
     if raw_flags:
         try:
-            pillar_flags = json.loads(raw_flags) if isinstance(raw_flags, str) else raw_flags
+            pillar_flags = (
+                json.loads(raw_flags) if isinstance(raw_flags, str) else raw_flags
+            )
         except Exception:
             pillar_flags = {}
 
@@ -276,33 +334,64 @@ def review_closed_trade(signal_id: int) -> dict | None:
     try:
         hour, minute = map(int, c_time_str.split(" ")[1].split(":")[:2])
         tot_m = hour * 60 + minute
-        if tot_m < 615: tod_str = "OPENING (09:15-10:15)"
-        elif tot_m < 705: tod_str = "MORNING_TREND (10:15-11:45)"
-        elif tot_m < 795: tod_str = "MIDDAY_CHOP (11:45-13:15)"
-        elif tot_m < 855: tod_str = "AFTERNOON_EXPANSION (13:15-14:15)"
-        else: tod_str = "LATE_DECAY (14:15-15:30)"
+        if tot_m < 615:
+            tod_str = "OPENING (09:15-10:15)"
+        elif tot_m < 705:
+            tod_str = "MORNING_TREND (10:15-11:45)"
+        elif tot_m < 795:
+            tod_str = "MIDDAY_CHOP (11:45-13:15)"
+        elif tot_m < 855:
+            tod_str = "AFTERNOON_EXPANSION (13:15-14:15)"
+        else:
+            tod_str = "LATE_DECAY (14:15-15:30)"
     except Exception:
         tod_str = "UNKNOWN"
 
     # IV Regime
     iv_f = float(iv) if (iv is not None and float(iv) > 0.01) else None
-    if iv_f is None: iv_regime = "UNAVAILABLE"
-    elif iv_f < 13.0: iv_regime = "LOW (<13%)"
-    elif iv_f <= 20.0: iv_regime = "NORMAL (13-20%)"
-    elif iv_f <= 26.0: iv_regime = "ELEVATED (20-26%)"
-    else: iv_regime = "HIGH (>26%)"
+    if iv_f is None:
+        iv_regime = "UNAVAILABLE"
+    elif iv_f < 13.0:
+        iv_regime = "LOW (<13%)"
+    elif iv_f <= 20.0:
+        iv_regime = "NORMAL (13-20%)"
+    elif iv_f <= 26.0:
+        iv_regime = "ELEVATED (20-26%)"
+    else:
+        iv_regime = "HIGH (>26%)"
 
     # 7. Counterfactual Replay Simulations on Trade Path
     counterfactuals = {
-        "SL_10_PCT": replay_trade_on_ticks(sig, ticks, {"sl_pct": 0.10, "t1_multiple": 1.5, "t2_multiple": 2.5}),
+        "SL_10_PCT": replay_trade_on_ticks(
+            sig, ticks, {"sl_pct": 0.10, "t1_multiple": 1.5, "t2_multiple": 2.5}
+        ),
         "SL_15_PCT_BASELINE": r_multiple,
-        "SL_20_PCT": replay_trade_on_ticks(sig, ticks, {"sl_pct": 0.20, "t1_multiple": 1.5, "t2_multiple": 2.5}),
-        "T1_1_0_R": replay_trade_on_ticks(sig, ticks, {"sl_pct": 0.15, "t1_multiple": 1.0, "t2_multiple": 2.0}),
+        "SL_20_PCT": replay_trade_on_ticks(
+            sig, ticks, {"sl_pct": 0.20, "t1_multiple": 1.5, "t2_multiple": 2.5}
+        ),
+        "T1_1_0_R": replay_trade_on_ticks(
+            sig, ticks, {"sl_pct": 0.15, "t1_multiple": 1.0, "t2_multiple": 2.0}
+        ),
         "T1_1_5_R": r_multiple,
-        "T1_2_0_R": replay_trade_on_ticks(sig, ticks, {"sl_pct": 0.15, "t1_multiple": 2.0, "t2_multiple": 3.0}),
-        "TSL_BE_0_8_R": 0.0 if mfe_pts >= (0.8 * initial_risk) and net_pts < 0 else r_multiple,
-        "TIME_STOP_45M": replay_trade_on_ticks(sig, ticks, {"sl_pct": 0.15, "t1_multiple": 1.5, "t2_multiple": 2.5, "time_stop_mins": 45.0}),
-        "ENTRY_AT_LTP": round((net_pts + (sig.get("spread_paid") or 0.0)) / initial_risk, 3),
+        "T1_2_0_R": replay_trade_on_ticks(
+            sig, ticks, {"sl_pct": 0.15, "t1_multiple": 2.0, "t2_multiple": 3.0}
+        ),
+        "TSL_BE_0_8_R": 0.0
+        if mfe_pts >= (0.8 * initial_risk) and net_pts < 0
+        else r_multiple,
+        "TIME_STOP_45M": replay_trade_on_ticks(
+            sig,
+            ticks,
+            {
+                "sl_pct": 0.15,
+                "t1_multiple": 1.5,
+                "t2_multiple": 2.5,
+                "time_stop_mins": 45.0,
+            },
+        ),
+        "ENTRY_AT_LTP": round(
+            (net_pts + (sig.get("spread_paid") or 0.0)) / initial_risk, 3
+        ),
     }
 
     # 8. Plain-Language Summary
@@ -313,7 +402,7 @@ def review_closed_trade(signal_id: int) -> dict | None:
         f"Holding duration: {dur_mins:.1f}m | MFE: +{mfe_pts:.1f} pts ({mfe_capture_pct:.0f}% captured) | MAE: -{mae_pts:.1f} pts ({mae_vs_stop_pct:.0f}% of SL).",
         f"Entry executed in {tod_str} with {len(passed_pillars)}/6 pillars confirmed (IV: {iv_display} | DTE: {dte if dte is not None else 'N/A'}).",
         f"Friction drag: ₹{costs['total_costs_inr']:.2f} statutory fees + ₹{spread_drag:.2f} spread paid.",
-        f"Primary Cause: {classification.replace('_', ' ').title()} — {'Price action followed setup structure cleanly.' if net_pts > 0 else 'Market structure reversed before reaching targets.'}"
+        f"Primary Cause: {classification.replace('_', ' ').title()} — {'Price action followed setup structure cleanly.' if net_pts > 0 else 'Market structure reversed before reaching targets.'}",
     ]
     plain_summary = "\n".join(summary_lines[:5])
 
@@ -354,7 +443,8 @@ def review_closed_trade(signal_id: int) -> dict | None:
         with _get_db() as conn:
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO trade_reviews (
                     signal_id, symbol, contract_name, signal_type, entry_price, exit_price,
                     initial_risk_pts, net_pnl_pts, net_pnl_inr, r_multiple, pnl_pct,
@@ -363,14 +453,37 @@ def review_closed_trade(signal_id: int) -> dict | None:
                     passed_pillars_json, marginal_gates_json, time_of_day, dte, iv_regime,
                     counterfactuals_json, data_quality_flags_json, plain_language_summary, reviewed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                signal_id, symbol, contract_name, sig_type, entry_p, exit_p,
-                round(initial_risk, 2), net_pts, net_inr, r_multiple, pnl_pct,
-                classification, mfe_capture_pct, mae_vs_stop_pct, time_to_mfe,
-                dur_mins, round(spread_drag, 2), costs["total_costs_inr"],
-                json.dumps(passed_pillars), json.dumps(marginal_gates), tod_str, dte, iv_regime,
-                json.dumps(counterfactuals), json.dumps(data_quality_flags), plain_summary, now_str
-            ))
+            """,
+                (
+                    signal_id,
+                    symbol,
+                    contract_name,
+                    sig_type,
+                    entry_p,
+                    exit_p,
+                    round(initial_risk, 2),
+                    net_pts,
+                    net_inr,
+                    r_multiple,
+                    pnl_pct,
+                    classification,
+                    mfe_capture_pct,
+                    mae_vs_stop_pct,
+                    time_to_mfe,
+                    dur_mins,
+                    round(spread_drag, 2),
+                    costs["total_costs_inr"],
+                    json.dumps(passed_pillars),
+                    json.dumps(marginal_gates),
+                    tod_str,
+                    dte,
+                    iv_regime,
+                    json.dumps(counterfactuals),
+                    json.dumps(data_quality_flags),
+                    plain_summary,
+                    now_str,
+                ),
+            )
             review_record["id"] = cursor.lastrowid
             conn.execute("COMMIT")
     except Exception as e:
@@ -386,7 +499,9 @@ def review_closed_trade(signal_id: int) -> dict | None:
         except Exception as e:
             log.warning(f"Hypothesis tracking update failed for #{signal_id}: {e}")
 
-    log.info(f"[TRADE REVIEW] Signal #{signal_id}: {classification} ({r_multiple:+.2f}R | ₹{net_inr:+,.2f}) — {summary_lines[4]}")
+    log.info(
+        f"[TRADE REVIEW] Signal #{signal_id}: {classification} ({r_multiple:+.2f}R | ₹{net_inr:+,.2f}) — {summary_lines[4]}"
+    )
     return review_record
 
 
@@ -395,7 +510,11 @@ def update_hypotheses_from_review(review: dict | None = None):
     Feeds a trade review observation into the hypotheses tracking table.
     Records matching evidence IDs for hypothesis verification in the daily job.
     """
-    if review is None or review.get("is_data_quality_flagged") or review.get("classification") == "DATA_QUALITY_ISSUE":
+    if (
+        review is None
+        or review.get("is_data_quality_flagged")
+        or review.get("classification") == "DATA_QUALITY_ISSUE"
+    ):
         return
 
     sig_id = review.get("signal_id")
@@ -411,18 +530,29 @@ def update_hypotheses_from_review(review: dict | None = None):
         conn.execute("BEGIN IMMEDIATE")
         for hyp in hyp_defs:
             h_id = hyp["hypothesis_id"]
-            existing = conn.execute("SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)).fetchone()
+            existing = conn.execute(
+                "SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)
+            ).fetchone()
             if not existing:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO hypotheses (
                         hypothesis_id, title, category, parameter, current_value, proposed_value,
                         observation_count, evidence_signals_json, status, validation_plan, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, 0, '[]', 'OBSERVATION', ?, ?, ?)
-                """, (
-                    h_id, hyp["title"], hyp["category"], hyp["parameter"],
-                    hyp["current_value"], hyp["proposed_value"], hyp["validation_plan"],
-                    now_str, now_str
-                ))
+                """,
+                    (
+                        h_id,
+                        hyp["title"],
+                        hyp["category"],
+                        hyp["parameter"],
+                        hyp["current_value"],
+                        hyp["proposed_value"],
+                        hyp["validation_plan"],
+                        now_str,
+                        now_str,
+                    ),
+                )
 
         matched = []
         if (dte is not None and dte <= 1.0) and c == "STOPPED_BY_NOISE":
@@ -433,7 +563,9 @@ def update_hypotheses_from_review(review: dict | None = None):
             matched.append("HYP_PROFIT_REVERSAL_TSL")
 
         for h_id in matched:
-            h_row = conn.execute("SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)).fetchone()
+            h_row = conn.execute(
+                "SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)
+            ).fetchone()
             if h_row:
                 ev_list = json.loads(h_row["evidence_signals_json"] or "[]")
                 if sig_id and sig_id not in ev_list:
@@ -443,11 +575,14 @@ def update_hypotheses_from_review(review: dict | None = None):
                 if obs_cnt >= MIN_SAMPLE_SIZE and new_status == "OBSERVATION":
                     new_status = "CANDIDATE"
 
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE hypotheses
                     SET observation_count = ?, evidence_signals_json = ?, status = ?, updated_at = ?
                     WHERE hypothesis_id = ?
-                """, (obs_cnt, json.dumps(ev_list), new_status, now_str, h_id))
+                """,
+                    (obs_cnt, json.dumps(ev_list), new_status, now_str, h_id),
+                )
 
         conn.execute("COMMIT")
 
@@ -457,12 +592,14 @@ def review_unreviewed_closed_trades() -> int:
     reviewed_count = 0
     try:
         with _get_db() as conn:
-            unreviewed = conn.execute("""
+            unreviewed = conn.execute(
+                """
                 SELECT id FROM signals
                 WHERE status NOT IN ('ACTIVE', 'TARGET_1_HIT') AND is_deleted = 0
                   AND id NOT IN (SELECT signal_id FROM trade_reviews)
                 ORDER BY id ASC
-            """).fetchall()
+            """
+            ).fetchall()
 
         for row in unreviewed:
             res = review_closed_trade(row["id"])
@@ -477,6 +614,7 @@ def review_unreviewed_closed_trades() -> int:
 # ==============================================================================
 # Continuous Hypothesis Promotion Engine (Replay & Evidence Tracking)
 # ==============================================================================
+
 
 def get_live_hypotheses_definitions() -> list[dict]:
     """Builds standard hypothesis list with current_value generated dynamically from ENGINE_CONFIG."""
@@ -498,7 +636,12 @@ def get_live_hypotheses_definitions() -> list[dict]:
             "parameter": "TIME_STOP_MINS",
             "current_value": "No fixed time exit (EOD)",
             "proposed_value": "45 Minutes Time Stop",
-            "params_variant": {"sl_pct": 0.15, "t1_multiple": 1.5, "t2_multiple": 2.5, "time_stop_mins": 45.0},
+            "params_variant": {
+                "sl_pct": 0.15,
+                "t1_multiple": 1.5,
+                "t2_multiple": 2.5,
+                "time_stop_mins": 45.0,
+            },
             "validation_plan": "Walk-forward replay comparison with 45m stagnation cut on test partition.",
         },
         {
@@ -508,7 +651,12 @@ def get_live_hypotheses_definitions() -> list[dict]:
             "parameter": "TSL_ACTIVATION_THRESHOLD",
             "current_value": f"+10% MFE / {ENGINE_CONFIG.get('MIN_SETUP_SCORE', 75)} Score",
             "proposed_value": "+0.5R Breakeven Lock",
-            "params_variant": {"sl_pct": 0.15, "t1_multiple": 1.5, "t2_multiple": 2.5, "trail_step": 0.5},
+            "params_variant": {
+                "sl_pct": 0.15,
+                "t1_multiple": 1.5,
+                "t2_multiple": 2.5,
+                "trail_step": 0.5,
+            },
             "validation_plan": "Paper-trade 30 consecutive setups with +0.5R breakeven lock in shadow mode.",
         },
     ]
@@ -526,26 +674,45 @@ def update_hypotheses_in_daily_job():
         conn.execute("BEGIN IMMEDIATE")
         for hyp in hyp_defs:
             h_id = hyp["hypothesis_id"]
-            existing = conn.execute("SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)).fetchone()
+            existing = conn.execute(
+                "SELECT * FROM hypotheses WHERE hypothesis_id = ?", (h_id,)
+            ).fetchone()
             if not existing:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO hypotheses (
                         hypothesis_id, title, category, parameter, current_value, proposed_value,
                         observation_count, evidence_signals_json, status, validation_plan, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, 0, '[]', 'OBSERVATION', ?, ?, ?)
-                """, (
-                    h_id, hyp["title"], hyp["category"], hyp["parameter"],
-                    hyp["current_value"], hyp["proposed_value"], hyp["validation_plan"],
-                    now_str, now_str
-                ))
+                """,
+                    (
+                        h_id,
+                        hyp["title"],
+                        hyp["category"],
+                        hyp["parameter"],
+                        hyp["current_value"],
+                        hyp["proposed_value"],
+                        hyp["validation_plan"],
+                        now_str,
+                        now_str,
+                    ),
+                )
             else:
                 # Keep current_value synchronized with live config
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE hypotheses SET current_value = ?, updated_at = ? WHERE hypothesis_id = ?
-                """, (hyp["current_value"], now_str, h_id))
+                """,
+                    (hyp["current_value"], now_str, h_id),
+                )
 
         # Count matched observations from reviews
-        reviews = [dict(r) for r in conn.execute("SELECT * FROM trade_reviews WHERE classification != 'DATA_QUALITY_ISSUE'").fetchall()]
+        reviews = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM trade_reviews WHERE classification != 'DATA_QUALITY_ISSUE'"
+            ).fetchall()
+        ]
 
         for hyp in hyp_defs:
             h_id = hyp["hypothesis_id"]
@@ -556,9 +723,15 @@ def update_hypotheses_in_daily_job():
                 dur = float(r.get("time_in_trade_mins") or 0.0)
                 r_val = float(r.get("r_multiple") or 0.0)
 
-                if h_id == "HYP_EXPIRY_TIGHT_SL" and (dte is not None and dte <= 1.0) and c == "STOPPED_BY_NOISE":
+                if (
+                    h_id == "HYP_EXPIRY_TIGHT_SL"
+                    and (dte is not None and dte <= 1.0)
+                    and c == "STOPPED_BY_NOISE"
+                ):
                     matched_ids.append(r["signal_id"])
-                elif h_id == "HYP_THETA_STAGNATION_STOP" and (c == "THETA_STAGNATION" or (dur >= 45.0 and r_val < 0)):
+                elif h_id == "HYP_THETA_STAGNATION_STOP" and (
+                    c == "THETA_STAGNATION" or (dur >= 45.0 and r_val < 0)
+                ):
                     matched_ids.append(r["signal_id"])
                 elif h_id == "HYP_PROFIT_REVERSAL_TSL" and c == "RIGHT_THEN_REVERSED":
                     matched_ids.append(r["signal_id"])
@@ -573,18 +746,27 @@ def update_hypotheses_in_daily_job():
 
             if obs_cnt >= MIN_SAMPLE_SIZE:
                 try:
-                    replay_res = run_walk_forward_evaluation(train_ratio=0.60, params_variant=hyp.get("params_variant"))
+                    replay_res = run_walk_forward_evaluation(
+                        train_ratio=0.60, params_variant=hyp.get("params_variant")
+                    )
                     replay_json = json.dumps(replay_res)
                     d_ci = replay_res.get("delta_95_ci", [0.0, 0.0])
                     ci_low, ci_high = d_ci[0], d_ci[1]
                     effect_size = round((ci_low + ci_high) / 2.0, 3)
-                    impact_str = f"+{effect_size:.3f} R delta (95% CI: [{ci_low}, {ci_high}])"
+                    impact_str = (
+                        f"+{effect_size:.3f} R delta (95% CI: [{ci_low}, {ci_high}])"
+                    )
 
-                    if replay_res.get("verdict") == "EVIDENCE_CONFIRMED" and ci_low > 0.0:
+                    if (
+                        replay_res.get("verdict") == "EVIDENCE_CONFIRMED"
+                        and ci_low > 0.0
+                    ):
                         new_status = "RECOMMENDED"
                     elif replay_res.get("verdict") == "BASELINE_UNPROFITABLE":
                         new_status = "REJECTED"
-                        rejection_reason = "Baseline strategy unprofitable in out-of-sample replay."
+                        rejection_reason = (
+                            "Baseline strategy unprofitable in out-of-sample replay."
+                        )
                     else:
                         new_status = "CANDIDATE"
                         rejection_reason = f"Out-of-sample paired 95% CI [{ci_low}, {ci_high}] includes zero."
@@ -592,17 +774,28 @@ def update_hypotheses_in_daily_job():
                     new_status = "CANDIDATE"
                     rejection_reason = f"Replay evaluation error: {e}"
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE hypotheses
                 SET observation_count = ?, evidence_signals_json = ?, status = ?,
                     effect_size = ?, ci_lower = ?, ci_upper = ?, expected_net_impact = ?,
                     replay_result_json = ?, rejection_reason = ?, updated_at = ?
                 WHERE hypothesis_id = ?
-            """, (
-                obs_cnt, json.dumps(matched_ids), new_status,
-                effect_size, ci_low, ci_high, impact_str,
-                replay_json, rejection_reason, now_str, h_id
-            ))
+            """,
+                (
+                    obs_cnt,
+                    json.dumps(matched_ids),
+                    new_status,
+                    effect_size,
+                    ci_low,
+                    ci_high,
+                    impact_str,
+                    replay_json,
+                    rejection_reason,
+                    now_str,
+                    h_id,
+                ),
+            )
 
         conn.execute("COMMIT")
 
@@ -622,14 +815,19 @@ def generate_daily_review_report(target_date: str | None = None) -> dict:
         log.warning(f"Error updating hypotheses in daily report: {e}")
 
     with _get_db() as conn:
-        reviews_rows = conn.execute("""
+        reviews_rows = conn.execute(
+            """
             SELECT * FROM trade_reviews
             WHERE reviewed_at LIKE ?
             ORDER BY id ASC
-        """, (f"{target_date}%",)).fetchall()
+        """,
+            (f"{target_date}%",),
+        ).fetchall()
         reviews = [dict(r) for r in reviews_rows]
 
-        hypotheses_rows = conn.execute("SELECT * FROM hypotheses ORDER BY id ASC").fetchall()
+        hypotheses_rows = conn.execute(
+            "SELECT * FROM hypotheses ORDER BY id ASC"
+        ).fetchall()
         hypotheses = [dict(h) for h in hypotheses_rows]
 
     classification_counts = {
@@ -671,6 +869,7 @@ def generate_daily_review_report(target_date: str | None = None) -> dict:
 # Main Diagnostic Telemetry Pipeline
 # ==============================================================================
 
+
 def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
     """
     Diagnostic analysis entry point:
@@ -682,7 +881,12 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
     else:
         try:
             with _get_db() as conn:
-                all_signals = [dict(r) for r in conn.execute("SELECT * FROM signals WHERE is_deleted = 0 ORDER BY id DESC").fetchall()]
+                all_signals = [
+                    dict(r)
+                    for r in conn.execute(
+                        "SELECT * FROM signals WHERE is_deleted = 0 ORDER BY id DESC"
+                    ).fetchall()
+                ]
         except Exception as e:
             log.error(f"Failed to query signals DB: {e}")
             all_signals = []
@@ -690,8 +894,12 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
     if not all_signals:
         return _build_empty_diagnostic_report()
 
-    closed_raw = [s for s in all_signals if s.get("status") not in ("ACTIVE", "TARGET_1_HIT")]
-    active_trades = [s for s in all_signals if s.get("status") in ("ACTIVE", "TARGET_1_HIT")]
+    closed_raw = [
+        s for s in all_signals if s.get("status") not in ("ACTIVE", "TARGET_1_HIT")
+    ]
+    active_trades = [
+        s for s in all_signals if s.get("status") in ("ACTIVE", "TARGET_1_HIT")
+    ]
 
     total_raw_count = len(all_signals)
     closed_raw_count = len(closed_raw)
@@ -736,11 +944,19 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
 
     total_net_inr = sum(t["net_pnl_inr"] for t in enriched_trades)
     total_net_pts = sum(t["net_pnl_pts"] for t in enriched_trades)
-    avg_win_r = (sum(t["r_multiple"] for t in wins) / win_count) if win_count > 0 else 0.0
-    avg_loss_r = (abs(sum(t["r_multiple"] for t in losses)) / loss_count) if loss_count > 0 else 0.0
+    avg_win_r = (
+        (sum(t["r_multiple"] for t in wins) / win_count) if win_count > 0 else 0.0
+    )
+    avg_loss_r = (
+        (abs(sum(t["r_multiple"] for t in losses)) / loss_count)
+        if loss_count > 0
+        else 0.0
+    )
 
     # 4. Measure Setup Pillars from decision_log forward labels
-    pillar_analysis = _analyze_setup_pillars_from_decision_log(baseline_r=mean_r, fallback_trades=enriched_trades)
+    pillar_analysis = _analyze_setup_pillars_from_decision_log(
+        baseline_r=mean_r, fallback_trades=enriched_trades
+    )
     excursion_analysis = _analyze_excursions(enriched_trades)
     duration_analysis = _analyze_duration(enriched_trades, baseline_r=mean_r)
     time_analysis = _analyze_time_of_day(enriched_trades, baseline_r=mean_r)
@@ -759,8 +975,13 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
 
     # 7. Best / Worst Segment Identification
     all_segment_tests = (
-        direction_analysis + moneyness_analysis + time_analysis +
-        iv_analysis + score_analysis + duration_analysis + symbol_analysis
+        direction_analysis
+        + moneyness_analysis
+        + time_analysis
+        + iv_analysis
+        + score_analysis
+        + duration_analysis
+        + symbol_analysis
     )
     _apply_benjamini_hochberg_fdr(all_segment_tests, alpha=0.05)
     best_conditions = _identify_best_conditions(all_segment_tests, pillar_analysis)
@@ -774,14 +995,21 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
         time_analysis=time_analysis,
         score_analysis=score_analysis,
         pillar_analysis=pillar_analysis,
-        counterfactual=counterfactual_results
+        counterfactual=counterfactual_results,
     )
 
     # 9. Hypotheses Table & Structured Recommendations
     with _get_db() as conn:
-        hypotheses_rows = conn.execute("SELECT * FROM hypotheses ORDER BY id ASC").fetchall()
+        hypotheses_rows = conn.execute(
+            "SELECT * FROM hypotheses ORDER BY id ASC"
+        ).fetchall()
         hypotheses = [dict(h) for h in hypotheses_rows]
-        recent_reviews = [dict(r) for r in conn.execute("SELECT * FROM trade_reviews ORDER BY id DESC LIMIT 20").fetchall()]
+        recent_reviews = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM trade_reviews ORDER BY id DESC LIMIT 20"
+            ).fetchall()
+        ]
 
     recommendations = _generate_rigorous_recommendations(
         n_valid=n_valid,
@@ -790,7 +1018,7 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
         worst_conditions=worst_conditions,
         counterfactual=counterfactual_results,
         loser_taxonomy=loser_taxonomy,
-        hypotheses=hypotheses
+        hypotheses=hypotheses,
     )
 
     health_score = _compute_rigorous_health_score(
@@ -799,12 +1027,16 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
         win_rate=win_rate_pct,
         pf=pf_value,
         max_dd_r=max_dd_r,
-        n=n_valid
+        n=n_valid,
     )
 
     return {
-        "status": "DIAGNOSTIC_COMPLETE" if n_valid >= MIN_SAMPLE_SIZE else "INSUFFICIENT_DATA",
-        "sample_sufficiency": "SUFFICIENT" if n_valid >= MIN_SAMPLE_SIZE else "INSUFFICIENT",
+        "status": "DIAGNOSTIC_COMPLETE"
+        if n_valid >= MIN_SAMPLE_SIZE
+        else "INSUFFICIENT_DATA",
+        "sample_sufficiency": "SUFFICIENT"
+        if n_valid >= MIN_SAMPLE_SIZE
+        else "INSUFFICIENT",
         "mode": "OBSERVE_AND_RECOMMEND_ONLY",
         "advisory_notice": "All recommendations are strictly advisory and require human approval before altering live engine parameters.",
         "data_limitation_notice": "MFE and MAE metrics are captured via periodic 3-minute polling cycles and may understate intra-interval price excursions or flash spikes.",
@@ -869,6 +1101,7 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
 # Helper Subroutines
 # ==============================================================================
 
+
 def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
     """
     Filters raw trade records for statistical validity:
@@ -888,7 +1121,12 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
         "STALE_OR_INVALID_EXIT": 0,
     }
 
-    excluded_hygiene_reasons = ("DUPLICATE_CLEANUP", "STALE_EXIT", "CONTRACT_EXPIRED", "EXPIRED")
+    excluded_hygiene_reasons = (
+        "DUPLICATE_CLEANUP",
+        "STALE_EXIT",
+        "CONTRACT_EXPIRED",
+        "EXPIRED",
+    )
 
     for raw_t in raw_trades:
         t = dict(raw_t)
@@ -925,7 +1163,11 @@ def _filter_data_quality(raw_trades: list[dict]) -> tuple[list[dict], dict]:
         t["core_valid"] = True
         valid.append(t)
 
-    total_excluded = exclusions["HYGIENE_CLEANUP_OR_EXPIRED"] + exclusions["FABRICATED_OR_OUTLIER_ENTRY"] + exclusions["STALE_OR_INVALID_EXIT"]
+    total_excluded = (
+        exclusions["HYGIENE_CLEANUP_OR_EXPIRED"]
+        + exclusions["FABRICATED_OR_OUTLIER_ENTRY"]
+        + exclusions["STALE_OR_INVALID_EXIT"]
+    )
     iv_valid_count = sum(1 for t in valid if t.get("iv_valid"))
     iv_missing_count = sum(1 for t in valid if not t.get("iv_valid"))
 
@@ -962,13 +1204,27 @@ def _enrich_trade_costs_and_r(trade: dict) -> dict:
     exit_reason = (t.get("exit_reason") or "").upper()
     stored_partial_lots = int(t.get("partial_exit_lots") or 0)
     t1_val = float(t.get("target_1") or (entry + initial_risk * 1.5))
-    stored_partial_price = float(t.get("partial_exit_price") or t1_val) if stored_partial_lots > 0 else t1_val
+    stored_partial_price = (
+        float(t.get("partial_exit_price") or t1_val)
+        if stored_partial_lots > 0
+        else t1_val
+    )
 
     if stored_partial_lots > 0:
         has_partial_t1 = True
         close_lots = stored_partial_lots
         partial_price = stored_partial_price
-    elif lots >= 2 and (status == "TARGET_1_HIT" or exit_reason == "TARGET_2_HIT" or (exit_reason == "TRAILING_STOP_HIT" and (status == "TARGET_1_HIT" or float(t.get("highest_price") or 0.0) >= t1_val))):
+    elif lots >= 2 and (
+        status == "TARGET_1_HIT"
+        or exit_reason == "TARGET_2_HIT"
+        or (
+            exit_reason == "TRAILING_STOP_HIT"
+            and (
+                status == "TARGET_1_HIT"
+                or float(t.get("highest_price") or 0.0) >= t1_val
+            )
+        )
+    ):
         has_partial_t1 = True
         close_lots = lots // 2
         partial_price = t1_val
@@ -982,12 +1238,16 @@ def _enrich_trade_costs_and_r(trade: dict) -> dict:
         f_t1 = close_lots / lots
         f_rem = rem_lots / lots
         exit_legs = [(partial_price, f_t1), (exit_p, f_rem)]
-        gross_pts = (close_lots * (partial_price - entry) + rem_lots * (exit_p - entry)) / lots
+        gross_pts = (
+            close_lots * (partial_price - entry) + rem_lots * (exit_p - entry)
+        ) / lots
     else:
         exit_legs = [(exit_p, 1.0)]
         gross_pts = exit_p - entry
 
-    costs = calculate_trade_costs(entry, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol)
+    costs = calculate_trade_costs(
+        entry, exit_legs, lot_size=lot_size, lots=lots, symbol=symbol
+    )
 
     net_pts = round(gross_pts - costs["cost_points"], 2)
     net_inr = round(net_pts * lot_size * lots, 2)
@@ -1012,23 +1272,38 @@ def _wilson_score_interval(successes: int, total: int) -> list[float]:
     z2 = z * z
     denom = 1.0 + z2 / total
     center = (p + z2 / (2.0 * total)) / denom
-    margin = (z / denom) * math.sqrt((p * (1.0 - p) / total) + (z2 / (4.0 * total * total)))
-    return [round(max(0.0, center - margin) * 100.0, 1), round(min(1.0, center + margin) * 100.0, 1)]
+    margin = (z / denom) * math.sqrt(
+        (p * (1.0 - p) / total) + (z2 / (4.0 * total * total))
+    )
+    return [
+        round(max(0.0, center - margin) * 100.0, 1),
+        round(min(1.0, center + margin) * 100.0, 1),
+    ]
 
 
-def _bootstrap_mean_ci(values: list[float], iterations: int = 1000, seed: int = 42) -> list[float]:
+def _bootstrap_mean_ci(
+    values: list[float], iterations: int = 1000, seed: int = 42
+) -> list[float]:
     n = len(values)
     if n == 0:
         return [0.0, 0.0]
     if n == 1:
         return [round(values[0], 3), round(values[0], 3)]
     rng = random.Random(seed)
-    boot_means = [sum(values[rng.randint(0, n - 1)] for _ in range(n)) / n for _ in range(iterations)]
+    boot_means = [
+        sum(values[rng.randint(0, n - 1)] for _ in range(n)) / n
+        for _ in range(iterations)
+    ]
     boot_means.sort()
-    return [round(boot_means[int(iterations * 0.025)], 3), round(boot_means[int(iterations * 0.975)], 3)]
+    return [
+        round(boot_means[int(iterations * 0.025)], 3),
+        round(boot_means[int(iterations * 0.975)], 3),
+    ]
 
 
-def _bootstrap_profit_factor(r_values: list[float], iterations: int = 1000, seed: int = 42) -> tuple[float, list[float]]:
+def _bootstrap_profit_factor(
+    r_values: list[float], iterations: int = 1000, seed: int = 42
+) -> tuple[float, list[float]]:
     n = len(r_values)
     if n == 0:
         return 1.0, [1.0, 1.0]
@@ -1036,18 +1311,30 @@ def _bootstrap_profit_factor(r_values: list[float], iterations: int = 1000, seed
     def _calc_pf(vals):
         wins = sum(v for v in vals if v > 0)
         losses = abs(sum(v for v in vals if v < 0))
-        return round(wins / losses, 2) if losses > 0 else (round(wins, 2) if wins > 0 else 1.0)
+        return (
+            round(wins / losses, 2)
+            if losses > 0
+            else (round(wins, 2) if wins > 0 else 1.0)
+        )
 
     actual_pf = _calc_pf(r_values)
     if n < 3:
         return actual_pf, [actual_pf, actual_pf]
     rng = random.Random(seed)
-    boot_pfs = [_calc_pf([r_values[rng.randint(0, n - 1)] for _ in range(n)]) for _ in range(iterations)]
+    boot_pfs = [
+        _calc_pf([r_values[rng.randint(0, n - 1)] for _ in range(n)])
+        for _ in range(iterations)
+    ]
     boot_pfs.sort()
-    return actual_pf, [round(boot_pfs[int(iterations * 0.025)], 2), round(boot_pfs[int(iterations * 0.975)], 2)]
+    return actual_pf, [
+        round(boot_pfs[int(iterations * 0.025)], 2),
+        round(boot_pfs[int(iterations * 0.975)], 2),
+    ]
 
 
-def _compute_welch_t_test(group_a: list[float], group_b: list[float]) -> tuple[float, float]:
+def _compute_welch_t_test(
+    group_a: list[float], group_b: list[float]
+) -> tuple[float, float]:
     n1, n2 = len(group_a), len(group_b)
     if n1 < 2 or n2 < 2:
         return 0.0, 1.0
@@ -1082,39 +1369,77 @@ def _compute_drawdowns(trades: list[dict]) -> tuple[float, float]:
     cum_inr, peak_inr, max_dd_inr = 0.0, 0.0, 0.0
     for t in trades:
         cum_r += t["r_multiple"]
-        if cum_r > peak_r: peak_r = cum_r
-        if (peak_r - cum_r) > max_dd_r: max_dd_r = peak_r - cum_r
+        if cum_r > peak_r:
+            peak_r = cum_r
+        if (peak_r - cum_r) > max_dd_r:
+            max_dd_r = peak_r - cum_r
 
         cum_inr += t["net_pnl_inr"]
-        if cum_inr > peak_inr: peak_inr = cum_inr
-        if (peak_inr - cum_inr) > max_dd_inr: max_dd_inr = peak_inr - cum_inr
+        if cum_inr > peak_inr:
+            peak_inr = cum_inr
+        if (peak_inr - cum_inr) > max_dd_inr:
+            max_dd_inr = peak_inr - cum_inr
     max_dd_pct = (max_dd_inr / peak_inr * 100.0) if peak_inr > 0 else 0.0
     return max_dd_r, max_dd_pct
 
 
-def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_trades: list[dict] = None) -> list[dict]:
+def _analyze_setup_pillars_from_decision_log(
+    baseline_r: float = 0.0, fallback_trades: list[dict] = None
+) -> list[dict]:
     """
     Measures setup pillar and gate discrimination value from decision_log with forward labels (all cycles incl. WAIT).
     Falls back to trade-level pillar flags if decision_log forward labels are not yet populated.
     """
     pillars_def = [
-        {"id": "direction", "name": "Directional Bias", "col": "pillar_direction", "flag_keys": ["direction", "bias_favorable"]},
-        {"id": "level", "name": "Key Level Structure", "col": "pillar_level", "flag_keys": ["level", "key_level"]},
-        {"id": "momentum", "name": "Price Momentum", "col": "pillar_momentum", "flag_keys": ["momentum"]},
-        {"id": "volume", "name": "Volume Expansion", "col": "pillar_volume", "flag_keys": ["volume"]},
-        {"id": "oi", "name": "Institutional OI Flow", "col": "pillar_oi", "flag_keys": ["oi"]},
-        {"id": "iv_session", "name": "IV & Session Window", "col": "pillar_iv_session", "flag_keys": ["iv_session"]},
+        {
+            "id": "direction",
+            "name": "Directional Bias",
+            "col": "pillar_direction",
+            "flag_keys": ["direction", "bias_favorable"],
+        },
+        {
+            "id": "level",
+            "name": "Key Level Structure",
+            "col": "pillar_level",
+            "flag_keys": ["level", "key_level"],
+        },
+        {
+            "id": "momentum",
+            "name": "Price Momentum",
+            "col": "pillar_momentum",
+            "flag_keys": ["momentum"],
+        },
+        {
+            "id": "volume",
+            "name": "Volume Expansion",
+            "col": "pillar_volume",
+            "flag_keys": ["volume"],
+        },
+        {
+            "id": "oi",
+            "name": "Institutional OI Flow",
+            "col": "pillar_oi",
+            "flag_keys": ["oi"],
+        },
+        {
+            "id": "iv_session",
+            "name": "IV & Session Window",
+            "col": "pillar_iv_session",
+            "flag_keys": ["iv_session"],
+        },
     ]
 
     try:
         with _get_db() as conn:
-            d_rows = conn.execute("""
+            d_rows = conn.execute(
+                """
                 SELECT timestamp, candidate_side, pillar_direction, pillar_level, pillar_momentum,
                        pillar_volume, pillar_oi, pillar_iv_session, forward_underlying_30m, forward_mfe_pct
                 FROM decision_log
                 WHERE forward_underlying_30m IS NOT NULL
                   AND candidate_side IN ('CE', 'PE')
-            """).fetchall()
+            """
+            ).fetchall()
             d_logs = [dict(r) for r in d_rows]
     except Exception:
         d_logs = []
@@ -1174,7 +1499,6 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
                 shuffled_pass = []
                 shuffled_fail = []
                 for d, day_moves in days_map.items():
-                    n_d = len(day_moves)
                     # Fraction of pass in this day
                     d_pass_cnt = sum(1 for dp, _ in pass_records if dp == d)
                     perm = list(day_moves)
@@ -1182,13 +1506,19 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
                     shuffled_pass.extend(perm[:d_pass_cnt])
                     shuffled_fail.extend(perm[d_pass_cnt:])
 
-                p_mean = sum(shuffled_pass) / len(shuffled_pass) if shuffled_pass else 0.0
-                f_mean = sum(shuffled_fail) / len(shuffled_fail) if shuffled_fail else 0.0
+                p_mean = (
+                    sum(shuffled_pass) / len(shuffled_pass) if shuffled_pass else 0.0
+                )
+                f_mean = (
+                    sum(shuffled_fail) / len(shuffled_fail) if shuffled_fail else 0.0
+                )
                 perm_diff = p_mean - f_mean
                 if abs(perm_diff) >= abs(delta_mean):
                     diff_count += 1
 
-            p_val = round(max(1.0 / n_perms, diff_count / n_perms), 4) if tot > 0 else 1.0
+            p_val = (
+                round(max(1.0 / n_perms, diff_count / n_perms), 4) if tot > 0 else 1.0
+            )
 
             # Effective sample size: adjust for clustering (N_eff = N / (1 + (M - 1) * icc))
             avg_m = tot / num_days if num_days > 0 else 1.0
@@ -1197,27 +1527,29 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
             neff = max(1, int(round(tot / (1.0 + max(0.0, avg_m - 1.0) * icc))))
 
             raw_p_values.append(p_val)
-            raw_items.append({
-                "pillar_id": p["id"],
-                "pillar_name": p["name"],
-                "data_source": "DECISION_LOG_FORWARD_LABELS",
-                "sign_adjusted_for_side": True,
-                "pass_stats": {
-                    "count": cnt_pass,
-                    "mean_forward_atr_30m": round(mean_pass, 2),
-                    "mean_r_95_ci": _bootstrap_mean_ci(pass_moves),
-                },
-                "fail_stats": {
-                    "count": cnt_fail,
-                    "mean_forward_atr_30m": round(mean_fail, 2),
-                    "mean_r_95_ci": _bootstrap_mean_ci(fail_moves),
-                },
-                "total_cycles_evaluated": tot,
-                "effective_sample_size": neff,
-                "trading_days_evaluated": num_days,
-                "delta_mean_r": round(delta_mean, 3),
-                "raw_p_value": p_val,
-            })
+            raw_items.append(
+                {
+                    "pillar_id": p["id"],
+                    "pillar_name": p["name"],
+                    "data_source": "DECISION_LOG_FORWARD_LABELS",
+                    "sign_adjusted_for_side": True,
+                    "pass_stats": {
+                        "count": cnt_pass,
+                        "mean_forward_atr_30m": round(mean_pass, 2),
+                        "mean_r_95_ci": _bootstrap_mean_ci(pass_moves),
+                    },
+                    "fail_stats": {
+                        "count": cnt_fail,
+                        "mean_forward_atr_30m": round(mean_fail, 2),
+                        "mean_r_95_ci": _bootstrap_mean_ci(fail_moves),
+                    },
+                    "total_cycles_evaluated": tot,
+                    "effective_sample_size": neff,
+                    "trading_days_evaluated": num_days,
+                    "delta_mean_r": round(delta_mean, 3),
+                    "raw_p_value": p_val,
+                }
+            )
 
         # Apply Benjamini-Hochberg FDR correction across all evaluated pillars
         m = len(raw_p_values)
@@ -1234,8 +1566,14 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
             fdr_p = adj_p_map.get(idx, item["raw_p_value"])
             item["p_value"] = fdr_p
             item["fdr_p_value"] = fdr_p
-            item["sample_status"] = "SUFFICIENT" if item["effective_sample_size"] >= MIN_SAMPLE_SIZE else "INSUFFICIENT_DATA"
-            item["statistically_significant"] = bool(fdr_p < 0.05 and item["effective_sample_size"] >= MIN_SAMPLE_SIZE)
+            item["sample_status"] = (
+                "SUFFICIENT"
+                if item["effective_sample_size"] >= MIN_SAMPLE_SIZE
+                else "INSUFFICIENT_DATA"
+            )
+            item["statistically_significant"] = bool(
+                fdr_p < 0.05 and item["effective_sample_size"] >= MIN_SAMPLE_SIZE
+            )
             results.append(item)
     else:
         # Fallback to trade-level flags
@@ -1250,53 +1588,82 @@ def _analyze_setup_pillars_from_decision_log(baseline_r: float = 0.0, fallback_t
                 raw_flags = t.get("pillar_flags_json") or t.get("pillar_flags")
                 flags = {}
                 if isinstance(raw_flags, str):
-                    try: flags = json.loads(raw_flags)
-                    except Exception: flags = {}
-                elif isinstance(raw_flags, dict): flags = raw_flags
+                    try:
+                        flags = json.loads(raw_flags)
+                    except Exception:
+                        flags = {}
+                elif isinstance(raw_flags, dict):
+                    flags = raw_flags
 
                 matched_key = next((k for k in keys if k in flags), None)
-                if matched_key is None: unk_t.append(t)
-                elif bool(flags[matched_key]): pass_t.append(t)
-                else: fail_t.append(t)
+                if matched_key is None:
+                    unk_t.append(t)
+                elif bool(flags[matched_key]):
+                    pass_t.append(t)
+                else:
+                    fail_t.append(t)
 
             def _calc_grp(grp, lbl):
                 cnt = len(grp)
                 if cnt == 0:
-                    return {"status": lbl, "count": 0, "win_rate_pct": 0.0, "mean_r": 0.0, "mean_r_95_ci": [0.0, 0.0], "total_net_inr": 0.0}
+                    return {
+                        "status": lbl,
+                        "count": 0,
+                        "win_rate_pct": 0.0,
+                        "mean_r": 0.0,
+                        "mean_r_95_ci": [0.0, 0.0],
+                        "total_net_inr": 0.0,
+                    }
                 w_cnt = sum(1 for x in grp if x["net_pnl_pts"] > 0)
                 r_vals = [x["r_multiple"] for x in grp]
                 return {
-                    "status": lbl, "count": cnt, "win_rate_pct": round(w_cnt / cnt * 100, 1),
-                    "mean_r": round(sum(r_vals) / cnt, 3), "mean_r_95_ci": _bootstrap_mean_ci(r_vals),
-                    "total_net_inr": round(sum(x["net_pnl_inr"] for x in grp), 2)
+                    "status": lbl,
+                    "count": cnt,
+                    "win_rate_pct": round(w_cnt / cnt * 100, 1),
+                    "mean_r": round(sum(r_vals) / cnt, 3),
+                    "mean_r_95_ci": _bootstrap_mean_ci(r_vals),
+                    "total_net_inr": round(sum(x["net_pnl_inr"] for x in grp), 2),
                 }
 
             pass_stats = _calc_grp(pass_t, "PASS")
             fail_stats = _calc_grp(fail_t, "FAIL")
             eval_count = len(pass_t) + len(fail_t)
-            t_stat, p_val = _compute_welch_t_test([x["r_multiple"] for x in pass_t], [x["r_multiple"] for x in fail_t])
+            t_stat, p_val = _compute_welch_t_test(
+                [x["r_multiple"] for x in pass_t], [x["r_multiple"] for x in fail_t]
+            )
 
-            results.append({
-                "pillar_id": p_id,
-                "pillar_name": p["name"],
-                "data_source": "TRADE_EXECUTION_JOURNAL",
-                "pass_stats": pass_stats,
-                "fail_stats": fail_stats,
-                "unknown_count": len(unk_t),
-                "evaluated_trades": eval_count,
-                "total_trades": n,
-                "delta_mean_r": round(pass_stats["mean_r"] - fail_stats["mean_r"], 3) if (pass_t and fail_t) else 0.0,
-                "p_value": p_val,
-                "sample_status": "SUFFICIENT" if eval_count >= MIN_SAMPLE_SIZE else "INSUFFICIENT_DATA",
-                "statistically_significant": (p_val < 0.05 and eval_count >= MIN_SAMPLE_SIZE),
-            })
+            results.append(
+                {
+                    "pillar_id": p_id,
+                    "pillar_name": p["name"],
+                    "data_source": "TRADE_EXECUTION_JOURNAL",
+                    "pass_stats": pass_stats,
+                    "fail_stats": fail_stats,
+                    "unknown_count": len(unk_t),
+                    "evaluated_trades": eval_count,
+                    "total_trades": n,
+                    "delta_mean_r": round(
+                        pass_stats["mean_r"] - fail_stats["mean_r"], 3
+                    )
+                    if (pass_t and fail_t)
+                    else 0.0,
+                    "p_value": p_val,
+                    "sample_status": "SUFFICIENT"
+                    if eval_count >= MIN_SAMPLE_SIZE
+                    else "INSUFFICIENT_DATA",
+                    "statistically_significant": (
+                        p_val < 0.05 and eval_count >= MIN_SAMPLE_SIZE
+                    ),
+                }
+            )
 
     return results
 
 
 def _analyze_excursions(trades: list[dict]) -> dict:
     n = len(trades)
-    if n == 0: return {}
+    if n == 0:
+        return {}
     tot_mfe, tot_mae, real_w, pot_w, rev_cnt = 0.0, 0.0, 0.0, 0.0, 0
     for t in trades:
         entry = float(t.get("entry_price") or 0.0)
@@ -1316,7 +1683,9 @@ def _analyze_excursions(trades: list[dict]) -> dict:
     return {
         "avg_mfe_pts": round(tot_mfe / n, 1),
         "avg_mae_pts": round(tot_mae / n, 1),
-        "mfe_capture_efficiency_pct": round(real_w / pot_w * 100, 1) if pot_w > 0 else 0.0,
+        "mfe_capture_efficiency_pct": round(real_w / pot_w * 100, 1)
+        if pot_w > 0
+        else 0.0,
         "reversal_losses_count": rev_cnt,
         "reversal_losses_pct": round(rev_cnt / n * 100, 1),
     }
@@ -1374,7 +1743,8 @@ def _analyze_moneyness(trades: list[dict], baseline_r: float = 0.0) -> list[dict
     groups = {}
     for t in trades:
         m = (t.get("moneyness") or "ATM").upper()
-        if m not in groups: groups[m] = {"trades": []}
+        if m not in groups:
+            groups[m] = {"trades": []}
         groups[m]["trades"].append(t)
     return _build_dimension_stats(groups, "moneyness", "Moneyness", baseline_r, trades)
 
@@ -1427,7 +1797,13 @@ def _analyze_exit_reasons(trades: list[dict]) -> list[dict]:
     for t in trades:
         reason = t.get("exit_reason") or t.get("status") or "UNKNOWN"
         if reason not in groups:
-            groups[reason] = {"count": 0, "pts": 0.0, "inr": 0.0, "wins": 0, "r_vals": []}
+            groups[reason] = {
+                "count": 0,
+                "pts": 0.0,
+                "inr": 0.0,
+                "wins": 0,
+                "r_vals": [],
+            }
         groups[reason]["count"] += 1
         pts = float(t.get("net_pnl_pts") or 0.0)
         inr = float(t.get("net_pnl_inr") or 0.0)
@@ -1435,19 +1811,22 @@ def _analyze_exit_reasons(trades: list[dict]) -> list[dict]:
         groups[reason]["pts"] += pts
         groups[reason]["inr"] += inr
         groups[reason]["r_vals"].append(r)
-        if pts > 0: groups[reason]["wins"] += 1
+        if pts > 0:
+            groups[reason]["wins"] += 1
 
     result = []
     for r, data in groups.items():
         cnt = data["count"]
-        result.append({
-            "exit_reason": r,
-            "count": cnt,
-            "win_rate_pct": round(data["wins"] / cnt * 100, 1) if cnt > 0 else 0.0,
-            "mean_r": round(sum(data["r_vals"]) / cnt, 3) if cnt > 0 else 0.0,
-            "total_net_pts": round(data["pts"], 1),
-            "total_net_inr": round(data["inr"], 2),
-        })
+        result.append(
+            {
+                "exit_reason": r,
+                "count": cnt,
+                "win_rate_pct": round(data["wins"] / cnt * 100, 1) if cnt > 0 else 0.0,
+                "mean_r": round(sum(data["r_vals"]) / cnt, 3) if cnt > 0 else 0.0,
+                "total_net_pts": round(data["pts"], 1),
+                "total_net_inr": round(data["inr"], 2),
+            }
+        )
     return sorted(result, key=lambda x: x["count"], reverse=True)
 
 
@@ -1455,22 +1834,38 @@ def _analyze_symbols(trades: list[dict], baseline_r: float = 0.0) -> list[dict]:
     syms = {}
     for t in trades:
         s = (t.get("symbol") or "NIFTY").upper()
-        if s not in syms: syms[s] = {"trades": []}
+        if s not in syms:
+            syms[s] = {"trades": []}
         syms[s]["trades"].append(t)
     return _build_dimension_stats(syms, "symbol", "Symbol", baseline_r, trades)
 
 
-def _build_dimension_stats(group_dict: dict, label_key: str, category_name: str, baseline_r: float, all_trades: list[dict]) -> list[dict]:
+def _build_dimension_stats(
+    group_dict: dict,
+    label_key: str,
+    category_name: str,
+    baseline_r: float,
+    all_trades: list[dict],
+) -> list[dict]:
     results = []
     for name, grp in group_dict.items():
         grp_trades = grp["trades"]
         cnt = len(grp_trades)
         if cnt == 0:
-            results.append({
-                label_key: name, "category": category_name, "count": 0, "win_rate_pct": 0.0,
-                "mean_r": 0.0, "mean_r_95_ci": [0.0, 0.0], "profit_factor": 1.0, "total_net_inr": 0.0,
-                "p_value": 1.0, "sample_status": "INSUFFICIENT_DATA"
-            })
+            results.append(
+                {
+                    label_key: name,
+                    "category": category_name,
+                    "count": 0,
+                    "win_rate_pct": 0.0,
+                    "mean_r": 0.0,
+                    "mean_r_95_ci": [0.0, 0.0],
+                    "profit_factor": 1.0,
+                    "total_net_inr": 0.0,
+                    "p_value": 1.0,
+                    "sample_status": "INSUFFICIENT_DATA",
+                }
+            )
             continue
 
         r_vals = [t["r_multiple"] for t in grp_trades]
@@ -1481,22 +1876,29 @@ def _build_dimension_stats(group_dict: dict, label_key: str, category_name: str,
         comp_r = [t["r_multiple"] for t in all_trades if t not in grp_trades]
         t_stat, p_val = _compute_welch_t_test(r_vals, comp_r) if comp_r else (0.0, 1.0)
 
-        results.append({
-            label_key: name,
-            "category": category_name,
-            "count": cnt,
-            "wins": wins,
-            "win_rate_pct": round(wins / cnt * 100, 1),
-            "mean_r": round(mean_r, 3),
-            "mean_r_95_ci": r_ci,
-            "profit_factor": round(pf, 2),
-            "total_net_pts": round(sum(t["net_pnl_pts"] for t in grp_trades), 1),
-            "total_net_inr": round(sum(t["net_pnl_inr"] for t in grp_trades), 2),
-            "t_statistic": t_stat,
-            "p_value": p_val,
-            "sample_status": "SUFFICIENT" if cnt >= MIN_SAMPLE_SIZE else "INSUFFICIENT_DATA",
-            "ci_excludes_baseline": ((r_ci[0] > baseline_r or r_ci[1] < baseline_r) and cnt >= MIN_SAMPLE_SIZE),
-        })
+        results.append(
+            {
+                label_key: name,
+                "category": category_name,
+                "count": cnt,
+                "wins": wins,
+                "win_rate_pct": round(wins / cnt * 100, 1),
+                "mean_r": round(mean_r, 3),
+                "mean_r_95_ci": r_ci,
+                "profit_factor": round(pf, 2),
+                "total_net_pts": round(sum(t["net_pnl_pts"] for t in grp_trades), 1),
+                "total_net_inr": round(sum(t["net_pnl_inr"] for t in grp_trades), 2),
+                "t_statistic": t_stat,
+                "p_value": p_val,
+                "sample_status": "SUFFICIENT"
+                if cnt >= MIN_SAMPLE_SIZE
+                else "INSUFFICIENT_DATA",
+                "ci_excludes_baseline": (
+                    (r_ci[0] > baseline_r or r_ci[1] < baseline_r)
+                    and cnt >= MIN_SAMPLE_SIZE
+                ),
+            }
+        )
     return results
 
 
@@ -1504,34 +1906,61 @@ def _classify_losers(trades: list[dict]) -> dict:
     losing_trades = [t for t in trades if t["net_pnl_pts"] <= 0]
     n_losses = len(losing_trades)
     if n_losses == 0:
-        return {"total_losers": 0, "wrong_direction": {"count": 0, "pct": 0.0}, "right_then_reversed": {"count": 0, "pct": 0.0}, "theta_stagnation": {"count": 0, "pct": 0.0}, "stopped_by_noise": {"count": 0, "pct": 0.0}}
+        return {
+            "total_losers": 0,
+            "wrong_direction": {"count": 0, "pct": 0.0},
+            "right_then_reversed": {"count": 0, "pct": 0.0},
+            "theta_stagnation": {"count": 0, "pct": 0.0},
+            "stopped_by_noise": {"count": 0, "pct": 0.0},
+        }
 
-    cats = {"wrong_direction": [], "right_then_reversed": [], "theta_stagnation": [], "stopped_by_noise": []}
+    cats = {
+        "wrong_direction": [],
+        "right_then_reversed": [],
+        "theta_stagnation": [],
+        "stopped_by_noise": [],
+    }
     for t in losing_trades:
         entry = float(t.get("entry_price") or 0.0)
-        init_sl = float(t.get("initial_stop_loss") or t.get("stop_loss") or (entry * 0.85))
+        init_sl = float(
+            t.get("initial_stop_loss") or t.get("stop_loss") or (entry * 0.85)
+        )
         high = float(t.get("highest_price") or entry)
         dur = float(t.get("duration_mins") or 0.0)
         risk = max(entry - init_sl, 0.1)
         mfe = float(t.get("mfe_points") or max(0.0, high - entry))
         exit_r = (t.get("exit_reason") or t.get("status") or "").upper()
 
-        if mfe >= (0.5 * risk): cats["right_then_reversed"].append(t)
-        elif dur >= 45.0: cats["theta_stagnation"].append(t)
-        elif exit_r in ("STOP_LOSS_HIT", "SL_HIT", "TRAILING_STOP_HIT", "TSL_HIT") and high >= entry: cats["stopped_by_noise"].append(t)
-        else: cats["wrong_direction"].append(t)
+        if mfe >= (0.5 * risk):
+            cats["right_then_reversed"].append(t)
+        elif dur >= 45.0:
+            cats["theta_stagnation"].append(t)
+        elif (
+            exit_r in ("STOP_LOSS_HIT", "SL_HIT", "TRAILING_STOP_HIT", "TSL_HIT")
+            and high >= entry
+        ):
+            cats["stopped_by_noise"].append(t)
+        else:
+            cats["wrong_direction"].append(t)
 
     result = {"total_losers": n_losses}
     for k, v in cats.items():
         cnt = len(v)
-        result[k] = {"count": cnt, "pct": round(cnt / n_losses * 100, 1), "avg_r": round(sum(x["r_multiple"] for x in v) / cnt, 3) if cnt > 0 else 0.0}
+        result[k] = {
+            "count": cnt,
+            "pct": round(cnt / n_losses * 100, 1),
+            "avg_r": round(sum(x["r_multiple"] for x in v) / cnt, 3)
+            if cnt > 0
+            else 0.0,
+        }
     return result
 
 
 def _run_counterfactual_replay(trades: list[dict]) -> dict:
     """Replays counterfactual parameter sets across trade paths and computes paired delta CI vs baseline."""
     n = len(trades)
-    if n == 0: return {}
+    if n == 0:
+        return {}
     baseline_r = [t["r_multiple"] for t in trades]
     base_mean_r = sum(baseline_r) / n
 
@@ -1542,7 +1971,10 @@ def _run_counterfactual_replay(trades: list[dict]) -> dict:
         try:
             with _get_db() as conn:
                 placeholders = ",".join(["?"] * len(trade_ids))
-                t_rows = conn.execute(f"SELECT * FROM trade_ticks WHERE signal_id IN ({placeholders}) ORDER BY id ASC", trade_ids).fetchall()
+                t_rows = conn.execute(
+                    f"SELECT * FROM trade_ticks WHERE signal_id IN ({placeholders}) ORDER BY id ASC",
+                    trade_ids,
+                ).fetchall()
                 for r in t_rows:
                     sid = r["signal_id"]
                     if sid not in ticks_map:
@@ -1554,31 +1986,33 @@ def _run_counterfactual_replay(trades: list[dict]) -> dict:
     variations = {
         "SL_10_PCT": {
             "name": "Tight Stop Loss (10% / ~0.7R)",
-            "params": {"sl_pct": 0.10, "t1_multiple": 1.5, "t2_multiple": 2.5}
+            "params": {"sl_pct": 0.10, "t1_multiple": 1.5, "t2_multiple": 2.5},
         },
         "SL_15_PCT_BASELINE": {
             "name": f"Baseline Stop Loss ({ENGINE_CONFIG.get('MIN_SETUP_SCORE', 75)} Score / 15% SL)",
-            "params": None
+            "params": None,
         },
         "SL_20_PCT": {
             "name": "Wide Stop Loss (20% / ~1.3R)",
-            "params": {"sl_pct": 0.20, "t1_multiple": 1.5, "t2_multiple": 2.5}
+            "params": {"sl_pct": 0.20, "t1_multiple": 1.5, "t2_multiple": 2.5},
         },
         "T1_1_0_R": {
             "name": "Quick Target 1 (1.0R Multiple)",
-            "params": {"sl_pct": 0.15, "t1_multiple": 1.0, "t2_multiple": 2.0}
+            "params": {"sl_pct": 0.15, "t1_multiple": 1.0, "t2_multiple": 2.0},
         },
-        "T1_1_5_R_BASELINE": {
-            "name": "Target 1 (1.5R Baseline)",
-            "params": None
-        },
+        "T1_1_5_R_BASELINE": {"name": "Target 1 (1.5R Baseline)", "params": None},
         "T1_2_0_R": {
             "name": "Extended Target 1 (2.0R Multiple)",
-            "params": {"sl_pct": 0.15, "t1_multiple": 2.0, "t2_multiple": 3.0}
+            "params": {"sl_pct": 0.15, "t1_multiple": 2.0, "t2_multiple": 3.0},
         },
         "TIME_STOP_45M": {
             "name": "Time Stop Cut (45 Mins Stagnation)",
-            "params": {"sl_pct": 0.15, "t1_multiple": 1.5, "t2_multiple": 2.5, "time_stop_mins": 45.0}
+            "params": {
+                "sl_pct": 0.15,
+                "t1_multiple": 1.5,
+                "t2_multiple": 2.5,
+                "time_stop_mins": 45.0,
+            },
         },
     }
 
@@ -1588,7 +2022,10 @@ def _run_counterfactual_replay(trades: list[dict]) -> dict:
         if p is None:
             r_list = baseline_r
         else:
-            r_list = [replay_trade_on_ticks(t, ticks_map.get(t.get("id"), []), p) for t in trades]
+            r_list = [
+                replay_trade_on_ticks(t, ticks_map.get(t.get("id"), []), p)
+                for t in trades
+            ]
 
         var_mean = sum(r_list) / n
         delta_list = [r_list[i] - baseline_r[i] for i in range(n)]
@@ -1601,41 +2038,103 @@ def _run_counterfactual_replay(trades: list[dict]) -> dict:
             "delta_mean_r": round(var_mean - base_mean_r, 3),
             "delta_mean_r_95_ci": delta_ci,
             "p_value": p_val,
-            "outperforms_baseline": (delta_ci[0] > 0.0 and p_val < 0.05 and n >= MIN_SAMPLE_SIZE),
+            "outperforms_baseline": (
+                delta_ci[0] > 0.0 and p_val < 0.05 and n >= MIN_SAMPLE_SIZE
+            ),
         }
     return results
 
 
-def _identify_best_conditions(segment_tests: list[dict], pillars: list[dict]) -> list[dict]:
+def _identify_best_conditions(
+    segment_tests: list[dict], pillars: list[dict]
+) -> list[dict]:
     best = []
     for seg in segment_tests:
         if seg["count"] >= MIN_SAMPLE_SIZE and seg["mean_r_95_ci"][0] > 0.0:
-            lbl = seg.get("symbol") or seg.get("moneyness") or seg.get("window") or seg.get("bracket") or seg.get("direction") or seg.get("bucket") or seg.get("regime")
-            best.append({"category": seg["category"], "condition": str(lbl), "metric": f"+{seg['mean_r']:.2f}R Mean ({seg['win_rate_pct']}% Win Rate)"})
+            lbl = (
+                seg.get("symbol")
+                or seg.get("moneyness")
+                or seg.get("window")
+                or seg.get("bracket")
+                or seg.get("direction")
+                or seg.get("bucket")
+                or seg.get("regime")
+            )
+            best.append(
+                {
+                    "category": seg["category"],
+                    "condition": str(lbl),
+                    "metric": f"+{seg['mean_r']:.2f}R Mean ({seg['win_rate_pct']}% Win Rate)",
+                }
+            )
     if not best:
-        best.append({"category": "Sample Verification", "condition": "INSUFFICIENT_DATA_OR_NO_PROVEN_EDGE", "metric": f"Awaiting >= {MIN_SAMPLE_SIZE} closed trades per segment."})
+        best.append(
+            {
+                "category": "Sample Verification",
+                "condition": "INSUFFICIENT_DATA_OR_NO_PROVEN_EDGE",
+                "metric": f"Awaiting >= {MIN_SAMPLE_SIZE} closed trades per segment.",
+            }
+        )
     return best
 
 
-def _identify_worst_conditions(segment_tests: list[dict], pillars: list[dict]) -> list[dict]:
+def _identify_worst_conditions(
+    segment_tests: list[dict], pillars: list[dict]
+) -> list[dict]:
     worst = []
     for seg in segment_tests:
         if seg["count"] >= MIN_SAMPLE_SIZE and seg["mean_r_95_ci"][1] < 0.0:
-            lbl = seg.get("symbol") or seg.get("moneyness") or seg.get("window") or seg.get("bracket") or seg.get("direction") or seg.get("bucket") or seg.get("regime")
-            worst.append({"category": seg["category"], "condition": str(lbl), "metric": f"{seg['mean_r']:.2f}R Mean ({seg['win_rate_pct']}% Win Rate)"})
+            lbl = (
+                seg.get("symbol")
+                or seg.get("moneyness")
+                or seg.get("window")
+                or seg.get("bracket")
+                or seg.get("direction")
+                or seg.get("bucket")
+                or seg.get("regime")
+            )
+            worst.append(
+                {
+                    "category": seg["category"],
+                    "condition": str(lbl),
+                    "metric": f"{seg['mean_r']:.2f}R Mean ({seg['win_rate_pct']}% Win Rate)",
+                }
+            )
     if not worst:
-        worst.append({"category": "Sample Verification", "condition": "INSUFFICIENT_DATA_OR_NO_STATISTICAL_DRAG", "metric": f"Awaiting >= {MIN_SAMPLE_SIZE} closed trades per segment."})
+        worst.append(
+            {
+                "category": "Sample Verification",
+                "condition": "INSUFFICIENT_DATA_OR_NO_STATISTICAL_DRAG",
+                "metric": f"Awaiting >= {MIN_SAMPLE_SIZE} closed trades per segment.",
+            }
+        )
     return worst
 
 
-def _identify_top_3_profit_leaks(enriched_trades, loser_taxonomy, duration_analysis, time_analysis, score_analysis, pillar_analysis, counterfactual) -> list[dict]:
+def _identify_top_3_profit_leaks(
+    enriched_trades,
+    loser_taxonomy,
+    duration_analysis,
+    time_analysis,
+    score_analysis,
+    pillar_analysis,
+    counterfactual,
+) -> list[dict]:
     """
     Identifies top 3 profit leaks from actual empirical data (loser taxonomy, duration, time-of-day, exit reasons),
     ranked by total R lost with 95% bootstrap confidence intervals.
     """
     n = len(enriched_trades)
     if n < MIN_SAMPLE_SIZE:
-        return [{"id": "INSUFFICIENT_SAMPLE", "severity": "INFO", "title": f"Insufficient Sample Size ({n}/{MIN_SAMPLE_SIZE})", "evidence": "Awaiting trade samples.", "impact": "None"}]
+        return [
+            {
+                "id": "INSUFFICIENT_SAMPLE",
+                "severity": "INFO",
+                "title": f"Insufficient Sample Size ({n}/{MIN_SAMPLE_SIZE})",
+                "evidence": "Awaiting trade samples.",
+                "impact": "None",
+            }
+        ]
 
     candidate_leaks = []
 
@@ -1643,93 +2142,139 @@ def _identify_top_3_profit_leaks(enriched_trades, loser_taxonomy, duration_analy
     rev_info = loser_taxonomy.get("right_then_reversed", {})
     rev_cnt = rev_info.get("count", 0)
     if rev_cnt >= 5:
-        rev_trades = [t for t in enriched_trades if t["net_pnl_pts"] <= 0 and (t.get("mfe_points") or 0.0) >= (0.5 * float(t.get("initial_risk_pts") or 1.0))]
+        rev_trades = [
+            t
+            for t in enriched_trades
+            if t["net_pnl_pts"] <= 0
+            and (t.get("mfe_points") or 0.0)
+            >= (0.5 * float(t.get("initial_risk_pts") or 1.0))
+        ]
         r_lost = abs(sum(t["r_multiple"] for t in rev_trades))
         ci = _bootstrap_mean_ci([t["r_multiple"] for t in rev_trades])
-        candidate_leaks.append({
-            "id": "PROFIT_REVERSALS",
-            "severity": "HIGH",
-            "title": f"Profit Reversals ({rev_cnt} trades reached >= +0.5R then closed in loss)",
-            "evidence": f"{rev_cnt}/{n} trades gave back early excursion ({rev_info.get('pct', 0)}% of losers).",
-            "total_r_lost": round(r_lost, 2),
-            "mean_loss_ci": ci,
-            "impact": f"-{r_lost:.1f}R cumulative lost (Mean loss {ci[0]:.2f}R to {ci[1]:.2f}R)"
-        })
+        candidate_leaks.append(
+            {
+                "id": "PROFIT_REVERSALS",
+                "severity": "HIGH",
+                "title": f"Profit Reversals ({rev_cnt} trades reached >= +0.5R then closed in loss)",
+                "evidence": f"{rev_cnt}/{n} trades gave back early excursion ({rev_info.get('pct', 0)}% of losers).",
+                "total_r_lost": round(r_lost, 2),
+                "mean_loss_ci": ci,
+                "impact": f"-{r_lost:.1f}R cumulative lost (Mean loss {ci[0]:.2f}R to {ci[1]:.2f}R)",
+            }
+        )
 
     # 2. Theta Stagnation (> 45m duration in chop)
-    stagnant = [t for t in enriched_trades if float(t.get("duration_mins") or 0.0) >= 45.0 and t["r_multiple"] < 0]
+    stagnant = [
+        t
+        for t in enriched_trades
+        if float(t.get("duration_mins") or 0.0) >= 45.0 and t["r_multiple"] < 0
+    ]
     if len(stagnant) >= 5:
         r_lost = abs(sum(t["r_multiple"] for t in stagnant))
         ci = _bootstrap_mean_ci([t["r_multiple"] for t in stagnant])
-        candidate_leaks.append({
-            "id": "THETA_STAGNATION",
-            "severity": "MEDIUM",
-            "title": f"Theta Decay Stagnation ({len(stagnant)} trades held >= 45 mins)",
-            "evidence": f"{len(stagnant)} trades eroded into losses after holding > 45 minutes.",
-            "total_r_lost": round(r_lost, 2),
-            "mean_loss_ci": ci,
-            "impact": f"-{r_lost:.1f}R cumulative lost"
-        })
+        candidate_leaks.append(
+            {
+                "id": "THETA_STAGNATION",
+                "severity": "MEDIUM",
+                "title": f"Theta Decay Stagnation ({len(stagnant)} trades held >= 45 mins)",
+                "evidence": f"{len(stagnant)} trades eroded into losses after holding > 45 minutes.",
+                "total_r_lost": round(r_lost, 2),
+                "mean_loss_ci": ci,
+                "impact": f"-{r_lost:.1f}R cumulative lost",
+            }
+        )
 
     # 3. Unfavorable Time-of-Day Window (e.g. Midday Chop)
     for w in time_analysis:
         if w.get("count", 0) >= 10 and w.get("mean_r", 0.0) < -0.2:
             r_lost = abs(w.get("mean_r", 0.0) * w["count"])
-            candidate_leaks.append({
-                "id": f"TIME_WINDOW_{w.get('window', 'UNKNOWN')}",
-                "severity": "MEDIUM",
-                "title": f"Chop Drag in {w.get('window')}",
-                "evidence": f"{w['count']} trades in this window produced {w.get('mean_r')}R average expectancy.",
-                "total_r_lost": round(r_lost, 2),
-                "mean_loss_ci": w.get("mean_r_95_ci", [0.0, 0.0]),
-                "impact": f"-{r_lost:.1f}R lost in segment"
-            })
+            candidate_leaks.append(
+                {
+                    "id": f"TIME_WINDOW_{w.get('window', 'UNKNOWN')}",
+                    "severity": "MEDIUM",
+                    "title": f"Chop Drag in {w.get('window')}",
+                    "evidence": f"{w['count']} trades in this window produced {w.get('mean_r')}R average expectancy.",
+                    "total_r_lost": round(r_lost, 2),
+                    "mean_loss_ci": w.get("mean_r_95_ci", [0.0, 0.0]),
+                    "impact": f"-{r_lost:.1f}R lost in segment",
+                }
+            )
 
     if not candidate_leaks:
-        return [{"id": "NO_SIGNIFICANT_LEAKS", "severity": "INFO", "title": "Operating within normal variance", "evidence": f"Evaluated across {n} valid trades.", "impact": "Baseline stable"}]
+        return [
+            {
+                "id": "NO_SIGNIFICANT_LEAKS",
+                "severity": "INFO",
+                "title": "Operating within normal variance",
+                "evidence": f"Evaluated across {n} valid trades.",
+                "impact": "Baseline stable",
+            }
+        ]
 
     candidate_leaks.sort(key=lambda x: x.get("total_r_lost", 0.0), reverse=True)
     return candidate_leaks[:3]
 
 
-def _generate_rigorous_recommendations(n_valid: int, baseline_mean_r: float, pillar_analysis: list[dict], worst_conditions: list[dict], counterfactual: dict, loser_taxonomy: dict, hypotheses: list[dict] = None) -> list[dict]:
+def _generate_rigorous_recommendations(
+    n_valid: int,
+    baseline_mean_r: float,
+    pillar_analysis: list[dict],
+    worst_conditions: list[dict],
+    counterfactual: dict,
+    loser_taxonomy: dict,
+    hypotheses: list[dict] = None,
+) -> list[dict]:
     recs = []
     if hypotheses:
         for h in hypotheses:
             if h.get("status") == "RECOMMENDED":
-                recs.append({
-                    "parameter": h["parameter"],
-                    "current_value": h["current_value"],
-                    "proposed_value": h["proposed_value"],
-                    "n": h.get("observation_count", 0),
-                    "effect_size": h.get("effect_size", 0.0),
-                    "ci": [h.get("ci_lower", 0.0), h.get("ci_upper", 0.0)],
-                    "expected_net_impact": h.get("expected_net_impact", ""),
-                    "validation_plan": h.get("validation_plan", ""),
-                    "evidence_status": "RECOMMENDED",
-                    "requires_approval": True,
-                    "target_file": "app/services/options_engine.py"
-                })
+                recs.append(
+                    {
+                        "parameter": h["parameter"],
+                        "current_value": h["current_value"],
+                        "proposed_value": h["proposed_value"],
+                        "n": h.get("observation_count", 0),
+                        "effect_size": h.get("effect_size", 0.0),
+                        "ci": [h.get("ci_lower", 0.0), h.get("ci_upper", 0.0)],
+                        "expected_net_impact": h.get("expected_net_impact", ""),
+                        "validation_plan": h.get("validation_plan", ""),
+                        "evidence_status": "RECOMMENDED",
+                        "requires_approval": True,
+                        "target_file": "app/services/options_engine.py",
+                    }
+                )
 
     if not recs:
-        recs.append({
-            "parameter": "ENGINE_CONFIG_BASELINE",
-            "current_value": f"Current Baseline Rules (Min Score: {ENGINE_CONFIG.get('MIN_SETUP_SCORE', 75)})",
-            "proposed_value": "No Change",
-            "n": n_valid,
-            "effect_size": 0.0,
-            "ci": [0.0, 0.0],
-            "expected_net_impact": "Preserves established baseline.",
-            "validation_plan": "Continue paper trade execution.",
-            "evidence_status": "NO_EVIDENCE_FOR_CHANGE" if n_valid >= MIN_SAMPLE_SIZE else "INSUFFICIENT_DATA",
-            "requires_approval": True,
-            "target_file": "None (Observation Only)"
-        })
+        recs.append(
+            {
+                "parameter": "ENGINE_CONFIG_BASELINE",
+                "current_value": f"Current Baseline Rules (Min Score: {ENGINE_CONFIG.get('MIN_SETUP_SCORE', 75)})",
+                "proposed_value": "No Change",
+                "n": n_valid,
+                "effect_size": 0.0,
+                "ci": [0.0, 0.0],
+                "expected_net_impact": "Preserves established baseline.",
+                "validation_plan": "Continue paper trade execution.",
+                "evidence_status": "NO_EVIDENCE_FOR_CHANGE"
+                if n_valid >= MIN_SAMPLE_SIZE
+                else "INSUFFICIENT_DATA",
+                "requires_approval": True,
+                "target_file": "None (Observation Only)",
+            }
+        )
     return recs
 
 
-def _compute_rigorous_health_score(mean_r: float, r_ci: list[float], win_rate: float, pf: float, max_dd_r: float, n: int) -> int:
-    if n == 0: return 50
+def _compute_rigorous_health_score(
+    mean_r: float,
+    r_ci: list[float],
+    win_rate: float,
+    pf: float,
+    max_dd_r: float,
+    n: int,
+) -> int:
+    if n == 0:
+        return 50
     exp_pts = max(0.0, min(40.0, 20.0 + (mean_r * 40.0)))
     wr_pts = max(0.0, min(25.0, (win_rate / 60.0) * 25.0))
     pf_pts = max(0.0, min(20.0, (pf / 2.0) * 20.0))
@@ -1757,7 +2302,7 @@ def _build_empty_diagnostic_report() -> dict:
             "core_excluded_count": 0,
             "hygiene_excluded_count": 0,
             "exclusion_reasons": {},
-            "filter_passed": True
+            "filter_passed": True,
         },
         "sample_size": {
             "total_signals_raw": 0,
@@ -1772,13 +2317,20 @@ def _build_empty_diagnostic_report() -> dict:
             "win_count": 0,
             "loss_count": 0,
             "win_rate_pct": 0.0,
-            "sample_sufficient": False
+            "sample_sufficient": False,
         },
-        "overall_performance": {"expectancy_r": 0.0, "profit_factor": 1.0, "total_net_inr": 0.0, "strategy_health_score": 50},
+        "overall_performance": {
+            "expectancy_r": 0.0,
+            "profit_factor": 1.0,
+            "total_net_inr": 0.0,
+            "strategy_health_score": 50,
+        },
         "setup_pillars": [],
         "loser_taxonomy": {"total_losers": 0},
         "counterfactual_replay": {},
-        "recommended_changes": _generate_rigorous_recommendations(0, 0.0, [], [], {}, {}),
+        "recommended_changes": _generate_rigorous_recommendations(
+            0, 0.0, [], [], {}, {}
+        ),
         "hypotheses_tracker": [],
         "recent_trade_reviews": [],
         "timestamp": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),

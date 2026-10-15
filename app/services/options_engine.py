@@ -17,7 +17,7 @@ import os
 import math
 import logging
 import threading
-from datetime import datetime, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from app.services.options_signal_service import (
     get_rolling_iv_percentile,
@@ -654,7 +654,11 @@ def compute_trending_oi_metrics(
         "total_pe_oi": total_pe_oi,
         "diff_oi": diff_oi,
         "diff_pct": diff_pct,
+        "strength_pct": diff_pct,
         "dots": dots,
+        "strength_dots": dots,
+        "conviction_confirmed": bool(abs(diff_pct) >= 40 and dots >= 2),
+        "is_grayed_out": bool(abs(diff_pct) < 30),
         "strength_class": strength_class,
         "strength_status": strength_status,
         "net_pcr": net_pcr,
@@ -911,21 +915,31 @@ def compute_tomorrow_trade_bias(
     call_wall = f"{r1:,.0f} CE"
     put_base = f"{s1:,.0f} PE"
 
-    if bearish_score >= 60 or diff_pct <= -30 or pcr < 0.8 or "BEARISH" in sentiment:
-        direction = "BEARISH"
-        badge = "BEARISH (SELL-ON-RISE)"
-        badge_class = "bearish"
-        detail = f"Next Pivot: {pivot:,.0f} | Resistance: {call_wall} | Base: {put_base}"
-    elif bullish_score >= 60 or diff_pct >= 30 or pcr > 1.2 or "BULLISH" in sentiment:
+    if bullish_score > bearish_score and (bullish_score >= 55 or diff_pct >= 30 or "BULLISH" in sentiment):
         direction = "BULLISH"
         badge = "BULLISH (BUY-ON-DIPS)"
         badge_class = "bullish"
-        detail = f"Next Pivot: {pivot:,.0f} | Resistance: {call_wall} | Base: {put_base}"
+        detail = f"Next Pivot: {pivot:,.0f} | CPR: {cpr_type} | Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Resist: {call_wall} | Base: {put_base}"
+    elif bearish_score > bullish_score and (bearish_score >= 55 or diff_pct <= -30 or "BEARISH" in sentiment):
+        direction = "BEARISH"
+        badge = "BEARISH (SELL-ON-RISE)"
+        badge_class = "bearish"
+        detail = f"Next Pivot: {pivot:,.0f} | CPR: {cpr_type} | Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Resist: {call_wall} | Base: {put_base}"
+    elif bearish_score >= 60 or diff_pct <= -30 or "BEARISH" in sentiment:
+        direction = "BEARISH"
+        badge = "BEARISH (SELL-ON-RISE)"
+        badge_class = "bearish"
+        detail = f"Next Pivot: {pivot:,.0f} | CPR: {cpr_type} | Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Resist: {call_wall} | Base: {put_base}"
+    elif bullish_score >= 60 or diff_pct >= 30 or "BULLISH" in sentiment:
+        direction = "BULLISH"
+        badge = "BULLISH (BUY-ON-DIPS)"
+        badge_class = "bullish"
+        detail = f"Next Pivot: {pivot:,.0f} | CPR: {cpr_type} | Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Resist: {call_wall} | Base: {put_base}"
     else:
         direction = "RANGEBOUND"
         badge = "RANGEBOUND (WAIT FOR BREAKOUT)"
         badge_class = "neutral"
-        detail = f"Expected Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Pivot: {pivot:,.0f}"
+        detail = f"Expected Range: {tomorrow_s1:,.0f} - {tomorrow_r1:,.0f} | Pivot: {pivot:,.0f} | CPR: {cpr_type}"
 
     return {
         "direction": direction,
@@ -1933,10 +1947,12 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     if req_iv:
         iv_safe = iv_safe and (avg_atm_iv is not None and avg_atm_iv > 0.01)
 
+    # 11. Trending OI (ATM +/- 5 strikes: 5 up, 5 down = 11 strikes total) matching Oi Pulse specification
+    trending_oi = compute_trending_oi_metrics(enriched_chain, spot, step, atm_strike, num_strikes_each_side=5)
+
     # Build checklist & pillar flags
     def build_checklist_and_flags(is_ce: bool):
         is_dir = is_bullish_dir if is_ce else is_bearish_dir
-        conf_count = bull_confirm_count if is_ce else bear_confirm_count
         p_sig = price_signal == ("BULLISH" if is_ce else "BEARISH")
         m_sig = momentum_signal == ("BULLISH" if is_ce else "BEARISH")
         o_sig = oi_signal == ("BULLISH" if is_ce else "BEARISH")
@@ -1944,10 +1960,24 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         pcr_sig = pcr_signal == ("BULLISH" if is_ce else "BEARISH")
         iv_ok = bool(iv_safe and in_trade_window)
 
+        # Oi Pulse Trending OI Conviction Rule: >= 40% diff with >= 2 strength dots aligned with bias
+        t_oi_pct = trending_oi.get("diff_pct", 0)
+        t_oi_dots = trending_oi.get("dots", 0)
+        t_oi_confirmed = (t_oi_pct >= 40 and t_oi_dots >= 2) if is_ce else (t_oi_pct <= -40 and t_oi_dots >= 2)
+        if t_oi_confirmed:
+            t_oi_desc = f"{'+' if t_oi_pct > 0 else ''}{t_oi_pct}% ({t_oi_dots} dots) — Confirmed Trend (&ge;40%, 2+ dots)"
+        elif abs(t_oi_pct) < 30:
+            t_oi_desc = f"{'+' if t_oi_pct > 0 else ''}{t_oi_pct}% ({t_oi_dots} dots) — Grayed out / Noise zone (&lt;30%)"
+        elif abs(t_oi_pct) < 40:
+            t_oi_desc = f"{'+' if t_oi_pct > 0 else ''}{t_oi_pct}% ({t_oi_dots} dots) — Weak trend (&lt;40% threshold)"
+        else:
+            t_oi_desc = f"{'+' if t_oi_pct > 0 else ''}{t_oi_pct}% ({t_oi_dots} dots) — Opposing OI flow"
+
         chk = [
             {"name": "Price Direction", "passed": p_sig, "desc": f"Price is {price_signal}"},
             {"name": "Momentum", "passed": m_sig, "desc": f"Momentum is {momentum_signal}"},
             {"name": "OI Structure", "passed": o_sig, "desc": f"OI is {oi_signal}"},
+            {"name": "Trending OI (&ge;40%, 2+ Dots)", "passed": t_oi_confirmed, "desc": t_oi_desc},
             {"name": "Volume", "passed": v_sig, "desc": f"Volume is {volume_signal}"},
             {"name": "PCR Trend", "passed": pcr_sig, "desc": f"PCR is {pcr_signal} ({pcr})"},
             {"name": "IV & Window", "passed": iv_ok, "desc": f"{iv_time_info.get('time_status', '')} | {iv_time_info.get('iv_condition', '')}"},
@@ -1958,13 +1988,18 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "momentum": m_sig,
             "volume": v_sig,
             "oi": o_sig,
+            "trending_oi": t_oi_confirmed,
             "iv_session": iv_ok,
         }
         score = 20 if p_sig else 0
-        if m_sig: score += 20
-        if o_sig: score += 20
-        if v_sig: score += 20
-        if pcr_sig: score += 20
+        if m_sig:
+            score += 20
+        if o_sig:
+            score += 20
+        if v_sig:
+            score += 20
+        if pcr_sig:
+            score += 20
         return score, chk, flags
 
     ce_score, ce_checklist, ce_pillar_flags = build_checklist_and_flags(is_ce=True)
@@ -2216,7 +2251,6 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     # 11. OI Trend Focus & Trending OI (ATM +/- 5 strikes: 5 up, 5 down, 11 strikes total)
     trend_strikes = [r for r in enriched_chain if abs(r["strike"] - atm_strike) <= (step * 5)]
-    trending_oi = compute_trending_oi_metrics(enriched_chain, spot, step, atm_strike, num_strikes_each_side=5)
     call_writing_strikes = [r["strike"] for r in enriched_chain if r.get("ce_activity") == "CALL WRITING"]
     put_writing_strikes = [r["strike"] for r in enriched_chain if r.get("pe_activity") == "PUT WRITING"]
     call_unwinding_strikes = [r["strike"] for r in enriched_chain if r.get("ce_activity") == "CALL UNWINDING"]

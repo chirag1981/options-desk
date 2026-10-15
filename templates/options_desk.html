@@ -378,15 +378,18 @@
 
             <div class="strip-controls">
                 <div class="tab-pill-group">
-                    <button type="button" class="tab-pill active" id="tab-btn-active-signals" data-tab="active">
+                    <button type="button" class="tab-pill active" id="tab-btn-active-signals" data-tab="active"
+                        aria-label="View Active Trades" title="View Active Trades">
                         <span>Active Trades</span>
                         <span class="tab-badge" id="active-signals-count-badge">0</span>
                     </button>
-                    <button type="button" class="tab-pill" id="tab-btn-history-signals" data-tab="history">
+                    <button type="button" class="tab-pill" id="tab-btn-history-signals" data-tab="history"
+                        aria-label="View Trade Journal History" title="View Trade Journal History">
                         <span>Trade Journal</span>
                         <span class="tab-badge" id="history-signals-count-badge">0</span>
                     </button>
-                    <button type="button" class="tab-pill" id="tab-btn-analysis" data-tab="analysis">
+                    <button type="button" class="tab-pill" id="tab-btn-analysis" data-tab="analysis"
+                        aria-label="View AI Diagnostics and Strategy Blueprint" title="View Strategy AI Diagnostics">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
                             style="margin-right:0.2rem;vertical-align:-1px;color:var(--gold-primary);">
@@ -805,21 +808,24 @@
             <table class="desk-table trending-pulse-table" id="trending-pulse-table">
                 <thead>
                     <tr>
-                        <th class="text-center">Time</th>
-                        <th class="text-right">SPOT</th>
-                        <th class="text-center">Day H/L</th>
-                        <th class="text-right">Call &Delta;OI</th>
-                        <th class="text-right">Put &Delta;OI</th>
-                        <th class="text-right">Diff OI</th>
-                        <th class="text-center">Str</th>
-                        <th class="text-center">Diff H/L</th>
-                        <th class="text-center">Build-up</th>
-                        <th class="text-center">Sentiment</th>
+                        <th class="text-center" style="min-width: 85px;">Date</th>
+                        <th class="text-center" style="min-width: 75px;">Time</th>
+                        <th class="text-right" style="min-width: 85px;">Spot</th>
+                        <th class="text-center" style="min-width: 115px;">Day H/L Break</th>
+                        <th class="text-right" style="min-width: 110px;">Chng. In Call OI</th>
+                        <th class="text-right" style="min-width: 110px;">Chng. In Put OI</th>
+                        <th class="text-right" style="min-width: 110px;">Diff. in OI</th>
+                        <th class="text-center" style="min-width: 105px;">Strength</th>
+                        <th class="text-center" style="min-width: 75px;">Direction</th>
+                        <th class="text-right" style="min-width: 100px;">Chg. Dir</th>
+                        <th class="text-right" style="min-width: 85px;">Dir. %</th>
+                        <th class="text-center" style="min-width: 120px;">Day High/Low Diff. in OI</th>
+                        <th class="text-center" style="min-width: 130px;">Sentiment</th>
                     </tr>
                 </thead>
                 <tbody id="trending-pulse-tbody">
                     <tr>
-                        <td colspan="10" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">
+                        <td colspan="13" class="text-center" style="padding:1.5rem;color:var(--text-muted,#94a3b8);">
                             Loading Trending OI data...</td>
                     </tr>
                 </tbody>
