@@ -6,7 +6,7 @@ Comprehensive pytest test suite validating fixes for P0 and P1 audit items:
 - Item 4: Telemetry archive-to-compressed-file (.csv.gz) before deletion and >= 400 day retention.
 - Item 5(d): Calibration test: replaying baseline params on ticks reproduces stored R within tolerance.
 - Item 6: Sign-adjusted PE forward moves, day-level clustering, FDR correction, and N_eff.
-- Item 7: Per-exchange charges (NSE vs BSE Sensex), GST, STT, and configurable brokerage.
+- Item 7: Statutory charges on NIFTY (NSE turnover, GST, STT, Stamp Duty, SEBI fees, and configurable brokerage).
 - Item 10: Pure analyze_option_desk without state mutation during UI calls.
 """
 
@@ -364,9 +364,9 @@ def test_item_6_pillar_analysis_sign_adjustment_and_day_clustering():
 # ==============================================================================
 
 def test_item_7_charges_config_per_exchange_and_brokerage():
-    """Validates per-exchange rates (NSE 0.035%, BSE Sensex 0.0325%, STT 0.15%, Stamp 0.003%, GST 18%)."""
-    # 1. NSE charges test
-    costs_nse = calculate_trade_costs(
+    """Validates statutory NIFTY options rates (NSE 0.035%, STT 0.15%, Stamp 0.003%, GST 18%)."""
+    # 1. Zero brokerage test
+    costs_zero_brk = calculate_trade_costs(
         entry_price=100.0,
         exit_prices=[(120.0, 1.0)],
         lot_size=65,
@@ -374,28 +374,28 @@ def test_item_7_charges_config_per_exchange_and_brokerage():
         symbol="NIFTY",
         brokerage_per_order=0.0, # Zero brokerage test
     )
-    assert costs_nse["brokerage"] == 0.0
-    assert costs_nse["exchange_charges"] > 0.0
+    assert costs_zero_brk["brokerage"] == 0.0
+    assert costs_zero_brk["exchange_charges"] > 0.0
     # Buy turnover = 6500, Sell turnover = 7800. Exch = 0.035% of total
     expected_exch = (6500 + 7800) * 0.00035
-    assert costs_nse["exchange_charges"] == pytest.approx(expected_exch, abs=0.1)
+    assert costs_zero_brk["exchange_charges"] == pytest.approx(expected_exch, abs=0.1)
 
-    # 2. BSE Sensex charges test (0.0325% rate)
-    costs_bse = calculate_trade_costs(
+    # 2. Configurable brokerage test (20 per order)
+    costs_with_brk = calculate_trade_costs(
         entry_price=100.0,
         exit_prices=[(120.0, 1.0)],
-        lot_size=20,
+        lot_size=65,
         lots=1,
-        symbol="SENSEX",
+        symbol="NIFTY",
         brokerage_per_order=20.0, # 20 per order
     )
-    assert costs_bse["brokerage"] == 40.0 # 2 orders * 20
-    expected_exch_bse = (2000 + 2400) * 0.000325
-    assert costs_bse["exchange_charges"] == pytest.approx(expected_exch_bse, abs=0.1)
+    assert costs_with_brk["brokerage"] == 40.0 # 2 orders * 20
+    expected_exch_nse = (6500 + 7800) * 0.00035
+    assert costs_with_brk["exchange_charges"] == pytest.approx(expected_exch_nse, abs=0.1)
 
     # GST is 18% on (Brokerage + Exchange + SEBI)
-    expected_gst = (costs_bse["brokerage"] + costs_bse["exchange_charges"] + costs_bse["sebi_charges"]) * 0.18
-    assert costs_bse["gst"] == pytest.approx(expected_gst, abs=0.1)
+    expected_gst = (costs_with_brk["brokerage"] + costs_with_brk["exchange_charges"] + costs_with_brk["sebi_charges"]) * 0.18
+    assert costs_with_brk["gst"] == pytest.approx(expected_gst, abs=0.1)
 
 
 # ==============================================================================

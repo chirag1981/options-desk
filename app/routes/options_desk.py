@@ -39,7 +39,7 @@ def get_options_desk_data():
     """
     Returns full processed options analysis payload for specified symbol & expiry.
     Query params:
-      - symbol: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX (default NIFTY)
+      - symbol: NIFTY (default NIFTY)
       - expiry: DD-MMM-YYYY (optional)
       - refresh: 'true' or '1' to force fresh fetch
     """
@@ -86,7 +86,7 @@ def get_trending_oi():
     """
     Dedicated endpoint for Oi Pulse style Trending OI time-series table.
     Query params:
-      - symbol: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX
+      - symbol: NIFTY
       - interval: 3, 5, 15 (minutes, default 5)
       - date: YYYY-MM-DD (optional, defaults to today)
     """
@@ -147,7 +147,7 @@ def get_desk_status():
         "broker": "FYERS" if fy_token else "NONE",
         "fyers_authenticated": fy_token,
         "engine_status": "OPERATIONAL",
-        "auto_refresh_interval_sec": 180,
+        "auto_refresh_interval_sec": 60,
     })
 
 

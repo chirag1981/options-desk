@@ -49,7 +49,7 @@ flowchart TD
 ### 1. Data Ingestion & Broker Authentication (`fyers_auth.py` & `fyers_options_service.py`)
 * **Zero-Click TOTP Authentication**: Uses headless TOTP verification via `pyotp` to exchange credentials for a daily access token automatically without user browser interaction.
 * **Token Caching**: Caches tokens in `instance/fyers_token.json`, valid for the full Indian trading day.
-* **Native High-Speed Option Chain**: Uses FYERS native option chain API endpoint (`/data/options-chain-v3`) delivering sub-150ms latency across benchmark indices (`NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`, `SENSEX`).
+* **Native High-Speed Option Chain**: Uses FYERS native option chain API endpoint (`/data/options-chain-v3`) delivering sub-150ms latency for `NIFTY 50`.
 
 ---
 

@@ -107,11 +107,11 @@ def test_item_2_initial_stop_loss_immutability_and_migration():
 
     # New signal created via record_signal
     sig_data = {
-        "symbol": "BANKNIFTY",
+        "symbol": "NIFTY",
         "type": "CE",
-        "strike": 50000,
+        "strike": 22500,
         "expiry": "2026-10-08",
-        "spot_price": 50000.0,
+        "spot_price": 22500.0,
         "entry_price": 200.0,
         "stop_loss": 170.0,
         "target_1": 250.0,
@@ -127,10 +127,10 @@ def test_item_2_initial_stop_loss_immutability_and_migration():
 
     # Trailing SL update modifies stop_loss but preserves initial_stop_loss
     market_cache = {
-        "BANKNIFTY": {
-            "spot_price": 50500.0,
+        "NIFTY": {
+            "spot_price": 22600.0,
             "chain": [
-                {"strike": 50000, "ce_ltp": 240.0, "ce_bid": 239.0, "ce_ask": 240.0}
+                {"strike": 22500, "ce_ltp": 240.0, "ce_bid": 239.0, "ce_ask": 240.0}
             ]
         }
     }
@@ -235,7 +235,7 @@ def test_item_6_and_7_partial_exits_and_manual_close():
 
     # 1-lot trade reaching T1
     res1 = record_signal({
-        "symbol": "FINNIFTY",
+        "symbol": "NIFTY",
         "type": "CE",
         "strike": 23000,
         "expiry": "2026-10-08",
@@ -255,7 +255,7 @@ def test_item_6_and_7_partial_exits_and_manual_close():
 
     # Price moves to 135.0 (well above T1=130, so trailed SL=132.5 < bid=134.5, position stays OPEN)
     market_cache1 = {
-        "FINNIFTY": {
+        "NIFTY": {
             "spot_price": 23200.0,
             "chain": [
                 {"strike": 23000, "ce_ltp": 135.0, "ce_bid": 134.5, "ce_ask": 135.5}
@@ -274,11 +274,11 @@ def test_item_6_and_7_partial_exits_and_manual_close():
 
     # 2-lot trade reaching T1
     res2 = record_signal({
-        "symbol": "MIDCPNIFTY",
+        "symbol": "NIFTY",
         "type": "CE",
-        "strike": 12000,
+        "strike": 23000,
         "expiry": "2026-10-08",
-        "spot_price": 12000.0,
+        "spot_price": 23000.0,
         "entry_price": 100.0,
         "stop_loss": 85.0,
         "target_1": 130.0,
@@ -286,14 +286,14 @@ def test_item_6_and_7_partial_exits_and_manual_close():
         "lots": 2,
         "bid_at_entry": 99.5,
         "ask_at_entry": 100.5,
-    }, is_paper_trade=True)
+    }, is_paper_trade=True, override_cooldown=True)
     sig2_id = res2["id"]
 
     market_cache2 = {
-        "MIDCPNIFTY": {
-            "spot_price": 12100.0,
+        "NIFTY": {
+            "spot_price": 23200.0,
             "chain": [
-                {"strike": 12000, "ce_ltp": 135.0, "ce_bid": 134.0, "ce_ask": 135.0}
+                {"strike": 23000, "ce_ltp": 135.0, "ce_bid": 134.0, "ce_ask": 135.0}
             ]
         }
     }

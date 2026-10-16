@@ -325,30 +325,29 @@ def test_replay_uses_ask_entry_bid_exit_and_conservative_gap_fill():
 # 5. Transaction Costs & P&L Reconciliation Tests (Task Section 8)
 # ==============================================================================
 
-def test_symbol_specific_statutory_costs_nifty_vs_sensex():
-    """Verify transaction costs pass underlying symbol and calculate exchange-specific fees."""
+def test_nifty_statutory_transaction_costs():
+    """Verify transaction costs for NIFTY options with statutory NSE fees."""
     # NIFTY trade: 1 lot (lot_size 65)
-    nifty_costs = calculate_trade_costs(
+    nifty_costs_1lot = calculate_trade_costs(
         entry_price=100.0,
         exit_prices=[(120.0, 1.0)],
         lot_size=65,
         lots=1,
         symbol="NIFTY",
     )
-    # SENSEX trade: 1 lot (lot_size 20) with BSE turnover rates
-    sensex_costs = calculate_trade_costs(
+    # NIFTY trade: 2 lots (lot_size 65)
+    nifty_costs_2lots = calculate_trade_costs(
         entry_price=100.0,
         exit_prices=[(120.0, 1.0)],
-        lot_size=20,
-        lots=1,
-        symbol="SENSEX",
+        lot_size=65,
+        lots=2,
+        symbol="NIFTY",
     )
 
-    assert nifty_costs["total_costs_inr"] > 0.0
-    assert sensex_costs["total_costs_inr"] > 0.0
-    # SENSEX turnover is smaller (20 qty vs 65 qty), so statutory turnover fees differ proportionally
-    assert nifty_costs["turnover_buy"] == 6500.0
-    assert sensex_costs["turnover_buy"] == 2000.0
+    assert nifty_costs_1lot["total_costs_inr"] > 0.0
+    assert nifty_costs_2lots["total_costs_inr"] > nifty_costs_1lot["total_costs_inr"]
+    assert nifty_costs_1lot["turnover_buy"] == 6500.0
+    assert nifty_costs_2lots["turnover_buy"] == 13000.0
 
 
 def test_whole_lot_partial_exits_and_journal_persistence():

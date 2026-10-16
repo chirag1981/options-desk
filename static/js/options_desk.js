@@ -10,8 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
         symbol: "NIFTY",
         expiry: "",
         strikeRange: 5, // Default ATM ± 5 strikes (5 up, 5 down)
-        refreshIntervalSec: 180, // 3 mins default
-        timerRemaining: 180,
+        refreshIntervalSec: 60, // 60s auto-refresh for real-time barrier & level updates
+        timerRemaining: 60,
         timerId: null,
         isFetching: false,
         lastData: null,
@@ -67,6 +67,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const levelS2Val = document.getElementById("level-s2-val");
     const levelR2Val = document.getElementById("level-r2-val");
     const levelsOuterTargets = document.getElementById("levels-outer-targets");
+
+    // Nearest S & R Barriers Elements (Card 4)
+    const barrierResStrike = document.getElementById("barrier-res-strike");
+    const barrierResDist = document.getElementById("barrier-res-dist");
+    const barrierResArrowBadge = document.getElementById("barrier-res-arrow-badge");
+    const barrierResArrow = document.getElementById("barrier-res-arrow");
+    const barrierResStatus = document.getElementById("barrier-res-status");
+    const barrierResChg = document.getElementById("barrier-res-chg");
+    const barrierSpotVal = document.getElementById("barrier-spot-val");
+    const barrierSupStrike = document.getElementById("barrier-sup-strike");
+    const barrierSupDist = document.getElementById("barrier-sup-dist");
+    const barrierSupArrowBadge = document.getElementById("barrier-sup-arrow-badge");
+    const barrierSupArrow = document.getElementById("barrier-sup-arrow");
+    const barrierSupStatus = document.getElementById("barrier-sup-status");
+    const barrierSupChg = document.getElementById("barrier-sup-chg");
 
     // Top Ticker / OI Totals Elements
     const totalCeOi = document.getElementById("total-ce-oi");
@@ -481,7 +496,61 @@ document.addEventListener("DOMContentLoaded", () => {
             vectorPlaybookText.textContent = mv.playbook || "Awaiting boundary confirmation.";
         }
 
-        // 4. Card 3: Option Buying Focus & Execution Plan
+        // 4. Card 4: Nearest S & R Barriers (Writer Positioning & Flow)
+        const barriers = data.nearest_barriers || (levels && levels.nearest_barriers) || {};
+        const sup = barriers.support || {};
+        const res = barriers.resistance || {};
+
+        if (barrierSpotVal) {
+            const spotVal = barriers.spot_price || spot || (bias && bias.spot_price) || 0;
+            barrierSpotVal.textContent = spotVal > 0 ? `₹${formatIndianNumber(spotVal)}` : "₹--";
+        }
+
+        // Resistance (Call Writers)
+        if (barrierResStrike) {
+            const rStrike = res.strike || levels.resistance_1;
+            barrierResStrike.textContent = rStrike ? formatIndianNumber(Math.round(Number(rStrike))) : "--";
+        }
+        if (barrierResDist) {
+            const rDist = res.dist_pts !== undefined ? res.dist_pts : (levels.dist_to_r1 !== undefined ? Math.abs(levels.dist_to_r1) : null);
+            barrierResDist.textContent = (rDist !== null && rDist !== undefined) ? `+${rDist} pts` : "+-- pts";
+        }
+        if (barrierResStatus) {
+            barrierResStatus.textContent = res.status || "Call Writers Adding";
+        }
+        if (barrierResChg) {
+            barrierResChg.textContent = res.change_formatted || (res.change_oi !== undefined ? formatCompactOi(res.change_oi) : "--");
+        }
+        if (barrierResArrow) {
+            barrierResArrow.textContent = res.arrow || "―";
+        }
+        if (barrierResArrowBadge) {
+            barrierResArrowBadge.className = `barrier-arrow-badge ${res.arrow_class || "arrow-neutral"}`;
+        }
+
+        // Support (Put Writers)
+        if (barrierSupStrike) {
+            const sStrike = sup.strike || levels.support_1;
+            barrierSupStrike.textContent = sStrike ? formatIndianNumber(Math.round(Number(sStrike))) : "--";
+        }
+        if (barrierSupDist) {
+            const sDist = sup.dist_pts !== undefined ? sup.dist_pts : (levels.dist_to_s1 !== undefined ? Math.abs(levels.dist_to_s1) : null);
+            barrierSupDist.textContent = (sDist !== null && sDist !== undefined) ? `-${sDist} pts` : "--- pts";
+        }
+        if (barrierSupStatus) {
+            barrierSupStatus.textContent = sup.status || "Put Writers Adding";
+        }
+        if (barrierSupChg) {
+            barrierSupChg.textContent = sup.change_formatted || (sup.change_oi !== undefined ? formatCompactOi(sup.change_oi) : "--");
+        }
+        if (barrierSupArrow) {
+            barrierSupArrow.textContent = sup.arrow || "―";
+        }
+        if (barrierSupArrowBadge) {
+            barrierSupArrowBadge.className = `barrier-arrow-badge ${sup.arrow_class || "arrow-neutral"}`;
+        }
+
+        // 5. Card 3: Option Buying Focus & Execution Plan
         const optBuying = data.option_buying || data.option_focus || {};
         const tradePlan = optBuying.trade_plan || {};
         const checklist = optBuying.checklist || [];

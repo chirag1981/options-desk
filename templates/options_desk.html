@@ -356,7 +356,81 @@
             </div>
         </article>
 
+        <!-- CARD 4: NEAREST SUPPORT & RESISTANCE (WRITER POSITIONING) -->
+        <article class="desk-card card-barriers" id="card-nearest-barriers" aria-label="Nearest Support and Resistance Barriers">
+            <div class="card-header">
+                <div class="card-title-group">
+                    <span class="card-subtitle">WRITER MOMENTUM</span>
+                    <h2 class="card-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                            style="margin-right:0.35rem;vertical-align:-2px;color:var(--gold-primary);">
+                            <line x1="12" y1="19" x2="12" y2="5"></line>
+                            <polyline points="5 12 12 5 19 12"></polyline>
+                        </svg>
+                        KEY S &amp; R BARRIERS
+                    </h2>
+                </div>
+                <div class="barrier-live-pill" id="barrier-live-pill" title="Real-time OI Writer Position Shifts">
+                    <span class="pulse-dot green" aria-hidden="true"></span>
+                    <span class="font-mono">LIVE FLOW</span>
+                </div>
+            </div>
 
+            <div class="barriers-card-body">
+                <!-- RESISTANCE ROW / BOX -->
+                <div class="barrier-item barrier-res" id="barrier-res-box">
+                    <div class="barrier-meta-top">
+                        <span class="barrier-tag res-tag">RESISTANCE</span>
+                        <span class="barrier-dist font-mono" id="barrier-res-dist">+-- pts</span>
+                    </div>
+                    <div class="barrier-main-row">
+                        <div class="barrier-strike-wrap font-mono">
+                            <span class="barrier-strike-num" id="barrier-res-strike">--</span>
+                            <span class="barrier-strike-type">CE</span>
+                        </div>
+                        <div class="barrier-arrow-badge arrow-neutral" id="barrier-res-arrow-badge" title="Call Writers Flow">
+                            <span class="barrier-arrow-icon" id="barrier-res-arrow">―</span>
+                        </div>
+                    </div>
+                    <div class="barrier-sub-row font-mono">
+                        <span class="barrier-status-text" id="barrier-res-status">Call Writers Adding</span>
+                        <strong class="barrier-chg-val" id="barrier-res-chg">+--</strong>
+                    </div>
+                </div>
+
+                <!-- SPOT PIVOT ANCHOR -->
+                <div class="barrier-spot-divider">
+                    <div class="spot-divider-line"></div>
+                    <div class="spot-divider-badge font-mono" title="Current Spot Price">
+                        <span class="spot-divider-lbl">SPOT</span>
+                        <strong class="spot-divider-val" id="barrier-spot-val">₹--</strong>
+                    </div>
+                    <div class="spot-divider-line"></div>
+                </div>
+
+                <!-- SUPPORT ROW / BOX -->
+                <div class="barrier-item barrier-sup" id="barrier-sup-box">
+                    <div class="barrier-meta-top">
+                        <span class="barrier-tag sup-tag">SUPPORT</span>
+                        <span class="barrier-dist font-mono" id="barrier-sup-dist">--- pts</span>
+                    </div>
+                    <div class="barrier-main-row">
+                        <div class="barrier-strike-wrap font-mono">
+                            <span class="barrier-strike-num" id="barrier-sup-strike">--</span>
+                            <span class="barrier-strike-type">PE</span>
+                        </div>
+                        <div class="barrier-arrow-badge arrow-neutral" id="barrier-sup-arrow-badge" title="Put Writers Flow">
+                            <span class="barrier-arrow-icon" id="barrier-sup-arrow">―</span>
+                        </div>
+                    </div>
+                    <div class="barrier-sub-row font-mono">
+                        <span class="barrier-status-text" id="barrier-sup-status">Put Writers Adding</span>
+                        <strong class="barrier-chg-val" id="barrier-sup-chg">+--</strong>
+                    </div>
+                </div>
+            </div>
+        </article>
 
     </section>
 

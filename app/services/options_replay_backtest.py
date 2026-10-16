@@ -23,8 +23,7 @@ log = logging.getLogger("options_replay_backtest")
 
 # Statutory Transaction Charges Schedule (Verified against official circulars)
 # Sources & Effective Dates:
-# - NSE Circular Ref: NSE/CMP/2024 (Exchange Transaction Charges for options ~0.035% of premium turnover)
-# - BSE Circular Ref: 20240906-44 (Exchange Transaction Charges for Sensex options ~0.0325% of premium turnover)
+# - NSE Circular Ref: NSE/CMP/2024 (Exchange Transaction Charges for NIFTY options ~0.035% of premium turnover)
 # - Finance Act 2024: STT on option sell turnover 0.15% (effective Oct 2024 / 2025/2026)
 # - Indian Stamp Act: Stamp Duty on option buy turnover 0.003%
 # - SEBI Turnover Fees: ₹10 per crore (0.0001% of turnover)
@@ -37,11 +36,7 @@ CHARGES_CONFIG = {
     "STAMP_DUTY_BUY_RATE": 0.00003,         # 0.003% on buy premium turnover
     "SEBI_TURNOVER_RATE": 0.000001,         # ₹10 per crore (0.0001%)
     "GST_RATE": 0.18,                       # 18% on (Brokerage + Exchange + SEBI)
-    "EXCHANGE_TURNOVER_RATES": {
-        "NSE": 0.00035,                     # ~0.035% of premium turnover (NFO)
-        "BSE": 0.000325,                    # ~0.0325% of premium turnover (BFO / Sensex)
-    },
-    "EXCHANGE_TURNOVER_RATE": 0.00035,      # Default fallback
+    "EXCHANGE_TURNOVER_RATE": 0.00035,      # NSE NFO ~0.035% of premium turnover
 }
 
 DEFAULT_EXIT_CONFIG = {
@@ -85,11 +80,8 @@ def calculate_trade_costs(
             total_sell_turnover += (exit_p * leg_qty)
 
     total_turnover = buy_turnover + total_sell_turnover
-
-    # Select per-exchange transaction charges rate based on underlying symbol
-    sym_clean = (symbol or "NIFTY").upper()
-    exch_code = "BSE" if sym_clean == "SENSEX" else "NSE"
-    exch_rate = CHARGES_CONFIG["EXCHANGE_TURNOVER_RATES"].get(exch_code, CHARGES_CONFIG["EXCHANGE_TURNOVER_RATE"])
+    exch_code = "NSE"
+    exch_rate = CHARGES_CONFIG["EXCHANGE_TURNOVER_RATE"]
 
     brk_per_order = brokerage_per_order if brokerage_per_order is not None else CHARGES_CONFIG["BROKERAGE_PER_ORDER"]
     total_brokerage = order_count * brk_per_order

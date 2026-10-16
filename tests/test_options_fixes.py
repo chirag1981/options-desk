@@ -48,17 +48,13 @@ class TestOptionsEngineFixes(unittest.TestCase):
     def setUp(self):
         init_signal_db()
 
-    def test_per_symbol_bias_isolation(self):
-        """Test that NIFTY and BANKNIFTY maintain separate, isolated bias states."""
+    def test_nifty_bias_state_tracking(self):
+        """Test that NIFTY maintains persistent, thread-safe bias state."""
         nifty_state = get_symbol_bias_state("NIFTY")
-        bank_state = get_symbol_bias_state("BANKNIFTY")
-
         nifty_state["last_bias"] = "BULLISH"
-        bank_state["last_bias"] = "BEARISH"
 
         self.assertEqual(get_symbol_bias_state("NIFTY")["last_bias"], "BULLISH")
-        self.assertEqual(get_symbol_bias_state("BANKNIFTY")["last_bias"], "BEARISH")
-        self.assertNotEqual(get_symbol_bias_state("NIFTY"), get_symbol_bias_state("BANKNIFTY"))
+        self.assertIn("consecutive_confirmations", get_symbol_bias_state("NIFTY"))
 
     def test_fail_closed_iv_gate(self):
         """Test that IV gate allows trade when IV is unavailable without blocking."""

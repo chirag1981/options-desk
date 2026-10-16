@@ -27,7 +27,6 @@ class TestOptionsIntegrityAndPersistence(unittest.TestCase):
     def setUp(self):
         init_signal_db()
         reset_pending_entry_confirmation("NIFTY")
-        reset_pending_entry_confirmation("BANKNIFTY")
 
     def test_data_unavailable_fails_closed(self):
         """1. When data_status is DATA_UNAVAILABLE or chain is empty, engine must fail closed and return WAIT."""
@@ -102,7 +101,7 @@ class TestOptionsIntegrityAndPersistence(unittest.TestCase):
 
     def test_confirmation_reset_on_failure_or_flip(self):
         """4. If any gate fails (WAIT) or opposite side appears (PE after CE), confirmation resets."""
-        symbol = "BANKNIFTY"
+        symbol = "NIFTY"
         req_confs = 2
 
         # Cycle 1: CE passes -> count = 1
@@ -128,7 +127,7 @@ class TestOptionsIntegrityAndPersistence(unittest.TestCase):
     def test_telemetry_confirmation_logging_in_decision_log(self):
         """5. Telemetry must store candidate_side, confirmation_count, required_confirmations in decision_log and raw_values_json."""
         payload = {
-            "symbol": "FINNIFTY",
+            "symbol": "NIFTY",
             "spot_price": 24500.0,
             "spot_change_pct": 0.45,
             "atm_strike": 24500.0,

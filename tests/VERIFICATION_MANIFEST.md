@@ -38,5 +38,5 @@ This registry documents the core business rules, expected behaviors, inputs, and
 
 | Rule ID | Description | Enforced In | Test Coverage |
 | :--- | :--- | :--- | :--- |
-| **ACCT-01** | **Symbol-Specific Fee Models:** NIFTY uses NSE turnover fee (0.05%) and lot size 25. SENSEX uses BSE turnover fee (0.0325%) and lot size 20. | `options_replay_backtest.py`<br>`trade_analyzer_agent.py` | `tests/test_execution_realism_and_costs.py` |
+| **ACCT-01** | **Statutory Fee Models:** NIFTY uses statutory NSE turnover fee (0.035%), STT (0.15%), stamp duty, SEBI fees, and GST with configurable brokerage. | `options_replay_backtest.py`<br>`trade_analyzer_agent.py` | `tests/test_execution_realism_and_costs.py` |
 | **ACCT-02** | **Partial Exit Multi-Leg Accounting:** Multi-lot trades book whole lots at T1 (e.g. 1 of 2 lots), moving remaining SL to breakeven. Dynamic columns `partial_exit_lots`, `partial_exit_price`, `partial_exit_time`, and `t1_hit_at` permanently preserve execution history. | `options_signal_service.py`<br>`trade_analyzer_agent.py` | `tests/test_p0_p1_p2_p3_fixes.py`<br>`tests/test_trade_analyzer_agent.py` |

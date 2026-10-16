@@ -1,6 +1,6 @@
 # 📊 Options Desk — Institutional-Grade Options Analytics & Paper Trading Journal
 
-A high-performance, real-time Options Analytical Terminal and Automated Paper Trading Journal designed for Indian benchmark indices (**NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX**) powered by live FYERS API v3 market data.
+A high-performance, real-time Options Analytical Terminal and Automated Paper Trading Journal designed for **NIFTY 50** options powered by live FYERS API v3 market data.
 
 ---
 

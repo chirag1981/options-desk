@@ -433,6 +433,10 @@ body.desk-body {
     border-top: 2.5px solid var(--bullish-green);
 }
 
+.decision-grid .card-barriers {
+    border-top: 2.5px solid var(--gold-primary);
+}
+
 .card-header {
     display: flex;
     align-items: center;
@@ -462,11 +466,234 @@ body.desk-body {
     color: var(--text-primary);
 }
 
-/* Decision Grid (3 Columns) */
+/* Decision Grid (4 Columns on Desktop) */
 .decision-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1.1fr 1fr 1.15fr 0.98fr;
     gap: 0.85rem;
+}
+
+@media (max-width: 1360px) {
+    .decision-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+    .decision-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   CARD 4: Nearest S & R Barriers (Writer Positioning & Flow)
+   ========================================================================== */
+.barrier-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #ffffff;
+    border: 1px solid var(--border-subtle);
+    padding: 0.18rem 0.5rem;
+    border-radius: var(--radius-full);
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(60, 40, 20, 0.04);
+}
+
+.barriers-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding-top: 0.2rem;
+}
+
+.barrier-item {
+    background: linear-gradient(180deg, #ffffff 0%, #faf8f5 100%);
+    border: 1px solid rgba(220, 212, 198, 0.85);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    box-shadow: inset 0 1px 0 #ffffff, 0 1px 3px rgba(60, 40, 20, 0.03);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.barrier-item:hover {
+    box-shadow: inset 0 1px 0 #ffffff, 0 3px 6px rgba(60, 40, 20, 0.06);
+}
+
+.barrier-item.barrier-res {
+    border-left: 3.5px solid var(--bearish-red);
+}
+
+.barrier-item.barrier-sup {
+    border-left: 3.5px solid var(--bullish-green);
+}
+
+.barrier-meta-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.barrier-tag {
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    padding: 0.12rem 0.42rem;
+    border-radius: 4px;
+}
+
+.barrier-tag.res-tag {
+    background: var(--bearish-surface);
+    color: var(--bearish-red);
+    border: 1px solid var(--bearish-border);
+}
+
+.barrier-tag.sup-tag {
+    background: var(--bullish-surface);
+    color: var(--bullish-green);
+    border: 1px solid var(--bullish-border);
+}
+
+.barrier-dist {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.barrier-main-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.barrier-strike-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+}
+
+.barrier-strike-num {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+.barrier-strike-type {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: var(--text-muted);
+}
+
+.barrier-arrow-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 50%;
+    font-size: 1.15rem;
+    font-weight: 900;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 4px rgba(60, 40, 20, 0.08);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.barrier-arrow-badge:hover {
+    transform: scale(1.08);
+}
+
+.barrier-arrow-badge.arrow-up-green {
+    background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+    color: var(--bullish-green);
+    border: 1.5px solid var(--bullish-border);
+    box-shadow: inset 0 1px 0 #ffffff, 0 2px 6px rgba(4, 120, 87, 0.15);
+}
+
+.barrier-arrow-badge.arrow-down-red {
+    background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+    color: var(--bearish-red);
+    border: 1.5px solid var(--bearish-border);
+    box-shadow: inset 0 1px 0 #ffffff, 0 2px 6px rgba(185, 28, 28, 0.15);
+}
+
+.barrier-arrow-badge.arrow-up-amber {
+    background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+    color: var(--gold-primary);
+    border: 1.5px solid var(--neutral-border);
+    box-shadow: inset 0 1px 0 #ffffff, 0 2px 6px rgba(180, 83, 9, 0.15);
+}
+
+.barrier-arrow-badge.arrow-neutral {
+    background: #f5f5f5;
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+}
+
+.barrier-arrow-icon {
+    line-height: 1;
+}
+
+.barrier-sub-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.68rem;
+    padding-top: 0.25rem;
+    border-top: 1px dashed rgba(220, 212, 198, 0.6);
+}
+
+.barrier-status-text {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.barrier-chg-val {
+    font-weight: 800;
+    color: var(--text-primary);
+}
+
+.barrier-spot-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    margin: 0.1rem 0;
+}
+
+.spot-divider-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border-subtle);
+}
+
+.spot-divider-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #ffffff;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.68rem;
+    box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px rgba(60, 40, 20, 0.04);
+}
+
+.spot-divider-lbl {
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+}
+
+.spot-divider-val {
+    font-weight: 800;
+    color: var(--gold-dark);
 }
 
 /* CARD 1: Market Bias (Compact) */

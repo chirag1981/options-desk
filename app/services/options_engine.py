@@ -1181,6 +1181,16 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                 "dist_to_s1": None,
                 "dist_to_r1": None,
                 "atm_tick_pct": None,
+                "nearest_barriers": {
+                    "support": {"strike": None, "type": "PE", "oi": 0, "oi_formatted": "--", "change_oi": 0, "change_formatted": "--", "arrow": "―", "arrow_direction": "neutral", "arrow_class": "arrow-flat", "trend": "FLAT", "status": "Unavailable", "ltp": 0.0, "dist_pts": 0.0},
+                    "resistance": {"strike": None, "type": "CE", "oi": 0, "oi_formatted": "--", "change_oi": 0, "change_formatted": "--", "arrow": "―", "arrow_direction": "neutral", "arrow_class": "arrow-flat", "trend": "FLAT", "status": "Unavailable", "ltp": 0.0, "dist_pts": 0.0},
+                    "spot_price": spot,
+                },
+            },
+            "nearest_barriers": {
+                "support": {"strike": None, "type": "PE", "oi": 0, "oi_formatted": "--", "change_oi": 0, "change_formatted": "--", "arrow": "―", "arrow_direction": "neutral", "arrow_class": "arrow-flat", "trend": "FLAT", "status": "Unavailable", "ltp": 0.0, "dist_pts": 0.0},
+                "resistance": {"strike": None, "type": "CE", "oi": 0, "oi_formatted": "--", "change_oi": 0, "change_formatted": "--", "arrow": "―", "arrow_direction": "neutral", "arrow_class": "arrow-flat", "trend": "FLAT", "status": "Unavailable", "ltp": 0.0, "dist_pts": 0.0},
+                "spot_price": spot,
             },
             "option_buying": {
                 "decision": "WAIT",
@@ -1598,6 +1608,70 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
 
     breakout_level = r1
     breakdown_level = s1
+
+    # Dynamic Nearest Support & Resistance Barriers relative to live spot price
+    res_candidates = [r for r in enriched_chain if r["strike"] > (spot + 0.5)]
+    sup_candidates = [r for r in enriched_chain if r["strike"] < (spot - 0.5)]
+
+    def _bar_res_score(r):
+        dist = max(0.0, r["strike"] - spot)
+        proximity = 1.0 / (1.0 + (dist / (step * 2.5)))
+        writing_bonus = 1.3 if "WRITING" in r.get("ce_activity", "") else 1.0
+        return (r.get("ce_oi", 0) * 0.5 + max(0, r.get("ce_change_oi", 0)) * 0.35 + r.get("ce_volume", 0) * 0.15) * proximity * writing_bonus
+
+    def _bar_sup_score(r):
+        dist = max(0.0, spot - r["strike"])
+        proximity = 1.0 / (1.0 + (dist / (step * 2.5)))
+        writing_bonus = 1.3 if "WRITING" in r.get("pe_activity", "") else 1.0
+        return (r.get("pe_oi", 0) * 0.5 + max(0, r.get("pe_change_oi", 0)) * 0.35 + r.get("pe_volume", 0) * 0.15) * proximity * writing_bonus
+
+    bar_res_row = max(res_candidates, key=_bar_res_score) if res_candidates else next((r for r in enriched_chain if abs(r["strike"] - r1) < 1.0), {})
+    bar_sup_row = max(sup_candidates, key=_bar_sup_score) if sup_candidates else next((r for r in enriched_chain if abs(r["strike"] - s1) < 1.0), {})
+
+    res_bar_strike = bar_res_row.get("strike", r1)
+    sup_bar_strike = bar_sup_row.get("strike", s1)
+
+    s1_pe_chg = int(bar_sup_row.get("pe_change_oi", 0) or 0)
+    s1_pe_oi = int(bar_sup_row.get("pe_oi", 0) or 0)
+    s1_pe_ltp = float(bar_sup_row.get("pe_ltp", 0.0) or 0.0)
+
+    r1_ce_chg = int(bar_res_row.get("ce_change_oi", 0) or 0)
+    r1_ce_oi = int(bar_res_row.get("ce_oi", 0) or 0)
+    r1_ce_ltp = float(bar_res_row.get("ce_ltp", 0.0) or 0.0)
+
+    nearest_barriers = {
+        "support": {
+            "strike": sup_bar_strike,
+            "type": "PE",
+            "oi": s1_pe_oi,
+            "oi_formatted": format_lakhs(s1_pe_oi),
+            "change_oi": s1_pe_chg,
+            "change_formatted": format_lakhs(s1_pe_chg),
+            "arrow": "▲" if s1_pe_chg > 0 else ("▼" if s1_pe_chg < 0 else "―"),
+            "arrow_direction": "up" if s1_pe_chg > 0 else ("down" if s1_pe_chg < 0 else "neutral"),
+            "arrow_class": "arrow-up-green" if s1_pe_chg > 0 else ("arrow-down-red" if s1_pe_chg < 0 else "arrow-neutral"),
+            "trend": "ADDING" if s1_pe_chg > 0 else ("EXITING" if s1_pe_chg < 0 else "FLAT"),
+            "status": "Put Writers Adding" if s1_pe_chg > 0 else ("Put Writers Exiting" if s1_pe_chg < 0 else "Neutral Flow"),
+            "ltp": s1_pe_ltp,
+            "dist_pts": max(0.0, round(spot - sup_bar_strike, 1)),
+        },
+        "resistance": {
+            "strike": res_bar_strike,
+            "type": "CE",
+            "oi": r1_ce_oi,
+            "oi_formatted": format_lakhs(r1_ce_oi),
+            "change_oi": r1_ce_chg,
+            "change_formatted": format_lakhs(r1_ce_chg),
+            "arrow": "▲" if r1_ce_chg > 0 else ("▼" if r1_ce_chg < 0 else "―"),
+            "arrow_direction": "up" if r1_ce_chg > 0 else ("down" if r1_ce_chg < 0 else "neutral"),
+            "arrow_class": "arrow-up-amber" if r1_ce_chg > 0 else ("arrow-down-green" if r1_ce_chg < 0 else "arrow-neutral"),
+            "trend": "ADDING" if r1_ce_chg > 0 else ("EXITING" if r1_ce_chg < 0 else "FLAT"),
+            "status": "Call Writers Adding" if r1_ce_chg > 0 else ("Call Writers Exiting" if r1_ce_chg < 0 else "Neutral Flow"),
+            "ltp": r1_ce_ltp,
+            "dist_pts": max(0.0, round(res_bar_strike - spot, 1)),
+        },
+        "spot_price": spot,
+    }
 
     # 6. IV & Session Time Evaluation
     atm_row = next((r for r in enriched_chain if abs(r["strike"] - atm_strike) < 1.0), {})
@@ -2398,7 +2472,9 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "dist_to_s1": oi_wall_metrics["dist_to_s1"],
             "dist_to_r1": oi_wall_metrics["dist_to_r1"],
             "atm_tick_pct": oi_wall_metrics["atm_tick_pct"],
+            "nearest_barriers": nearest_barriers,
         },
+        "nearest_barriers": nearest_barriers,
         "option_buying": {
             "decision": decision,  # BUY CE, BUY PE, WAIT
             "action": decision,

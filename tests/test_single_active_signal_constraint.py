@@ -5,7 +5,7 @@ Tests:
 1. Concurrent record_signal calls for the same symbol create exactly one row.
 2. Paper and non-paper trades are both blocked if an active position exists.
 3. Opposite side (PE while CE is open) is blocked while open.
-4. Different symbols (NIFTY, BANKNIFTY, FINNIFTY) are allowed in parallel.
+4. Only 1 active position allowed for NIFTY.
 5. New signal is allowed after position is closed and 15m cooldown has elapsed.
 6. DB migration cleans up pre-existing duplicate open signals, closing them with exit_reason='DUPLICATE_CLEANUP'.
 """
@@ -131,18 +131,16 @@ class TestSingleActiveSignalConstraint(unittest.TestCase):
         pe_attempt = record_signal(dict(self.sample_signal_pe), is_paper_trade=False)
         self.assertIsNone(pe_attempt)
 
-    def test_different_symbols_allowed_in_parallel(self):
-        """Test 4: Different index symbols (NIFTY, BANKNIFTY, SENSEX) can have 1 active position each."""
+    def test_single_active_trade_limit_enforced(self):
+        """Test 4: Only 1 active position allowed for NIFTY."""
         nifty_trade = record_signal(dict(self.sample_signal_ce, symbol="NIFTY"))
-        banknifty_trade = record_signal(dict(self.sample_signal_ce, symbol="BANKNIFTY", contract_name="54500 CE", strike=54500))
-        sensex_trade = record_signal(dict(self.sample_signal_ce, symbol="SENSEX", contract_name="72000 CE", strike=72000))
-
         self.assertIsNotNone(nifty_trade)
-        self.assertIsNotNone(banknifty_trade)
-        self.assertIsNotNone(sensex_trade)
+
+        second_attempt = record_signal(dict(self.sample_signal_ce, symbol="NIFTY", contract_name="23100 CE", strike=23100))
+        self.assertIsNone(second_attempt)
 
         summary = get_signals_summary()
-        self.assertEqual(summary["metrics"]["active_count"], 3)
+        self.assertEqual(summary["metrics"]["active_count"], 1)
 
     def test_new_signal_allowed_after_close_and_cooldown(self):
         """Test 5: New signal is allowed after the trade is closed and cooldown (15m) has passed."""

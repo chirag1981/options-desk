@@ -378,8 +378,8 @@ class TestTradeReviewSystem(unittest.TestCase):
     def test_startup_review_unreviewed_closed_trades(self):
         """Startup job automatically finds and reviews closed trades with no existing review."""
         sig1 = self._insert_test_signal(symbol="NIFTY", status="SL_HIT", exit_reason="SL_HIT", exit_price=85.0, highest_price=101.0, lowest_price=84.0)
-        sig2 = self._insert_test_signal(symbol="BANKNIFTY", status="CLOSED", exit_reason="TARGET_1", exit_price=130.0, highest_price=132.0, lowest_price=98.0)
-        sig_active = self._insert_test_signal(symbol="FINNIFTY", status="ACTIVE")
+        sig2 = self._insert_test_signal(symbol="NIFTY", status="CLOSED", exit_reason="TARGET_1", exit_price=130.0, highest_price=132.0, lowest_price=98.0)
+        sig_active = self._insert_test_signal(symbol="NIFTY", status="ACTIVE")
 
         reviewed_count = review_unreviewed_closed_trades()
         self.assertEqual(reviewed_count, 2)
