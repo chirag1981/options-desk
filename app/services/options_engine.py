@@ -45,6 +45,8 @@ ENGINE_CONFIG = {
     "MARKET_SESSION_START_MINS": int(os.environ.get("MARKET_SESSION_START_MINS", 550)), # 09:10 IST
     "MARKET_SESSION_END_MINS": int(os.environ.get("MARKET_SESSION_END_MINS", 930)),   # 15:30 IST
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
+    "SCHEDULER_ENTRY_CONFIRMATIONS": int(os.environ.get("SCHEDULER_ENTRY_CONFIRMATIONS", 2)),
+    "ENABLE_50_PIVOT_FILTER": True,           # If current price > 50% pivot of day's High-Low, look for CE; if < 50% pivot, look for PE
     "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
     "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
     "POST_EXPANSION_EXHAUSTION_FILTER": True, # Blocks buying options that have expanded > 70% and pulled back > 18% into chop
@@ -69,6 +71,8 @@ ENGINE_CONFIG = {
     }
 }
 
+
+log = logging.getLogger("options_engine")
 
 # Thread-safe, per-symbol persistent bias tracking across refreshes
 _BIAS_LOCK = threading.Lock()
@@ -132,249 +136,56 @@ def update_symbol_bias_state(symbol: str, raw_bias: str, score_diff: float) -> s
         return state["last_bias"]
 
 
-# Thread-safe rolling spot price history for Pullback & Recovery Detection
-_PRICE_HISTORY_LOCK = threading.Lock()
-_SYMBOL_PRICE_HISTORY: dict[str, list[float]] = {}
+def clear_symbol_price_history(symbol: str | None = None) -> None:
+    """Safe no-op / backward-compatibility reset hook for tests and session cleanup."""
+    pass
 
 
-def get_symbol_price_history(symbol: str) -> list[float]:
-    """Retrieves current rolling price history for a symbol."""
-    with _PRICE_HISTORY_LOCK:
-        return list(_SYMBOL_PRICE_HISTORY.get((symbol or "").upper(), []))
-
-
-def clear_symbol_price_history(symbol: str | None = None):
-    """Clears price history for testing or session reset."""
-    with _PRICE_HISTORY_LOCK:
-        if symbol:
-            _SYMBOL_PRICE_HISTORY.pop(symbol.upper(), None)
-        else:
-            _SYMBOL_PRICE_HISTORY.clear()
-
-
-def update_symbol_pullback_recovery(
-    symbol: str,
+def evaluate_market_expansion_and_chop(
     spot: float,
-    is_bullish: bool,
-    is_bearish: bool,
-    custom_history: list[float] | None = None,
-    update_state: bool = False,
-    momentum_signal: str = "NEUTRAL",
-    price_signal: str = "NEUTRAL",
-    volume_signal: str = "NEUTRAL",
-    spot_chg: float = 0.0,
-    strike_step: float = 50.0,
-) -> dict:
+    spot_chg: float,
+    strike_step: float,
+    price_history: list[float] | None = None,
+) -> tuple[bool, bool]:
     """
-    Evaluates whether the current market movement represents a valid PULLBACK_RECOVERY,
-    a FRESH_HIGH_NO_PULLBACK, a FRESH_LOW_NO_PULLBACK, a LOW_EXPANSION_OR_CHOP condition,
-    or a PULLBACK_IN_PROGRESS.
-    
-    Anti-Chase Guard & Market Expansion:
-    - In a bullish trend: If price is at a fresh peak/high without a preceding pullback dip,
-      entry is blocked (FRESH_HIGH_NO_PULLBACK).
-    - In a bearish trend: If price is at a fresh trough/low without a preceding rebound,
-      entry is blocked (FRESH_LOW_NO_PULLBACK).
-    - Recovery requires:
-        1. Meaningful pullback / rebound detected.
-        2. Price actively turning back in the trend direction with follow-through (not just spot > trough).
-        3. Market Expansion confirmed (not compressed/choppy range or frequent direction reversals).
-        4. Momentum and Price confirmed in the trend direction.
+    Evaluates whether the market is actively expanding or trapped in low-expansion / sideways chop.
+    Returns: (expansion_confirmed: bool, is_choppy: bool)
     """
-    sym = (symbol or "DEFAULT").upper()
-    with _PRICE_HISTORY_LOCK:
-        if custom_history is not None:
-            hist = list(custom_history)
-        else:
-            if sym not in _SYMBOL_PRICE_HISTORY:
-                _SYMBOL_PRICE_HISTORY[sym] = []
-            hist = _SYMBOL_PRICE_HISTORY[sym]
-            if update_state or not hist:
-                hist.append(spot)
-                if len(hist) > 15:
-                    hist.pop(0)
+    mom_threshold = float(ENGINE_CONFIG.get("MOMENTUM_CHANGE_THRESHOLD", 0.05))
+    if not price_history or len(price_history) < 3:
+        is_expanding = abs(spot_chg) >= mom_threshold
+        return is_expanding, not is_expanding
 
-        pullback_occurred = False
-        recovery_confirmed = False
-        expansion_confirmed = True
-        is_choppy = False
-        anti_chase = "BLOCK"
-        setup_type = "NORMAL_CONTINUATION"
-        reason = ""
+    hist = list(price_history)
+    range_pts = max(hist) - min(hist)
+    avg_spot = sum(hist) / len(hist) if hist else spot
+    range_pct = (range_pts / avg_spot * 100) if avg_spot > 0 else 0.0
 
-        # Evaluate Chop and Market Expansion on price history
-        if len(hist) >= 3:
-            range_pts = max(hist) - min(hist)
-            avg_spot = sum(hist) / len(hist) if hist else spot
-            range_pct = (range_pts / avg_spot * 100) if avg_spot > 0 else 0.0
-            mom_threshold = ENGINE_CONFIG.get("MOMENTUM_CHANGE_THRESHOLD", 0.05)
+    deltas = [hist[i] - hist[i - 1] for i in range(1, len(hist))]
+    non_zero_deltas = [d for d in deltas if abs(d) >= 1e-4]
+    sign_flips = sum(1 for i in range(1, len(non_zero_deltas)) if (non_zero_deltas[i] > 0) != (non_zero_deltas[i - 1] > 0))
 
-            # Reversals / oscillation
-            deltas = [hist[i] - hist[i - 1] for i in range(1, len(hist))]
-            non_zero_deltas = [d for d in deltas if abs(d) >= 1e-4]
-            sign_flips = sum(1 for i in range(1, len(non_zero_deltas)) if (non_zero_deltas[i] > 0) != (non_zero_deltas[i - 1] > 0))
+    is_choppy = False
+    expansion_confirmed = True
 
-            # Narrow range / compressed price action with weak momentum
-            if (range_pct < 0.04 or range_pts < min(1.5, strike_step * 0.03)) and abs(spot_chg) < mom_threshold:
-                is_choppy = True
-                expansion_confirmed = False
+    # Compressed price action with weak momentum
+    if (range_pct < 0.04 or range_pts < min(1.5, strike_step * 0.03)) and abs(spot_chg) < mom_threshold:
+        is_choppy = True
+        expansion_confirmed = False
 
-            # Frequent direction reversals (alternating chop)
-            if len(non_zero_deltas) >= 3:
-                if sign_flips >= len(non_zero_deltas) - 1 and (abs(spot_chg) < mom_threshold * 2 or range_pct < 0.08):
-                    is_choppy = True
-                    expansion_confirmed = False
-                elif sign_flips >= 3 and abs(hist[-1] - hist[0]) < (range_pts * 0.3):
-                    is_choppy = True
-                    expansion_confirmed = False
+    # Frequent sign flips / alternating chop
+    if len(non_zero_deltas) >= 3:
+        if sign_flips >= len(non_zero_deltas) - 1 and (abs(spot_chg) < mom_threshold * 2 or range_pct < 0.08):
+            is_choppy = True
+            expansion_confirmed = False
+        elif sign_flips >= 3 and abs(hist[-1] - hist[0]) < (range_pts * 0.3):
+            is_choppy = True
+            expansion_confirmed = False
 
-            # Weak momentum
-            if abs(spot_chg) < mom_threshold:
-                expansion_confirmed = False
+    if abs(spot_chg) < mom_threshold:
+        expansion_confirmed = False
 
-            if is_choppy:
-                setup_type = "LOW_EXPANSION_OR_CHOP"
-                reason = "LOW_EXPANSION_OR_CHOP"
-
-        if len(hist) >= 3:
-            if is_bullish:
-                peak = max(hist)
-                peak_idx = hist.index(peak)
-                # Check if current spot is at fresh high with no preceding dip after a peak
-                if peak_idx == len(hist) - 1:
-                    pullback_occurred = False
-                    recovery_confirmed = False
-                    anti_chase = "BLOCK"
-                    setup_type = "FRESH_HIGH_NO_PULLBACK"
-                    reason = "FRESH_HIGH_NO_PULLBACK"
-                else:
-                    post_peak = hist[peak_idx:]
-                    trough = min(post_peak)
-                    trough_idx = hist.index(trough, peak_idx)
-                    
-                    if trough < peak:
-                        pullback_occurred = True
-                    
-                    # Meaningful pullback and recovery with follow-through
-                    is_moving_up = (spot > trough and (trough_idx < len(hist) - 1 and spot >= hist[-2]))
-                    has_follow_through = (
-                        is_moving_up
-                        and (spot - trough) >= min(0.5, (peak - trough) * 0.15)
-                        and momentum_signal == "BULLISH"
-                        and price_signal == "BULLISH"
-                    )
-
-                    if pullback_occurred and has_follow_through:
-                        if is_choppy or not expansion_confirmed:
-                            recovery_confirmed = False
-                            anti_chase = "BLOCK"
-                            setup_type = "LOW_EXPANSION_OR_CHOP"
-                            reason = "LOW_EXPANSION_OR_CHOP"
-                        else:
-                            recovery_confirmed = True
-                            anti_chase = "PASS"
-                            setup_type = "PULLBACK_RECOVERY"
-                            reason = "PULLBACK_RECOVERY"
-                    else:
-                        recovery_confirmed = False
-                        anti_chase = "BLOCK"
-                        if not pullback_occurred:
-                            setup_type = "FRESH_HIGH_NO_PULLBACK"
-                            reason = "FRESH_HIGH_NO_PULLBACK"
-                        elif is_choppy:
-                            setup_type = "LOW_EXPANSION_OR_CHOP"
-                            reason = "LOW_EXPANSION_OR_CHOP"
-                        else:
-                            setup_type = "PULLBACK_IN_PROGRESS"
-                            reason = "PULLBACK_IN_PROGRESS"
-
-            elif is_bearish:
-                trough = min(hist)
-                trough_idx = hist.index(trough)
-                if trough_idx == len(hist) - 1:
-                    pullback_occurred = False
-                    recovery_confirmed = False
-                    anti_chase = "BLOCK"
-                    setup_type = "FRESH_LOW_NO_PULLBACK"
-                    reason = "FRESH_LOW_NO_PULLBACK"
-                else:
-                    post_trough = hist[trough_idx:]
-                    bounce = max(post_trough)
-                    bounce_idx = hist.index(bounce, trough_idx)
-                    
-                    if bounce > trough:
-                        pullback_occurred = True
-                    
-                    # Meaningful rebound and downward recovery with follow-through
-                    is_moving_down = (spot < bounce and (bounce_idx < len(hist) - 1 and spot <= hist[-2]))
-                    has_follow_through = (
-                        is_moving_down
-                        and (bounce - spot) >= min(0.5, (bounce - trough) * 0.15)
-                        and momentum_signal == "BEARISH"
-                        and price_signal == "BEARISH"
-                    )
-
-                    if pullback_occurred and has_follow_through:
-                        if is_choppy or not expansion_confirmed:
-                            recovery_confirmed = False
-                            anti_chase = "BLOCK"
-                            setup_type = "LOW_EXPANSION_OR_CHOP"
-                            reason = "LOW_EXPANSION_OR_CHOP"
-                        else:
-                            recovery_confirmed = True
-                            anti_chase = "PASS"
-                            setup_type = "PULLBACK_RECOVERY"
-                            reason = "PULLBACK_RECOVERY"
-                    else:
-                        recovery_confirmed = False
-                        anti_chase = "BLOCK"
-                        if not pullback_occurred:
-                            setup_type = "FRESH_LOW_NO_PULLBACK"
-                            reason = "FRESH_LOW_NO_PULLBACK"
-                        elif is_choppy:
-                            setup_type = "LOW_EXPANSION_OR_CHOP"
-                            reason = "LOW_EXPANSION_OR_CHOP"
-                        else:
-                            setup_type = "PULLBACK_IN_PROGRESS"
-                            reason = "PULLBACK_IN_PROGRESS"
-            else:
-                if is_choppy:
-                    setup_type = "LOW_EXPANSION_OR_CHOP"
-                    reason = "LOW_EXPANSION_OR_CHOP"
-                    anti_chase = "BLOCK"
-                else:
-                    setup_type = "NORMAL_CONTINUATION"
-                    anti_chase = "PASS"
-        else:
-            if custom_history is not None:
-                if is_bullish:
-                    setup_type = "FRESH_HIGH_NO_PULLBACK"
-                    reason = "FRESH_HIGH_NO_PULLBACK"
-                    anti_chase = "BLOCK"
-                elif is_bearish:
-                    setup_type = "FRESH_LOW_NO_PULLBACK"
-                    reason = "FRESH_LOW_NO_PULLBACK"
-                    anti_chase = "BLOCK"
-                else:
-                    setup_type = "NORMAL_CONTINUATION"
-                    anti_chase = "PASS"
-            else:
-                pullback_occurred = True
-                recovery_confirmed = True
-                expansion_confirmed = (momentum_signal in ("BULLISH", "BEARISH"))
-                is_choppy = not expansion_confirmed
-                anti_chase = "PASS"
-                setup_type = "PULLBACK_RECOVERY"
-
-        return {
-            "setup_type": setup_type,
-            "pullback_occurred": pullback_occurred,
-            "recovery_confirmed": recovery_confirmed,
-            "expansion_confirmed": expansion_confirmed,
-            "is_choppy": is_choppy,
-            "anti_chase": anti_chase,
-            "reason": reason,
-        }
+    return expansion_confirmed, is_choppy
 
 
 def get_symbol_oi_thresholds(symbol: str) -> dict:
@@ -768,7 +579,7 @@ def compute_morning_trade_bias(
             why_reasons.append(f"Spot (₹{spot:.1f}) is trading above Previous Day High (₹{pdh:.1f}) in breakout territory.")
         else:
             setup_title = "Above CPR Bullish Continuation"
-            trigger_str = f"Buy CE on pullback to CPR Top (₹{cpr_top:.1f}) holding with bounce"
+            trigger_str = f"Buy CE on sustained move above CPR Top (₹{cpr_top:.1f}) with bullish volume"
             target_1 = round(pdh, 1)
             target_2 = round(max(cpr_r1, pdh + step), 1)
             sl_level = round(cpr_bottom, 1)
@@ -798,7 +609,7 @@ def compute_morning_trade_bias(
             why_reasons.append(f"Spot (₹{spot:.1f}) is trading below Previous Day Low (₹{pdl:.1f}) in breakdown territory.")
         else:
             setup_title = "Below CPR Bearish Rejection"
-            trigger_str = f"Buy PE on pullback to CPR Bottom (₹{cpr_bottom:.1f}) facing rejection"
+            trigger_str = f"Buy PE on sustained move below CPR Bottom (₹{cpr_bottom:.1f}) with bearish volume"
             target_1 = round(pdl, 1)
             target_2 = round(min(cpr_s1, pdl - step), 1)
             sl_level = round(cpr_top, 1)
@@ -1129,7 +940,7 @@ def compute_market_vector(
 def analyze_option_desk(market_data: dict, update_state: bool = False, has_active_trade: bool | None = None) -> dict:
     """
     Comprehensive Options Analytical Engine with Selective Option Buying Decision Flow:
-    5 Core Signals (Price, Momentum, OI, Volume, PCR) -> 2/3 Confirmations -> Pullback & Recovery -> Active Trade Check -> BUY CE/BUY PE/WAIT
+    5 Core Signals (Price, Momentum, OI, Volume, PCR) -> 2/3 Confirmations -> Breakout / Market Expansion -> Active Trade Check -> BUY CE/BUY PE/WAIT
     Pure by default: state hysteresis is only updated when update_state=True (e.g. from scheduler cycle).
     """
     spot = float(market_data.get("spot_price", 0.0))
@@ -1755,26 +1566,35 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     bull_confirm_count = sum(1 for s in (oi_signal, volume_signal, pcr_signal) if s == "BULLISH")
     bear_confirm_count = sum(1 for s in (oi_signal, volume_signal, pcr_signal) if s == "BEARISH")
 
+    # 50% Intraday Range Pivot Gate (High & Low of today):
+    # If current price is above 50% pivot level of low and high: Look for CE (Bullish half)
+    # If current price is below 50% pivot level of low and high: Look for PE (Bearish half)
+    today_high = float(market_data.get("high_price") or market_data.get("high") or market_data.get("today_high") or 0.0)
+    today_low = float(market_data.get("low_price") or market_data.get("low") or market_data.get("today_low") or 0.0)
+    has_valid_day_range = (today_high > 0.0 and today_low > 0.0 and today_high > today_low)
+    pivot_50 = round((today_high + today_low) / 2.0, 2) if has_valid_day_range else spot
+    pivot_filter_enabled = ENGINE_CONFIG.get("ENABLE_50_PIVOT_FILTER", True)
+
+    pivot_50_ce_blocked = pivot_filter_enabled and has_valid_day_range and (spot < pivot_50)
+    pivot_50_pe_blocked = pivot_filter_enabled and has_valid_day_range and (spot > pivot_50)
+    pivot_50_msg = (
+        f"50%_PIVOT_BLOCK (Spot {spot:,.1f} is above 50% Pivot {pivot_50:,.1f} [Day L: {today_low:,.1f} | H: {today_high:,.1f}]. Only CE allowed in upper half of day range)."
+        if pivot_50_pe_blocked else
+        f"50%_PIVOT_BLOCK (Spot {spot:,.1f} is below 50% Pivot {pivot_50:,.1f} [Day L: {today_low:,.1f} | H: {today_high:,.1f}]. Only PE allowed in lower half of day range)."
+    )
+
     # OI-Led directional gate: OI MUST agree with direction; price context must not conflict.
     # Price is a sanity check (spot_chg not contradicting); momentum is not counted as an independent vote.
     is_bullish_dir = (oi_signal == "BULLISH" and spot_chg >= 0.0 and bull_confirm_count >= 2)
     is_bearish_dir = (oi_signal == "BEARISH" and spot_chg <= 0.0 and bear_confirm_count >= 2)
 
 
-    # Pullback & Recovery Detection
+    # Market Expansion and Chop Evaluation
     custom_price_hist = market_data.get("price_history")
-    pullback_info = update_symbol_pullback_recovery(
-        symbol, spot, is_bullish_dir, is_bearish_dir,
-        custom_history=custom_price_hist, update_state=update_state,
-        momentum_signal=momentum_signal, price_signal=price_signal,
-        volume_signal=volume_signal, spot_chg=spot_chg, strike_step=step
+    expansion_confirmed, is_choppy = evaluate_market_expansion_and_chop(
+        spot=spot, spot_chg=spot_chg, strike_step=step, price_history=custom_price_hist
     )
-    setup_type = pullback_info["setup_type"]
-    pullback_occurred = pullback_info["pullback_occurred"]
-    recovery_confirmed = pullback_info["recovery_confirmed"]
-    expansion_confirmed = pullback_info.get("expansion_confirmed", True)
-    is_choppy = pullback_info.get("is_choppy", False)
-    anti_chase_status = pullback_info["anti_chase"]
+    setup_type = "TRENDING_BREAKOUT" if is_bullish_dir else ("TRENDING_BREAKDOWN" if is_bearish_dir else "NEUTRAL")
 
     # 8. Preferred Option Contract Selection (ATM or ITM-1)
     ce_candidates = [r for r in enriched_chain if r["strike"] in (atm_strike, atm_strike - step)]
@@ -2041,10 +1861,17 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         else:
             t_oi_desc = f"{'+' if t_oi_pct > 0 else ''}{t_oi_pct}% ({t_oi_dots} dots) — Opposing OI flow"
 
+        pivot_50_ok = (spot >= pivot_50) if is_ce else (spot <= pivot_50) if has_valid_day_range else True
+        pivot_50_desc = (
+            f"Spot {spot:,.1f} {'>=' if is_ce else '<='} 50% Pivot {pivot_50:,.1f} [L: {today_low:,.0f} | H: {today_high:,.0f}]"
+            if has_valid_day_range else "Day range unavailable"
+        )
+
         chk = [
             {"name": "Price Direction", "passed": p_sig, "desc": f"Price is {price_signal}"},
             {"name": "Momentum", "passed": m_sig, "desc": f"Momentum is {momentum_signal}"},
             {"name": "OI Structure", "passed": o_sig, "desc": f"OI is {oi_signal}"},
+            {"name": "50% Range Pivot", "passed": pivot_50_ok, "desc": pivot_50_desc},
             {"name": "Trending OI (&ge;40%, 2+ Dots)", "passed": t_oi_confirmed, "desc": t_oi_desc},
             {"name": "Volume", "passed": v_sig, "desc": f"Volume is {volume_signal}"},
             {"name": "PCR Trend", "passed": pcr_sig, "desc": f"PCR is {pcr_signal} ({pcr})"},
@@ -2056,6 +1883,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "momentum": m_sig,
             "volume": v_sig,
             "oi": o_sig,
+            "pivot_50": pivot_50_ok,
             "trending_oi": t_oi_confirmed,
             "iv_session": iv_ok,
         }
@@ -2151,6 +1979,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: CE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif pivot_50_ce_blocked:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = pivot_50_msg
         elif round_ce_blocked:
             decision = "WAIT"
             setup_score = ce_score
@@ -2167,22 +2003,6 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = ce_exhaustion_msg
-        elif not pullback_occurred:
-            decision = "WAIT"
-            setup_score = ce_score
-            active_checklist = ce_checklist
-            active_trade_plan = ce_trade_plan or {}
-            active_pillar_flags = ce_pillar_flags
-            focus_title = "WAIT"
-            focus_reason = "FRESH_HIGH_NO_PULLBACK"
-        elif not recovery_confirmed:
-            decision = "WAIT"
-            setup_score = ce_score
-            active_checklist = ce_checklist
-            active_trade_plan = ce_trade_plan or {}
-            active_pillar_flags = ce_pillar_flags
-            focus_title = "WAIT"
-            focus_reason = "LOW_EXPANSION_OR_CHOP" if (is_choppy or not expansion_confirmed) else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
         elif is_choppy or not expansion_confirmed:
             decision = "WAIT"
             setup_score = ce_score
@@ -2193,6 +2013,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             focus_reason = "LOW_EXPANSION_OR_CHOP"
         else:
             decision = "BUY CE"
+            setup_type = "TRENDING_BREAKOUT"
             setup_score = max(ce_score, 80)
             active_checklist = ce_checklist
             active_trade_plan = ce_trade_plan
@@ -2208,6 +2029,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = "Option quality gate failed: PE contract quote missing, zero LTP, or bid/ask spread invalid."
+        elif pivot_50_pe_blocked:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = pivot_50_msg
         elif round_pe_blocked:
             decision = "WAIT"
             setup_score = pe_score
@@ -2224,22 +2053,6 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = pe_exhaustion_msg
-        elif not pullback_occurred:
-            decision = "WAIT"
-            setup_score = pe_score
-            active_checklist = pe_checklist
-            active_trade_plan = pe_trade_plan or {}
-            active_pillar_flags = pe_pillar_flags
-            focus_title = "WAIT"
-            focus_reason = "FRESH_LOW_NO_PULLBACK"
-        elif not recovery_confirmed:
-            decision = "WAIT"
-            setup_score = pe_score
-            active_checklist = pe_checklist
-            active_trade_plan = pe_trade_plan or {}
-            active_pillar_flags = pe_pillar_flags
-            focus_title = "WAIT"
-            focus_reason = "LOW_EXPANSION_OR_CHOP" if (is_choppy or not expansion_confirmed) else "PULLBACK_IN_PROGRESS_OR_WEAK_RECOVERY"
         elif is_choppy or not expansion_confirmed:
             decision = "WAIT"
             setup_score = pe_score
@@ -2250,6 +2063,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             focus_reason = "LOW_EXPANSION_OR_CHOP"
         else:
             decision = "BUY PE"
+            setup_type = "TRENDING_BREAKDOWN"
             setup_score = max(pe_score, 80)
             active_checklist = pe_checklist
             active_trade_plan = pe_trade_plan
@@ -2263,7 +2077,11 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         active_trade_plan = (ce_trade_plan if ce_score >= pe_score else pe_trade_plan) or {}
         active_pillar_flags = ce_pillar_flags if ce_score >= pe_score else pe_pillar_flags
         focus_title = "WAIT"
-        if is_choppy or not expansion_confirmed:
+        if pivot_50_ce_blocked and (price_signal == "BULLISH" or ce_score >= pe_score):
+            focus_reason = pivot_50_msg
+        elif pivot_50_pe_blocked and (price_signal == "BEARISH" or pe_score > ce_score):
+            focus_reason = pivot_50_msg
+        elif is_choppy or not expansion_confirmed:
             focus_reason = "LOW_EXPANSION_OR_CHOP"
         elif price_signal == "BULLISH" and oi_signal != "BULLISH":
             if bull_confirm_count < 2:
@@ -2289,10 +2107,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
     market_bias_str = "BULLISH" if is_bullish_dir else ("BEARISH" if is_bearish_dir else "NEUTRAL")
     confirm_display = f"{bull_confirm_count if is_bullish_dir else (bear_confirm_count if is_bearish_dir else max(bull_confirm_count, bear_confirm_count))}/3"
 
-    pullback_str = "YES" if pullback_occurred else "NO"
-    recovery_str = "YES" if recovery_confirmed else "NO"
     expansion_str = "YES" if expansion_confirmed else "NO"
-    antichase_str = "PASS" if anti_chase_status == "ALLOW" else "BLOCK"
     window_str = "PASS" if (in_trade_window and iv_safe) else "FAIL"
     bidask_str = "VALID" if (active_trade_plan and active_trade_plan.get("bid_at_entry") is not None) else "INVALID/MISSING"
     spread_str = f"{active_trade_plan.get('spread_paid', 0.0)} pts ({active_trade_plan.get('bid_ask_spread_pct', 0.0)}%)" if active_trade_plan else "N/A"
@@ -2305,10 +2120,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         f"Volume      : {volume_signal}\n"
         f"PCR         : {pcr_signal}\n\n"
         f"Confirmation: {confirm_display}\n\n"
-        f"Pullback    : {pullback_str}\n"
-        f"Recovery    : {recovery_str}\n"
-        f"Expansion   : {expansion_str}\n"
-        f"Anti-Chase  : {antichase_str}\n\n"
+        f"Expansion   : {expansion_str}\n\n"
         f"Active Trade: {active_trade_str}\n"
         f"Window      : {window_str}\n"
         f"Bid/Ask     : {bidask_str}\n"
@@ -2372,6 +2184,12 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         "dte": dte,
         "bid_ask_spread_pct": active_trade_plan.get("bid_ask_spread_pct", 0.0) if active_trade_plan else 0.0,
         "spread_paid": active_trade_plan.get("spread_paid", 0.0) if active_trade_plan else 0.0,
+        "today_high": today_high,
+        "today_low": today_low,
+        "pivot_50": pivot_50,
+        "spot_vs_pivot_50": "ABOVE" if spot >= pivot_50 else "BELOW",
+        "range_half": "UPPER (CE Favored)" if spot >= pivot_50 else "LOWER (PE Favored)",
+
     }
 
     is_iv_missing = bool(avg_atm_iv is None or avg_atm_iv <= 0.01)
@@ -2462,6 +2280,10 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "support_2": s2,
             "breakout_level": breakout_level,
             "breakdown_level": breakdown_level,
+            "pivot_50": pivot_50,
+            "day_high": today_high,
+            "day_low": today_low,
+            "range_half": "UPPER (CE Favored)" if spot >= pivot_50 else "LOWER (PE Favored)",
             "spot_diff": spot_diff,
             "market_vector": market_vector,
             "is_available": oi_wall_metrics["is_available"],

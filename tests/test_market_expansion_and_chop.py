@@ -96,7 +96,7 @@ def test_1_strong_directional_move_at_12_15_generates_trade(monkeypatch):
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
     assert opt["decision"] == "BUY CE"
-    assert opt["setup_type"] == "PULLBACK_RECOVERY"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
 def test_2_sideways_choppy_market_at_10_30_generates_wait(monkeypatch):
@@ -127,8 +127,8 @@ def test_2_sideways_choppy_market_at_10_30_generates_wait(monkeypatch):
     assert opt["reason"] == "LOW_EXPANSION_OR_CHOP"
 
 
-def test_3_pullback_recovery_strong_expansion_generates_buy(monkeypatch):
-    """3. Pullback + recovery + strong expansion can generate BUY."""
+def test_3_strong_expansion_generates_buy(monkeypatch):
+    """3. Strong market expansion generates BUY CE."""
     t_1030 = datetime(2026, 10, 5, 10, 30, tzinfo=IST)
     orig_filter = options_engine.evaluate_iv_and_time_filter
     monkeypatch.setattr(
@@ -137,7 +137,7 @@ def test_3_pullback_recovery_strong_expansion_generates_buy(monkeypatch):
         lambda atm_iv, now_dt=None: orig_filter(atm_iv, t_1030),
     )
 
-    # Bullish: new high, pullback to trough, followed by strong upward recovery & follow-through
+    # Bullish: strong upward expansion & follow-through
     bullish_expansion_history = [100.0, 108.0, 115.0, 110.0, 112.5, 114.0]
     data = _make_chain_data(
         spot=114.0,
@@ -152,11 +152,11 @@ def test_3_pullback_recovery_strong_expansion_generates_buy(monkeypatch):
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
     assert opt["decision"] == "BUY CE"
-    assert opt["setup_type"] == "PULLBACK_RECOVERY"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
-def test_4_fresh_high_low_without_pullback_generates_wait(monkeypatch):
-    """4. Fresh high/low without pullback generates WAIT."""
+def test_4_fresh_high_breakout_generates_buy_ce(monkeypatch):
+    """4. Fresh high breakout with strong expansion generates BUY CE."""
     t_1030 = datetime(2026, 10, 5, 10, 30, tzinfo=IST)
     orig_filter = options_engine.evaluate_iv_and_time_filter
     monkeypatch.setattr(
@@ -165,7 +165,7 @@ def test_4_fresh_high_low_without_pullback_generates_wait(monkeypatch):
         lambda atm_iv, now_dt=None: orig_filter(atm_iv, t_1030),
     )
 
-    # Monotonic run to fresh high without pullback
+    # Monotonic run to fresh high with strong momentum
     fresh_high_history = [100.0, 105.0, 110.0, 115.0]
     data = _make_chain_data(
         spot=115.0,
@@ -179,8 +179,8 @@ def test_4_fresh_high_low_without_pullback_generates_wait(monkeypatch):
     )
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
-    assert opt["decision"] == "WAIT"
-    assert opt["reason"] == "FRESH_HIGH_NO_PULLBACK"
+    assert opt["decision"] == "BUY CE"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
 def test_5_existing_active_trade_prevents_entry(monkeypatch):

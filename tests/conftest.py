@@ -35,6 +35,7 @@ def _assert_isolated_db():
     from app.services import options_engine
     with options_engine._BIAS_LOCK:
         options_engine._BIAS_STATES.clear()
+    options_engine.clear_symbol_price_history()
     from app.services import options_scheduler
     with options_scheduler._CONFIRMATION_LOCK:
         options_scheduler._PENDING_ENTRY_CONFIRMATIONS.clear()

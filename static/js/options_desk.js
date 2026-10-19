@@ -1234,7 +1234,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 outcomeText = "🎯 TARGET 2 HIT";
             } else if (sig.status === "TSL_HIT") {
                 outcomeClass = "status-tag-tsl";
-                outcomeText = "🛡️ T1 BOOKED & TSL";
+                const reachedT2 = (sig.highest_price || 0) >= (sig.target_2 || Infinity);
+                const reachedT1 = (sig.highest_price || 0) >= (sig.target_1 || Infinity) || Boolean(sig.t1_hit_at);
+                if (reachedT2) {
+                    outcomeText = "🎯 T2 ACHIEVED & TSL";
+                } else if (reachedT1) {
+                    outcomeText = "🛡️ T1 ACHIEVED & TSL";
+                } else if ((sig.points_pnl || 0) >= 0) {
+                    outcomeText = "🛡️ TRAILED BE / TSL";
+                } else {
+                    outcomeText = "🛡️ TRAILING SL HIT";
+                }
             } else if (sig.status === "TARGET_1_HIT") {
                 outcomeClass = "status-tag-t1";
                 outcomeText = "🎯 TARGET 1 HIT";

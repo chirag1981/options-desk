@@ -104,21 +104,21 @@ class TestPaperStrategyScenarios(unittest.TestCase):
             ],
         }
 
-    def test_scenario_1_fresh_bullish_high_no_pullback(self):
-        """Scenario 1: Fresh intraday high with strictly ascending prices (no pullback) -> WAIT."""
+    def test_scenario_1_fresh_bullish_high_breakout(self):
+        """Scenario 1: Fresh intraday high with strong expansion and confirmations -> BUY CE."""
         data = self._base_bullish_chain()
         data["price_history"] = [22450.0, 22480.0, 22520.0, 22550.0]  # Monotonic rise
         res = analyze_option_desk(data, has_active_trade=False)
-        self.assertEqual(res["option_buying"]["decision"], "WAIT")
-        self.assertEqual(res["option_buying"]["decision_reason"], "FRESH_HIGH_NO_PULLBACK")
+        self.assertEqual(res["option_buying"]["decision"], "BUY CE")
+        self.assertEqual(res["option_buying"]["setup_type"], "TRENDING_BREAKOUT")
 
-    def test_scenario_2_fresh_bearish_low_no_pullback(self):
-        """Scenario 2: Fresh intraday low with strictly descending prices (no rebound) -> WAIT."""
+    def test_scenario_2_fresh_bearish_low_breakdown(self):
+        """Scenario 2: Fresh intraday low with strong expansion and confirmations -> BUY PE."""
         data = self._base_bearish_chain()
         data["price_history"] = [22650.0, 22620.0, 22580.0, 22550.0]  # Monotonic fall
         res = analyze_option_desk(data, has_active_trade=False)
-        self.assertEqual(res["option_buying"]["decision"], "WAIT")
-        self.assertEqual(res["option_buying"]["decision_reason"], "FRESH_LOW_NO_PULLBACK")
+        self.assertEqual(res["option_buying"]["decision"], "BUY PE")
+        self.assertEqual(res["option_buying"]["setup_type"], "TRENDING_BREAKDOWN")
 
     def test_scenario_3_bullish_pullback_recovery_expansion(self):
         """Scenario 3: Bullish pullback + confirmed recovery + 2/3 confirmation -> BUY CE."""

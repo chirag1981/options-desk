@@ -70,7 +70,7 @@ def get_pending_entry_confirmation(symbol: str) -> dict:
 
 def update_pending_entry_confirmation(
     symbol: str, candidate_side: str | None, req_confs: int = 2, now_dt: datetime | None = None
-) -> tuple[int, bool, float | None]:
+) -> tuple[int, bool]:
     """
     Updates consecutive entry confirmation state for symbol.
     Returns (confirmation_count, is_fully_confirmed, entry_latency_sec).
@@ -201,7 +201,7 @@ def _refresh_worker():
         log.warning("Another options scheduler process is already running. Exiting worker thread.")
         return
 
-    log.info("Options Desk scheduler started (Asia/Kolkata timezone).")
+    log.info("Options Desk scheduler started (Asia/Kolkata timezone). Paper Trading Only, Live Orders Strictly Disabled.")
 
     # Run startup review of any unreviewed closed trades
     try:
@@ -287,7 +287,7 @@ def _refresh_worker():
                         data_quality = opt_buying.get("data_quality", {})
                         market_bias = analysis.get("market_bias", {})
 
-                        req_confs = ENGINE_CONFIG.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 2)
+                        req_confs = ENGINE_CONFIG.get("SCHEDULER_ENTRY_CONFIRMATIONS", 2)
 
                         # Evaluate final entry persistence:
                         # Candidate BUY must pass all mandatory gates for CONSECUTIVE_CONFIRMATIONS_REQUIRED cycles

@@ -2281,7 +2281,7 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
             if t1_eval_quote >= t1 and curr_status == "ACTIVE":
                 new_status = "TARGET_1_HIT"
                 curr_status = "TARGET_1_HIT"
-                trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
+                trailed_sl = max(trailed_sl, round(t1, 2))
                 stored_t1_hit_at = now_str
                 if lots >= 2:
                     stored_partial_lots = lots // 2
@@ -2289,9 +2289,13 @@ def update_active_signals(market_data_cache: dict | None = None, now_dt: datetim
                     stored_partial_time = now_str
 
             if curr_status == "TARGET_1_HIT":
-                trailed_sl = max(trailed_sl, round(entry + (t1 - entry) * 0.5, 2))
+                trailed_sl = max(trailed_sl, round(t1, 2))
                 if highest > t1:
                     trailed_sl = max(trailed_sl, round(t1 + 0.5 * (highest - t1), 2))
+                if highest >= t2:
+                    trailed_sl = max(trailed_sl, round(t2, 2))
+                if highest > t2:
+                    trailed_sl = max(trailed_sl, round(t2 + 0.5 * (highest - t2), 2))
 
         max_allowed_stagnation = 15.0 if time_now >= dtime(13, 0) else 30.0
 

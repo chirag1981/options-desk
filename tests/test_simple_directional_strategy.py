@@ -96,9 +96,8 @@ def _make_chain(
 # SECTION 16 EXACT TEST CASES
 # ==============================================================================
 
-def test_section16_case1_fresh_bullish_high_blocks_chase():
-    """Test 1: Price bullish, Mom bullish, OI/Vol/PCR bullish, New intraday high, No pullback -> WAIT, FRESH_HIGH_NO_PULLBACK."""
-    # 100 -> 105 -> 110 -> 115 (monotonic fresh high, no pullback)
+def test_section16_case1_fresh_bullish_breakout_generates_buy_ce():
+    """Test 1: Bullish Price, Momentum, OI, Volume, PCR with fresh breakout -> BUY CE (TRENDING_BREAKOUT)."""
     fresh_high_history = [100.0, 105.0, 110.0, 115.0]
     data = _make_chain(
         spot=115.0,
@@ -112,14 +111,12 @@ def test_section16_case1_fresh_bullish_high_blocks_chase():
     )
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
-    assert opt["decision"] == "WAIT"
-    assert opt["reason"] == "FRESH_HIGH_NO_PULLBACK"
-    assert opt["setup_type"] == "FRESH_HIGH_NO_PULLBACK"
+    assert opt["decision"] == "BUY CE"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
-def test_section16_case2_bullish_pullback_and_recovery_generates_buy_ce():
-    """Test 2: Bullish trend, New high, Pullback, Recovery, Price+Mom bullish, 2/3 confirmations, No active trade -> BUY CE."""
-    # 100 -> 105 -> 110 -> 115 -> 112 -> 109 -> 111 -> 113 (pullback to 109, recovering to 113)
+def test_section16_case2_bullish_breakout_generates_buy_ce():
+    """Test 2: Bullish trend, Momentum bullish, 2/3 confirmations, No active trade -> BUY CE."""
     recovery_history = [100.0, 105.0, 110.0, 115.0, 112.0, 109.0, 111.0, 113.0]
     data = _make_chain(
         spot=113.0,
@@ -134,7 +131,7 @@ def test_section16_case2_bullish_pullback_and_recovery_generates_buy_ce():
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
     assert opt["decision"] == "BUY CE"
-    assert opt["setup_type"] == "PULLBACK_RECOVERY"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
 def test_section16_case3_weak_bounce_momentum_not_bullish():
@@ -203,7 +200,7 @@ def test_section16_case6_reentry_after_ce_closes():
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
     assert opt["decision"] == "BUY CE"
-    assert opt["setup_type"] == "PULLBACK_RECOVERY"
+    assert opt["setup_type"] == "TRENDING_BREAKOUT"
 
 
 def test_section16_case7_bearish_pullback_and_recovery_generates_buy_pe():
@@ -223,7 +220,7 @@ def test_section16_case7_bearish_pullback_and_recovery_generates_buy_pe():
     res = analyze_option_desk(data, has_active_trade=False)
     opt = res["option_buying"]
     assert opt["decision"] == "BUY PE"
-    assert opt["setup_type"] == "PULLBACK_RECOVERY"
+    assert opt["setup_type"] == "TRENDING_BREAKDOWN"
 
 
 # ==============================================================================
