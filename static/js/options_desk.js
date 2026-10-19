@@ -443,6 +443,15 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             if (oiBarSpotLabel) {
                 oiBarSpotLabel.textContent = spot > 0 ? formatIndianNumber(spot) : "--";
+                if (posPct > 80) {
+                    const shift = 50 + (posPct - 80) * 2.2;
+                    oiBarSpotLabel.style.transform = `translateX(-${shift}%)`;
+                } else if (posPct < 20) {
+                    const shift = Math.max(0, 50 - (20 - posPct) * 2.2);
+                    oiBarSpotLabel.style.transform = `translateX(-${shift}%)`;
+                } else {
+                    oiBarSpotLabel.style.transform = "translateX(-50%)";
+                }
             }
 
             // ATM Tick on bar (only when it differs from S1/R1)
@@ -585,7 +594,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (tradeSl) tradeSl.textContent = tradePlan.stop_loss ? `₹${tradePlan.stop_loss}` : "₹--";
         if (tradeT1) tradeT1.textContent = tradePlan.target_1 ? `₹${tradePlan.target_1}` : "₹--";
         if (tradeT2) tradeT2.textContent = tradePlan.target_2 ? `₹${tradePlan.target_2}` : "₹--";
-        if (tradeRr) tradeRr.textContent = tradePlan.risk_reward || "1 : 2.0";
+        if (tradeRr) {
+            const rawRr = tradePlan.risk_reward || "1:2.0";
+            tradeRr.textContent = rawRr.replace(/\s*:\s*/g, ":");
+        }
 
         // Confirmation Checklist
         if (checklistGrid && checklist.length > 0) {
@@ -614,16 +626,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (totalPeChg) totalPeChg.textContent = `(${summary.total_pe_change_oi || "--"})`;
 
         // 6. Section 3: Trending OI (ATM ± 5 strikes)
-        // Refresh Trending OI ONLY at selected interval; manual desk refresh preserves Trending OI table
-        const currentIntervalMins = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
-        const intervalMs = currentIntervalMins * 60 * 1000;
-        const timeSinceTrendingFetch = Date.now() - (state.trendingLastFetchTime || 0);
-
-        if (!state.trendingData || timeSinceTrendingFetch >= intervalMs) {
-            if (data.trending_oi_timeseries && data.trending_oi_timeseries.rows) {
-                state.trendingData = data.trending_oi_timeseries;
-                state.trendingLastFetchTime = Date.now();
-            }
+        // Automatically update Trending OI whenever fresh desk data arrives
+        if (data.trending_oi_timeseries && data.trending_oi_timeseries.rows) {
+            state.trendingData = data.trending_oi_timeseries;
+            state.trendingLastFetchTime = Date.now();
         }
         if (state.trendingData) {
             renderTrendingOiTable(state.trendingData, levels.atm_strike, bias.spot_price);
@@ -1485,7 +1491,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const samples = rep.sample_size || {};
 
         const score = perf.strategy_health_score !== undefined ? perf.strategy_health_score : 50;
-        const totalTrades = samples.closed_trades || 0;
+        const totalTrades = samples.closed_trades || samples.valid_closed_trades || samples.closed_trades_raw || 0;
 
         // Badge in Tab Header
         if (strategyScoreBadge) {
@@ -1514,18 +1520,20 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (diagOvPts) {
-            const pts = perf.total_pts || 0.0;
+            const pts = perf.total_net_pts !== undefined ? perf.total_net_pts : (perf.total_pts || 0.0);
             const sign = pts >= 0 ? '+' : '';
             diagOvPts.textContent = `${sign}${pts.toFixed(1)} pts`;
             diagOvPts.className = `d-val font-mono ${pts >= 0 ? 'val-win' : 'val-loss'}`;
         }
 
         if (diagOvAvgWinLoss) {
-            diagOvAvgWinLoss.textContent = `Avg W: +${perf.avg_win_pts || 0} | Avg L: -${perf.avg_loss_pts || 0} pts`;
+            const avgW = perf.avg_win_pts !== undefined ? `+${perf.avg_win_pts} pts` : `+${perf.avg_win_r || 0}R`;
+            const avgL = perf.avg_loss_pts !== undefined ? `-${perf.avg_loss_pts} pts` : `-${perf.avg_loss_r || 0}R`;
+            diagOvAvgWinLoss.textContent = `Avg W: ${avgW} | Avg L: ${avgL}`;
         }
 
         if (diagOvInr) {
-            const inr = perf.total_inr || 0.0;
+            const inr = perf.total_net_inr !== undefined ? perf.total_net_inr : (perf.total_inr || 0.0);
             const sign = inr >= 0 ? '+₹' : '-₹';
             diagOvInr.textContent = `${sign}${formatIndianNumber(Math.abs(inr).toFixed(2))}`;
             diagOvInr.className = `d-val font-mono ${inr >= 0 ? 'val-win' : 'val-loss'}`;
@@ -1657,7 +1665,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 diagMoneynessTbody.innerHTML = "";
                 mList.forEach((m) => {
                     const tr = document.createElement("tr");
-                    const mPts = typeof m.total_pts === 'number' ? m.total_pts : (parseFloat(m.total_pts) || 0);
+                    const rawPts = m.total_net_pts !== undefined ? m.total_net_pts : m.total_pts;
+                    const mPts = typeof rawPts === 'number' ? rawPts : (parseFloat(rawPts) || 0);
                     const ptsClass = mPts >= 0 ? "val-pos" : "val-neg";
                     const ptsSign = mPts >= 0 ? "+" : "";
                     tr.innerHTML = `
@@ -1680,7 +1689,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 diagTimewindowTbody.innerHTML = "";
                 wList.forEach((w) => {
                     const tr = document.createElement("tr");
-                    const wPts = typeof w.total_pts === 'number' ? w.total_pts : (parseFloat(w.total_pts) || 0);
+                    const rawPts = w.total_net_pts !== undefined ? w.total_net_pts : w.total_pts;
+                    const wPts = typeof rawPts === 'number' ? rawPts : (parseFloat(rawPts) || 0);
                     const ptsClass = wPts >= 0 ? "val-pos" : "val-neg";
                     const ptsSign = wPts >= 0 ? "+" : "";
                     tr.innerHTML = `
@@ -1702,21 +1712,22 @@ document.addEventListener("DOMContentLoaded", () => {
     // Dedicated Trending OI Interval Fetcher & Timer
     async function fetchTrendingOiData(force = false) {
         const intervalVal = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
-        const intervalMs = intervalVal * 60 * 1000;
         const now = Date.now();
 
-        if (!force && state.trendingData && (now - state.trendingLastFetchTime) < intervalMs) {
+        // Prevent rapid repeated calls within 5 seconds unless forced
+        if (!force && state.trendingData && (now - (state.trendingLastFetchTime || 0)) < 5000) {
             return;
         }
 
         try {
-            const res = await fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}&interval=${intervalVal}`);
+            const expParam = state.expiry ? `&expiry=${encodeURIComponent(state.expiry)}` : "";
+            const res = await fetch(`/api/options-desk/trending-oi?symbol=${state.symbol}${expParam}&interval=${intervalVal}`);
             const json = await res.json();
             if (json.success && json.data) {
                 state.trendingData = json.data;
                 state.trendingLastFetchTime = Date.now();
                 const spot = state.lastData?.market_bias?.spot_price || parseFloat(document.getElementById("spot-price-display")?.textContent?.replace(/,/g, "") || "0");
-                const atm = state.lastData?.key_levels?.atm_strike || null;
+                const atm = state.trendingData.atm_strike || state.lastData?.key_levels?.atm_strike || null;
                 renderTrendingOiTable(json.data, atm, spot);
             }
         } catch (err) {
@@ -1729,12 +1740,10 @@ document.addEventListener("DOMContentLoaded", () => {
             clearInterval(state.trendingTimerId);
             state.trendingTimerId = null;
         }
-        const intervalMins = parseInt(trendingIntervalSelect ? trendingIntervalSelect.value : "5", 10) || 5;
-        const intervalMs = intervalMins * 60 * 1000;
-
+        // Poll dedicated Trending OI endpoint every 60 seconds for live interval flow updates
         state.trendingTimerId = setInterval(() => {
             fetchTrendingOiData(true);
-        }, intervalMs);
+        }, 60000);
     }
 
     // Trending OI Interval Selection (Dedicated to Trending OI table)
@@ -1756,11 +1765,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         trendingRowsSelect.addEventListener("change", () => {
             localStorage.setItem("options_desk_trending_rows", trendingRowsSelect.value);
-            if (state.trendingData && state.trendingData.timeseries) {
+            if (state.trendingData) {
+                const spot = state.lastData?.market_bias?.spot_price || parseFloat(document.getElementById("spot-price-display")?.textContent?.replace(/,/g, "") || "0");
+                const atm = state.trendingData.atm_strike || state.lastData?.key_levels?.atm_strike || null;
                 renderTrendingOiTable(
-                    state.trendingData.timeseries,
-                    state.trendingData.atm_strike,
-                    state.trendingData.spot_price
+                    state.trendingData,
+                    atm,
+                    spot
                 );
             }
         });

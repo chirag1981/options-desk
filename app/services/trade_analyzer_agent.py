@@ -1046,6 +1046,7 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
             "closed_trades_raw": closed_raw_count,
             "valid_closed_trades": n_valid,
             "core_valid_trades": n_valid,
+            "closed_trades": n_valid,
             "iv_valid_trades": data_quality.get("iv_valid_trades", n_valid),
             "iv_missing_count": data_quality.get("iv_missing_count", 0),
             "excluded_trades": data_quality["excluded_count"],
@@ -1066,8 +1067,12 @@ def analyze_paper_trading_logs(trades_override: list[dict] = None) -> dict:
             "profit_factor_95_ci": pf_ci,
             "total_net_inr": round(total_net_inr, 2),
             "total_net_pts": round(total_net_pts, 2),
+            "total_pts": round(total_net_pts, 2),
+            "total_inr": round(total_net_inr, 2),
             "avg_win_r": round(avg_win_r, 2),
             "avg_loss_r": round(avg_loss_r, 2),
+            "avg_win_pts": round(sum(t["net_pnl_pts"] for t in wins) / win_count, 1) if win_count > 0 else 0.0,
+            "avg_loss_pts": round(abs(sum(t["net_pnl_pts"] for t in losses)) / loss_count, 1) if loss_count > 0 else 0.0,
             "max_drawdown_r": round(max_dd_r, 2),
             "max_drawdown_pct": round(max_dd_pct, 1),
             "strategy_health_score": health_score,
@@ -1861,7 +1866,10 @@ def _build_dimension_stats(
                     "mean_r": 0.0,
                     "mean_r_95_ci": [0.0, 0.0],
                     "profit_factor": 1.0,
+                    "total_net_pts": 0.0,
+                    "total_pts": 0.0,
                     "total_net_inr": 0.0,
+                    "total_inr": 0.0,
                     "p_value": 1.0,
                     "sample_status": "INSUFFICIENT_DATA",
                 }
@@ -1876,6 +1884,9 @@ def _build_dimension_stats(
         comp_r = [t["r_multiple"] for t in all_trades if t not in grp_trades]
         t_stat, p_val = _compute_welch_t_test(r_vals, comp_r) if comp_r else (0.0, 1.0)
 
+        tot_pts = round(sum(t["net_pnl_pts"] for t in grp_trades), 1)
+        tot_inr = round(sum(t["net_pnl_inr"] for t in grp_trades), 2)
+
         results.append(
             {
                 label_key: name,
@@ -1886,8 +1897,10 @@ def _build_dimension_stats(
                 "mean_r": round(mean_r, 3),
                 "mean_r_95_ci": r_ci,
                 "profit_factor": round(pf, 2),
-                "total_net_pts": round(sum(t["net_pnl_pts"] for t in grp_trades), 1),
-                "total_net_inr": round(sum(t["net_pnl_inr"] for t in grp_trades), 2),
+                "total_net_pts": tot_pts,
+                "total_pts": tot_pts,
+                "total_net_inr": tot_inr,
+                "total_inr": tot_inr,
                 "t_statistic": t_stat,
                 "p_value": p_val,
                 "sample_status": "SUFFICIENT"
@@ -2309,6 +2322,7 @@ def _build_empty_diagnostic_report() -> dict:
             "closed_trades_raw": 0,
             "valid_closed_trades": 0,
             "core_valid_trades": 0,
+            "closed_trades": 0,
             "iv_valid_trades": 0,
             "iv_missing_count": 0,
             "excluded_trades": 0,
@@ -2323,6 +2337,11 @@ def _build_empty_diagnostic_report() -> dict:
             "expectancy_r": 0.0,
             "profit_factor": 1.0,
             "total_net_inr": 0.0,
+            "total_net_pts": 0.0,
+            "total_pts": 0.0,
+            "total_inr": 0.0,
+            "avg_win_pts": 0.0,
+            "avg_loss_pts": 0.0,
             "strategy_health_score": 50,
         },
         "setup_pillars": [],

@@ -99,9 +99,10 @@ def get_trending_oi():
         interval_m = 5
 
     trade_date = request.args.get("date", None)
+    expiry = request.args.get("expiry", None)
 
     try:
-        raw_chain = fetch_option_chain_data(symbol=symbol)
+        raw_chain = fetch_option_chain_data(symbol=symbol, expiry=expiry)
         analysis = analyze_option_desk(raw_chain)
 
         try:

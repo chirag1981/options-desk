@@ -864,7 +864,7 @@ def compute_morning_trade_bias(
             "stop_loss": sl_level,
             "target_1": target_1,
             "target_2": target_2,
-            "risk_reward": f"1 : {rr_ratio:.1f}",
+            "risk_reward": f"1:{rr_ratio:.1f}",
         },
         "why_reasons": why_reasons,
     }
@@ -1249,7 +1249,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
                     "stop_loss": spot - step,
                     "target_1": spot + step,
                     "target_2": spot + 2 * step,
-                    "risk_reward": "1 : 2.0",
+                    "risk_reward": "1:2.0",
                 },
                 "why_reasons": ["Market data currently unavailable from FYERS. Fail-closed discipline active."],
             },
@@ -1835,7 +1835,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         sl_price = round(max(fill_entry_price - risk_per_contract, 0.05), 2)
         t1_price = round(fill_entry_price + (risk_per_contract * 1.5), 2)
         t2_price = round(fill_entry_price + (risk_per_contract * 2.5), 2)
-        rr_str = "1 : 2.0"
+        rr_str = "1:2.0"
 
         return {
             "contract_name": f"{strike} {'CE' if is_ce else 'PE'}",
