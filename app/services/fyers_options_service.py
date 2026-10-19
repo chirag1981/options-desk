@@ -243,6 +243,110 @@ def get_live_spot_price(symbol: str = "NIFTY") -> tuple[float, float, str]:
     return default_price, 0.0, "DATA_UNAVAILABLE"
 
 
+_CANDLE_CACHE = {}
+_CANDLE_CACHE_TTL_SEC = 30
+
+
+def get_underlying_candles(
+    symbol: str = "NIFTY",
+    resolution: str = "5",
+    limit: int = 30,
+    force_refresh: bool = False,
+) -> list[dict]:
+    """
+    Fetches real completed and current intraday OHLC candles for the underlying index via FYERS history API.
+    Returns a list of structured candle dicts:
+    [
+        {
+            "timestamp": epoch_start,
+            "datetime": "YYYY-MM-DD HH:MM:SS",
+            "open": float,
+            "high": float,
+            "low": float,
+            "close": float,
+            "volume": float,
+            "is_completed": bool,
+        },
+        ...
+    ]
+    """
+    sym = (symbol or "NIFTY").upper()
+    cfg = INDEX_CONFIGS.get(sym, INDEX_CONFIGS.get("NIFTY"))
+    fy_sym = cfg.get("fyers_symbol", "NSE:NIFTY50-INDEX")
+
+    now = datetime.now(IST)
+    cache_key = (sym, str(resolution))
+    if not force_refresh and cache_key in _CANDLE_CACHE:
+        cached = _CANDLE_CACHE[cache_key]
+        if (now - cached["fetch_time"]).total_seconds() < _CANDLE_CACHE_TTL_SEC:
+            return cached["candles"]
+
+    fyers = get_fyers_model()
+    if not fyers:
+        return []
+
+    try:
+        try:
+            res_minutes = int(resolution)
+        except (TypeError, ValueError):
+            res_minutes = 5
+        res_seconds = res_minutes * 60
+
+        today_start = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        from_epoch = int(today_start.timestamp())
+        to_epoch = int(now.timestamp())
+
+        if to_epoch - from_epoch < 3600:
+            from_epoch -= 86400 * 2
+
+        data_req = {
+            "symbol": fy_sym,
+            "resolution": str(resolution),
+            "date_format": "0",
+            "range_from": str(from_epoch),
+            "range_to": str(to_epoch),
+            "cont_flag": "1",
+        }
+
+        resp = fyers.history(data=data_req)
+        if resp.get("s") == "ok":
+            raw_candles = resp.get("candles", [])
+            candles_out = []
+            now_epoch = int(now.timestamp())
+
+            for c in raw_candles:
+                if len(c) >= 5:
+                    c_epoch = int(c[0])
+                    c_dt = datetime.fromtimestamp(c_epoch, tz=IST).strftime("%Y-%m-%d %H:%M:%S")
+                    is_done = (now_epoch >= c_epoch + res_seconds)
+                    candles_out.append({
+                        "timestamp": c_epoch,
+                        "datetime": c_dt,
+                        "open": round(float(c[1]), 2),
+                        "high": round(float(c[2]), 2),
+                        "low": round(float(c[3]), 2),
+                        "close": round(float(c[4]), 2),
+                        "volume": round(float(c[5]), 2) if len(c) > 5 else 0.0,
+                        "is_completed": is_done,
+                    })
+
+            if len(candles_out) > limit:
+                candles_out = candles_out[-limit:]
+
+            _CANDLE_CACHE[cache_key] = {
+                "candles": candles_out,
+                "fetch_time": now,
+            }
+            return candles_out
+        elif resp.get("code") in (-16, 401) or "invalid or expired" in str(resp.get("message", "")).lower():
+            log.warning("FYERS token expired during history candle fetch; invalidating.")
+            invalidate_cached_token()
+    except Exception as e:
+        log.warning(f"Error fetching FYERS underlying candles for {sym}: {e}")
+
+    return []
+
+
 def fetch_option_chain_data(
     symbol: str = "NIFTY",
     expiry: str | None = None,
@@ -445,6 +549,7 @@ def fetch_option_chain_data(
         "last_updated": now.strftime("%H:%M:%S"),
         "timestamp_iso": now.isoformat(),
         "chain": chain_records,
+        "underlying_candles": get_underlying_candles(symbol=symbol, resolution="5", limit=30),
     }
 
     # Cache result

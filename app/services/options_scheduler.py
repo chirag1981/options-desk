@@ -69,12 +69,19 @@ def get_pending_entry_confirmation(symbol: str) -> dict:
 
 
 def update_pending_entry_confirmation(
-    symbol: str, candidate_side: str | None, req_confs: int = 2, now_dt: datetime | None = None
+    symbol: str,
+    candidate_side: str | None,
+    req_confs: int = 2,
+    now_dt: datetime | None = None,
+    candle_ts: int | str | None = None,
 ) -> tuple[int, bool]:
     """
     Updates consecutive entry confirmation state for symbol.
-    Returns (confirmation_count, is_fully_confirmed, entry_latency_sec).
-    - If candidate_side is CE/PE and matches previous pending candidate, increments count.
+    Returns (confirmation_count, is_fully_confirmed).
+    - If candidate_side is CE/PE and matches previous pending candidate:
+        * If candle_ts is provided and matches state['last_candle_ts'], prevents duplicate
+          confirmation counting across multiple scheduler polls within the same candle.
+        * If candle_ts is new or unsupplied, increments confirmation count.
     - If candidate_side changes, is None (or gate fails/WAIT), resets count.
     - Tracks elapsed seconds from initial raw gate pass to confirmed entry.
     """
@@ -89,6 +96,7 @@ def update_pending_entry_confirmation(
                 "required": req_confs,
                 "first_pass_time": None,
                 "last_cycle": "",
+                "last_candle_ts": None,
             }
 
         state = _PENDING_ENTRY_CONFIRMATIONS[symbol]
@@ -96,11 +104,18 @@ def update_pending_entry_confirmation(
 
         if candidate_side in ("CE", "PE"):
             if state["candidate_side"] == candidate_side:
-                state["confirmation_count"] += 1
+                # Deduplication: do not increment confirmation if same candle is polled repeatedly
+                if candle_ts is not None and state.get("last_candle_ts") == candle_ts:
+                    pass
+                else:
+                    state["confirmation_count"] += 1
+                    if candle_ts is not None:
+                        state["last_candle_ts"] = candle_ts
             else:
                 state["candidate_side"] = candidate_side
                 state["confirmation_count"] = 1
                 state["first_pass_time"] = now_dt
+                state["last_candle_ts"] = candle_ts
 
             if state.get("first_pass_time") is None:
                 state["first_pass_time"] = now_dt
@@ -111,6 +126,7 @@ def update_pending_entry_confirmation(
             state["candidate_side"] = None
             state["confirmation_count"] = 0
             state["first_pass_time"] = None
+            state["last_candle_ts"] = None
             return 0, False
 
 
@@ -134,6 +150,7 @@ def reset_pending_entry_confirmation(symbol: str):
             "required": ENGINE_CONFIG.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 2),
             "first_pass_time": None,
             "last_cycle": "",
+            "last_candle_ts": None,
         }
 
 
@@ -292,9 +309,15 @@ def _refresh_worker():
                         # Evaluate final entry persistence:
                         # Candidate BUY must pass all mandatory gates for CONSECUTIVE_CONFIRMATIONS_REQUIRED cycles
                         entry_latency_sec = None
+                        raw_candles = raw.get("underlying_candles") or []
+                        comp_candles = [c for c in raw_candles if c.get("is_completed")]
+                        curr_candle_ts = comp_candles[-1].get("timestamp") if comp_candles else None
+
                         if cand_decision in ("BUY CE", "BUY PE", "CE", "PE"):
                             cand_side = "CE" if "CE" in cand_decision else "PE"
-                            conf_count, is_confirmed = update_pending_entry_confirmation(sym, cand_side, req_confs, now_dt)
+                            conf_count, is_confirmed = update_pending_entry_confirmation(
+                                sym, cand_side, req_confs, now_dt, candle_ts=curr_candle_ts
+                            )
                             if is_confirmed:
                                 entry_latency_sec = get_pending_entry_latency(sym, now_dt)
                                 final_decision = f"BUY {cand_side}"
@@ -304,7 +327,9 @@ def _refresh_worker():
                                 decision_reason = f"Candidate BUY {cand_side} pending confirmation ({conf_count}/{req_confs} evaluations). Preserving entry discipline."
                         else:
                             cand_side = None
-                            conf_count, is_confirmed = update_pending_entry_confirmation(sym, None, req_confs, now_dt)
+                            conf_count, is_confirmed = update_pending_entry_confirmation(
+                                sym, None, req_confs, now_dt, candle_ts=curr_candle_ts
+                            )
                             final_decision = "WAIT"
                             decision_reason = opt_buying.get("reason", "")
 

@@ -42,11 +42,14 @@ ENGINE_CONFIG = {
     "PRIME_WINDOW_START_MINS": 570,   # 09:30 IST
     "PRIME_WINDOW_END_MINS": int(os.environ.get("PRIME_WINDOW_END_MINS", 870)),     # 14:30 IST (02:30 PM default cutoff, extended from 14:00)
     "BREAKOUT_WINDOW_END_MINS": int(os.environ.get("BREAKOUT_WINDOW_END_MINS", 885)), # 14:45 IST (02:45 PM on valid high-conviction breakouts)
+    "ALLOW_BREAKOUT_WINDOW_EXTENSION": False, # Strict trading window discipline; requires explicit opt-in
     "MARKET_SESSION_START_MINS": int(os.environ.get("MARKET_SESSION_START_MINS", 550)), # 09:10 IST
     "MARKET_SESSION_END_MINS": int(os.environ.get("MARKET_SESSION_END_MINS", 930)),   # 15:30 IST
     "CONSECUTIVE_CONFIRMATIONS_REQUIRED": int(os.environ.get("CONSECUTIVE_CONFIRMATIONS_REQUIRED", 1)),
     "SCHEDULER_ENTRY_CONFIRMATIONS": int(os.environ.get("SCHEDULER_ENTRY_CONFIRMATIONS", 2)),
     "ENABLE_50_PIVOT_FILTER": True,           # If current price > 50% pivot of day's High-Low, look for CE; if < 50% pivot, look for PE
+    "CANDLE_TIMEFRAME_MINUTES": int(os.environ.get("CANDLE_TIMEFRAME_MINUTES", 5)),
+    "BREAKOUT_BUFFER_POINTS": float(os.environ.get("BREAKOUT_BUFFER_POINTS", 3.0)),
     "NIFTY_MAX_OPTION_RISK_POINTS": 8.0, # Configurable maximum option premium risk cap (in points)
     "NIFTY_MIN_OPTION_RISK_POINTS": 3.0, # Minimum option SL buffer floor (in points)
     "POST_EXPANSION_EXHAUSTION_FILTER": True, # Blocks buying options that have expanded > 70% and pulled back > 18% into chop
@@ -186,6 +189,165 @@ def evaluate_market_expansion_and_chop(
         expansion_confirmed = False
 
     return expansion_confirmed, is_choppy
+
+
+def classify_market_regime(
+    spot: float,
+    spot_chg: float,
+    today_high: float,
+    today_low: float,
+    pivot_50: float,
+    is_choppy: bool,
+    price_signal: str = "NEUTRAL",
+    oi_signal: str = "NEUTRAL",
+    completed_candles: list[dict] | None = None,
+) -> tuple[str, str]:
+    """
+    Classifies market regime into BULLISH, BEARISH, RANGE_BOUND, or UNCLEAR
+    based primarily on underlying index price structure and confirmed candle ranges.
+    Returns: (regime: str, reason: str)
+    """
+    has_day_range = (today_high > 0.0 and today_low > 0.0 and today_high > today_low)
+    day_span = (today_high - today_low) if has_day_range else 0.0
+
+    # 1. Range-bound chop check
+    if is_choppy or (has_day_range and day_span < 25.0 and abs(spot_chg) < 0.08):
+        return "RANGE_BOUND", "Underlying index oscillating in tight consolidation / narrow intraday range."
+
+    # 2. Completed candles structural analysis
+    if completed_candles and len(completed_candles) >= 3:
+        recent = completed_candles[-5:]
+        closes = [float(c["close"]) for c in recent if "close" in c]
+        highs = [float(c["high"]) for c in recent if "high" in c]
+        lows = [float(c["low"]) for c in recent if "low" in c]
+
+        is_ascending = (len(closes) >= 3 and closes[-1] > closes[0] and (not lows or lows[-1] >= lows[0]))
+        is_descending = (len(closes) >= 3 and closes[-1] < closes[0] and (not highs or highs[-1] <= highs[0]))
+
+        if is_ascending and spot >= pivot_50 and spot_chg >= 0.0:
+            return "BULLISH", "Price structure forming higher highs and higher lows in upper half of range."
+        elif is_descending and spot <= pivot_50 and spot_chg <= 0.0:
+            return "BEARISH", "Price structure forming lower highs and lower lows in lower half of range."
+        elif (max(closes) - min(closes)) < (day_span * 0.25 if day_span > 0 else 20.0):
+            return "RANGE_BOUND", "Price structure consolidating tightly within recent swing boundaries."
+
+    # 3. Structural range evaluation via 50% intraday pivot and price momentum
+    if spot >= pivot_50 and spot_chg >= 0.0:
+        return "BULLISH", f"Price structure holding upper half above 50% Pivot ({pivot_50:,.1f}) with positive momentum."
+    elif spot <= pivot_50 and spot_chg <= 0.0:
+        return "BEARISH", f"Price structure holding lower half below 50% Pivot ({pivot_50:,.1f}) with negative momentum."
+
+    return "UNCLEAR", "Price structure conflicts with intraday range pivot or directional momentum."
+
+
+def identify_price_structure_levels(
+    spot: float,
+    today_high: float,
+    today_low: float,
+    pivot_50: float,
+    cpr_levels: dict,
+    completed_candles: list[dict] | None = None,
+) -> dict:
+    """
+    Identifies meaningful price-based support and resistance levels from underlying candle data:
+    - Prior confirmed swing highs and lows from preceding candles (excluding current candidate candle)
+    - Established intraday range boundaries (CPR R1/S1, 50% range pivot)
+    """
+    swing_high = None
+    swing_low = None
+
+    if completed_candles and len(completed_candles) >= 2:
+        # Prior completed candles before the candidate breakout candle
+        prior_candles = completed_candles[:-1]
+        recent = prior_candles[-10:] if len(prior_candles) > 10 else prior_candles
+        highs = [float(c["high"]) for c in recent if "high" in c]
+        lows = [float(c["low"]) for c in recent if "low" in c]
+        if highs:
+            swing_high = round(max(highs), 2)
+        if lows:
+            swing_low = round(min(lows), 2)
+
+    r1 = float(cpr_levels.get("r1", spot + 25.0) or (spot + 25.0))
+    s1 = float(cpr_levels.get("s1", spot - 25.0) or (spot - 25.0))
+
+    if swing_high is not None:
+        res_level = swing_high
+        res_source = "SWING_HIGH"
+    elif today_high > spot:
+        res_level = today_high
+        res_source = "DAY_HIGH"
+    else:
+        res_level = r1
+        res_source = "CPR_R1"
+
+    if swing_low is not None:
+        sup_level = swing_low
+        sup_source = "SWING_LOW"
+    elif today_low > 0.0 and today_low < spot:
+        sup_level = today_low
+        sup_source = "DAY_LOW"
+    else:
+        sup_level = s1
+        sup_source = "CPR_S1"
+
+    return {
+        "resistance": round(res_level, 2),
+        "resistance_source": res_source,
+        "support": round(sup_level, 2),
+        "support_source": sup_source,
+        "swing_high": swing_high,
+        "swing_low": swing_low,
+        "today_high": today_high,
+        "today_low": today_low,
+        "pivot_50": pivot_50,
+    }
+
+
+def evaluate_candle_breakout(
+    spot: float,
+    resistance_level: float,
+    support_level: float,
+    buffer_pts: float = 3.0,
+    completed_candles: list[dict] | None = None,
+    spot_chg: float = 0.0,
+    expansion_confirmed: bool = True,
+) -> tuple[bool, bool, bool, bool, str]:
+    """
+    Evaluates breakout / breakdown confirmation on completed underlying candles.
+    Returns:
+    (is_bullish_breakout, is_bearish_breakdown, is_intrabar_cross_ce, is_intrabar_cross_pe, detail_msg)
+    """
+    if completed_candles and len(completed_candles) > 0:
+        last_c = completed_candles[-1]
+        c_close = float(last_c.get("close", spot))
+        c_high = float(last_c.get("high", spot))
+        c_low = float(last_c.get("low", spot))
+
+        is_bull_break = (c_close >= (resistance_level + buffer_pts))
+        is_bear_break = (c_close <= (support_level - buffer_pts))
+
+        # Intrabar checks: spot LTP or candle high crossed, but candle close did not confirm
+        is_intrabar_ce = (not is_bull_break) and (spot >= resistance_level or c_high >= resistance_level)
+        is_intrabar_pe = (not is_bear_break) and (spot <= support_level or c_low <= support_level)
+
+        if is_bull_break:
+            msg = f"Completed candle closed at {c_close:,.1f} >= Resistance {resistance_level:,.1f} + {buffer_pts:.1f}pt buffer."
+        elif is_bear_break:
+            msg = f"Completed candle closed at {c_close:,.1f} <= Support {support_level:,.1f} - {buffer_pts:.1f}pt buffer."
+        elif is_intrabar_ce:
+            msg = f"Intrabar test of Resistance {resistance_level:,.1f} (Spot {spot:,.1f}); completed candle close pending."
+        elif is_intrabar_pe:
+            msg = f"Intrabar test of Support {support_level:,.1f} (Spot {spot:,.1f}); completed candle close pending."
+        else:
+            msg = f"Price inside range (Support: {support_level:,.1f} | Resistance: {resistance_level:,.1f})."
+
+        return is_bull_break, is_bear_break, is_intrabar_ce, is_intrabar_pe, msg
+
+    # Fallback when candle series is not provided (mock/synthetic tests):
+    is_bull_break = (spot_chg >= 0.0 and expansion_confirmed)
+    is_bear_break = (spot_chg <= 0.0 and expansion_confirmed)
+    msg = f"Expansion fallback (Spot Chg: {spot_chg:+.2f}%, Expansion: {expansion_confirmed})"
+    return is_bull_break, is_bear_break, False, False, msg
 
 
 def get_symbol_oi_thresholds(symbol: str) -> dict:
@@ -1583,16 +1745,69 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         f"50%_PIVOT_BLOCK (Spot {spot:,.1f} is below 50% Pivot {pivot_50:,.1f} [Day L: {today_low:,.1f} | H: {today_high:,.1f}]. Only PE allowed in lower half of day range)."
     )
 
-    # OI-Led directional gate: OI MUST agree with direction; price context must not conflict.
-    # Price is a sanity check (spot_chg not contradicting); momentum is not counted as an independent vote.
-    is_bullish_dir = (oi_signal == "BULLISH" and spot_chg >= 0.0 and bull_confirm_count >= 2)
-    is_bearish_dir = (oi_signal == "BEARISH" and spot_chg <= 0.0 and bear_confirm_count >= 2)
-
-
     # Market Expansion and Chop Evaluation
     custom_price_hist = market_data.get("price_history")
     expansion_confirmed, is_choppy = evaluate_market_expansion_and_chop(
         spot=spot, spot_chg=spot_chg, strike_step=step, price_history=custom_price_hist
+    )
+
+    # Completed candles extraction
+    raw_candles = market_data.get("underlying_candles")
+    completed_candles = [c for c in raw_candles if c.get("is_completed")] if raw_candles else None
+
+    # 1. Market Regime Classification (BULLISH, BEARISH, RANGE_BOUND, UNCLEAR)
+    market_regime, regime_reason = classify_market_regime(
+        spot=spot,
+        spot_chg=spot_chg,
+        today_high=today_high,
+        today_low=today_low,
+        pivot_50=pivot_50,
+        is_choppy=is_choppy,
+        price_signal=price_signal,
+        oi_signal=oi_signal,
+        completed_candles=completed_candles,
+    )
+
+    # 2. Meaningful Price-Structure Levels (Swing High/Low, Intraday Boundaries, CPR)
+    price_levels = identify_price_structure_levels(
+        spot=spot,
+        today_high=today_high,
+        today_low=today_low,
+        pivot_50=pivot_50,
+        cpr_levels={"r1": r1, "s1": s1},
+        completed_candles=completed_candles,
+    )
+    resistance_level = price_levels["resistance"]
+    support_level = price_levels["support"]
+    breakout_buf = float(ENGINE_CONFIG.get("BREAKOUT_BUFFER_POINTS", 3.0))
+
+    # 3. Completed-Candle Breakout Evaluation
+    is_bull_break, is_bear_break, is_intrabar_ce, is_intrabar_pe, break_msg = evaluate_candle_breakout(
+        spot=spot,
+        resistance_level=resistance_level,
+        support_level=support_level,
+        buffer_pts=breakout_buf,
+        completed_candles=completed_candles,
+        spot_chg=spot_chg,
+        expansion_confirmed=expansion_confirmed,
+    )
+
+    # Price-structure and candle breakout is the primary context; OI/Vol/PCR act as supporting confirmations
+    is_bullish_dir = (
+        market_regime == "BULLISH"
+        and spot >= pivot_50
+        and spot_chg >= 0.0
+        and is_bull_break
+        and not is_intrabar_ce
+        and bull_confirm_count >= 2
+    )
+    is_bearish_dir = (
+        market_regime == "BEARISH"
+        and spot <= pivot_50
+        and spot_chg <= 0.0
+        and is_bear_break
+        and not is_intrabar_pe
+        and bear_confirm_count >= 2
     )
     setup_type = "TRENDING_BREAKOUT" if is_bullish_dir else ("TRENDING_BREAKDOWN" if is_bearish_dir else "NEUTRAL")
 
@@ -1681,8 +1896,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "spot_target": f"{spot_target}",
         }
 
-    ce_trade_plan = calculate_trade_levels(best_ce, is_ce=True, spot_invalidation=s1, spot_target=r2)
-    pe_trade_plan = calculate_trade_levels(best_pe, is_ce=False, spot_invalidation=r1, spot_target=s2)
+    ce_trade_plan = calculate_trade_levels(best_ce, is_ce=True, spot_invalidation=support_level, spot_target=r2)
+    pe_trade_plan = calculate_trade_levels(best_pe, is_ce=False, spot_invalidation=resistance_level, spot_target=s2)
 
     # 10. Check Daily Trade Limit, Consecutive Loss Cooldown & Active Trade Constraint
     if has_active_trade is None:
@@ -1872,14 +2087,18 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             {"name": "Momentum", "passed": m_sig, "desc": f"Momentum is {momentum_signal}"},
             {"name": "OI Structure", "passed": o_sig, "desc": f"OI is {oi_signal}"},
             {"name": "50% Range Pivot", "passed": pivot_50_ok, "desc": pivot_50_desc},
+            {"name": "Market Regime", "passed": (market_regime == ("BULLISH" if is_ce else "BEARISH")), "desc": f"Regime is {market_regime}"},
+            {"name": "Breakout Confirmation", "passed": (is_bull_break if is_ce else is_bear_break), "desc": break_msg},
             {"name": "Trending OI (&ge;40%, 2+ Dots)", "passed": t_oi_confirmed, "desc": t_oi_desc},
-            {"name": "Volume", "passed": v_sig, "desc": f"Volume is {volume_signal}"},
+            {"name": "Option Chain Volume (CE/PE)", "passed": v_sig, "desc": f"Option volume is {volume_signal}"},
             {"name": "PCR Trend", "passed": pcr_sig, "desc": f"PCR is {pcr_signal} ({pcr})"},
             {"name": "IV & Window", "passed": iv_ok, "desc": f"{iv_time_info.get('time_status', '')} | {iv_time_info.get('iv_condition', '')}"},
         ]
         flags = {
             "direction": p_sig and m_sig,
             "level": is_dir,
+            "regime": market_regime == ("BULLISH" if is_ce else "BEARISH"),
+            "breakout": is_bull_break if is_ce else is_bear_break,
             "momentum": m_sig,
             "volume": v_sig,
             "oi": o_sig,
@@ -1914,8 +2133,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
         now_dt = datetime.now(IST)
         iv_mins = now_dt.hour * 60 + now_dt.minute
     prime_start_mins = ENGINE_CONFIG.get("PRIME_WINDOW_START_MINS", 570)
-    breakout_end_mins = ENGINE_CONFIG.get("BREAKOUT_WINDOW_END_MINS", 885)
-    can_extend_breakout = is_breakout_expansion and (prime_start_mins <= iv_mins < breakout_end_mins)
+    allow_breakout_ext = bool(ENGINE_CONFIG.get("ALLOW_BREAKOUT_WINDOW_EXTENSION", False))
+    can_extend_breakout = allow_breakout_ext and is_breakout_expansion and (prime_start_mins <= iv_mins < breakout_end_mins)
     effective_trade_window = in_trade_window or can_extend_breakout
 
 
@@ -2011,6 +2230,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = ce_pillar_flags
             focus_title = "WAIT"
             focus_reason = "LOW_EXPANSION_OR_CHOP"
+        elif is_intrabar_ce:
+            decision = "WAIT"
+            setup_score = ce_score
+            active_checklist = ce_checklist
+            active_trade_plan = ce_trade_plan or {}
+            active_pillar_flags = ce_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "AWAITING_CANDLE_CLOSE (Intrabar test of resistance; awaiting completed candle close confirmation)"
         else:
             decision = "BUY CE"
             setup_type = "TRENDING_BREAKOUT"
@@ -2061,6 +2288,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             active_pillar_flags = pe_pillar_flags
             focus_title = "WAIT"
             focus_reason = "LOW_EXPANSION_OR_CHOP"
+        elif is_intrabar_pe:
+            decision = "WAIT"
+            setup_score = pe_score
+            active_checklist = pe_checklist
+            active_trade_plan = pe_trade_plan or {}
+            active_pillar_flags = pe_pillar_flags
+            focus_title = "WAIT"
+            focus_reason = "AWAITING_CANDLE_CLOSE (Intrabar test of support; awaiting completed candle close confirmation)"
         else:
             decision = "BUY PE"
             setup_type = "TRENDING_BREAKDOWN"
@@ -2081,8 +2316,14 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             focus_reason = pivot_50_msg
         elif pivot_50_pe_blocked and (price_signal == "BEARISH" or pe_score > ce_score):
             focus_reason = pivot_50_msg
-        elif is_choppy or not expansion_confirmed:
-            focus_reason = "LOW_EXPANSION_OR_CHOP"
+        elif is_intrabar_ce:
+            focus_reason = "AWAITING_CANDLE_CLOSE (Intrabar test of resistance; awaiting completed candle close confirmation)"
+        elif is_intrabar_pe:
+            focus_reason = "AWAITING_CANDLE_CLOSE (Intrabar test of support; awaiting completed candle close confirmation)"
+        elif is_choppy or not expansion_confirmed or market_regime == "RANGE_BOUND":
+            focus_reason = "LOW_EXPANSION_OR_CHOP" if (is_choppy or not expansion_confirmed) else regime_reason
+        elif market_regime == "UNCLEAR":
+            focus_reason = regime_reason
         elif price_signal == "BULLISH" and oi_signal != "BULLISH":
             if bull_confirm_count < 2:
                 focus_reason = f"Bullish confirmation gate failed: Only {bull_confirm_count}/3 confirmations (OI, Volume, PCR) support Bullish direction."
@@ -2270,7 +2511,9 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "dte": dte,
             "last_changed": bias_state["last_changed_time"],
             "why_reasons": bullish_factors if is_bullish_dir else (bearish_factors if is_bearish_dir else (bullish_factors[:2] + bearish_factors[:2])),
-            "net_interpretation": f"Net Bias: {market_bias_str} ({confirm_display} Confirmations: OI, Vol, PCR)"
+            "net_interpretation": f"Net Bias: {market_bias_str} ({confirm_display} Confirmations: OI, Vol, PCR)",
+            "regime": market_regime,
+            "regime_reason": regime_reason,
         },
         "key_levels": {
             "resistance_1": r1,
@@ -2295,6 +2538,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "dist_to_r1": oi_wall_metrics["dist_to_r1"],
             "atm_tick_pct": oi_wall_metrics["atm_tick_pct"],
             "nearest_barriers": nearest_barriers,
+            "price_levels": price_levels,
+            "candle_breakout": {"is_bull_break": is_bull_break, "is_bear_break": is_bear_break, "message": break_msg},
         },
         "nearest_barriers": nearest_barriers,
         "option_buying": {
@@ -2304,6 +2549,7 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "type": "CE" if "CE" in decision else ("PE" if "PE" in decision else "WAIT"),
             "symbol": symbol,
             "market_direction": market_bias_str,
+            "market_regime": market_regime,
             "key_level": f"Resistance: {r1} / Support: {s1}",
             "level_status": "CONFIRMED" if (decision in ("BUY CE", "BUY PE") or is_bullish_dir or is_bearish_dir) else "NOT CONFIRMED",
             "momentum_status": "CONFIRMED" if (decision in ("BUY CE", "BUY PE") or momentum_signal in ("BULLISH", "BEARISH")) else "NOT CONFIRMED",
@@ -2318,6 +2564,8 @@ def analyze_option_desk(market_data: dict, update_state: bool = False, has_activ
             "setup_score": setup_score,
             "setup_type": setup_type,
             "active_trade_exists": has_active_trade,
+            "price_levels": price_levels,
+            "candle_breakout": {"is_bull_break": is_bull_break, "is_bear_break": is_bear_break, "message": break_msg},
             "signals": {
                 "price": price_signal,
                 "momentum": momentum_signal,
