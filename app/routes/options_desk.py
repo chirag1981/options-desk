@@ -265,4 +265,25 @@ def get_trade_analysis():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@options_desk_bp.route("/api/options-desk/strategy-diagnostics", methods=["GET", "POST"])
+def get_strategy_diagnostics():
+    """
+    Returns automated trade failure diagnoses, tick counterfactual replays,
+    and parameter optimization actions from the Strategy Diagnostic Agent.
+    Query param / JSON: auto_apply=true/false
+    """
+    try:
+        from app.services.strategy_diagnostic_agent import run_strategy_diagnostic_cycle
+        auto_apply = request.args.get("auto_apply", "false").lower() in ["true", "1", "yes"]
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+            if "auto_apply" in data:
+                auto_apply = bool(data["auto_apply"])
+        report = run_strategy_diagnostic_cycle(auto_apply=auto_apply)
+        return jsonify({"success": True, "report": report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+
 

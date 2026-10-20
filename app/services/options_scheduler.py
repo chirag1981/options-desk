@@ -40,6 +40,7 @@ from app.services.trade_analyzer_agent import (
     review_unreviewed_closed_trades,
     generate_daily_review_report,
 )
+from app.services.strategy_diagnostic_agent import run_strategy_diagnostic_cycle
 
 log = logging.getLogger("options_scheduler")
 
@@ -229,6 +230,7 @@ def _refresh_worker():
         log.warning(f"[STARTUP] review_unreviewed_closed_trades error: {e}")
 
     last_fwd_backfill_time = 0.0
+    last_diagnostic_time = 0.0
     daily_report_saved_for_date = None
 
     try:
@@ -258,6 +260,11 @@ def _refresh_worker():
                         if persist_daily_report(rep):
                             daily_report_saved_for_date = today_date_str
                             cleanup_old_telemetry(retention_days=400)
+                            try:
+                                auto_apply_env = os.environ.get("DIAGNOSTIC_AUTO_APPLY", "0").lower() in ("1", "true", "yes")
+                                run_strategy_diagnostic_cycle(lookback_days=7, auto_apply=auto_apply_env)
+                            except Exception as ex:
+                                log.warning(f"Error running EOD strategy diagnostic cycle: {ex}")
                     except Exception as e:
                         log.warning(f"Error generating daily review report: {e}")
 
@@ -472,6 +479,22 @@ def _refresh_worker():
                         last_fwd_backfill_time = cur_monotonic
                     except Exception as e:
                         log.warning(f"Error backfilling forward labels: {e}")
+
+                # Periodically run autonomous strategy diagnostic cycle (~every 5 minutes / 300s)
+                if (cur_monotonic - last_diagnostic_time) >= 300.0:
+                    try:
+                        auto_apply_env = os.environ.get("DIAGNOSTIC_AUTO_APPLY", "0").lower() in ("1", "true", "yes")
+                        diag_res = run_strategy_diagnostic_cycle(lookback_days=7, auto_apply=auto_apply_env)
+                        failed_cnt = diag_res.get("failed_trades_detected", 0)
+                        if failed_cnt > 0:
+                            log.info(
+                                f"[DIAGNOSTIC_CYCLE] Processed {failed_cnt} failed trade(s), "
+                                f"{diag_res.get('replays_analyzed', 0)} counterfactual replays, "
+                                f"{diag_res.get('optimizations_applied', 0)} optimizations applied."
+                            )
+                        last_diagnostic_time = cur_monotonic
+                    except Exception as e:
+                        log.warning(f"Error in strategy diagnostic cycle: {e}")
 
                 # Generate daily review report after 15:45 IST
                 if now_time >= dtime(15, 45) and daily_report_saved_for_date != today_date_str:
