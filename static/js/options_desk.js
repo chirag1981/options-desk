@@ -179,6 +179,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (result && result.success && result.data) {
                 state.lastData = result.data;
+
+                // Synchronize Expiry dropdown if real market expiries are returned
+                const availExpiries = result.data.meta && result.data.meta.available_expiries;
+                if (availExpiries && availExpiries.length && expirySelect) {
+                    const currentOpts = Array.from(expirySelect.options).map(o => o.value);
+                    const isMismatch = currentOpts.length !== availExpiries.length || currentOpts.some((v, i) => v !== availExpiries[i]);
+                    if (isMismatch) {
+                        const prevSelected = expirySelect.value;
+                        expirySelect.innerHTML = "";
+                        availExpiries.forEach((exp) => {
+                            const opt = document.createElement("option");
+                            opt.value = exp;
+                            opt.textContent = exp;
+                            if (exp === prevSelected || (!prevSelected && exp === result.data.meta.expiry)) {
+                                opt.selected = true;
+                            }
+                            expirySelect.appendChild(opt);
+                        });
+                        state.expiry = expirySelect.value || availExpiries[0] || "";
+                    }
+                }
+
                 try {
                     renderDashboard(result.data);
                 } catch (renderErr) {
@@ -875,6 +897,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (btnRefresh) {
         btnRefresh.addEventListener("click", () => {
+            updateExpiriesForSymbol(state.symbol);
             loadOptionsDeskData(true);
             loadSignalsData();
             loadTradeAnalysis();

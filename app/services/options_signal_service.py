@@ -1220,11 +1220,15 @@ def get_trending_oi_timeseries(
         start_t = datetime.combine(base_d, dtime(9, 15), tzinfo=IST)
         market_close = datetime.combine(base_d, dtime(15, 30), tzinfo=IST)
         
-        # Ensure we generate points: if today is just opening or off-hours, ensure at least enough points
-        has_adequate_live_span = (trade_date == now_dt.strftime("%Y-%m-%d") and (now_dt - start_t).total_seconds() >= interval_minutes * 60 * 2)
-        end_limit = min(now_dt, market_close) if has_adequate_live_span else market_close
-        if end_limit < start_t:
-            end_limit = market_close
+        is_today = (trade_date == now_dt.strftime("%Y-%m-%d"))
+        if is_today and now_dt < start_t:
+            # Pre-market on live trading day: do not simulate end-of-day future intervals
+            end_limit = start_t
+        else:
+            has_adequate_live_span = (is_today and (now_dt - start_t).total_seconds() >= interval_minutes * 60 * 2)
+            end_limit = min(now_dt, market_close) if has_adequate_live_span else market_close
+            if end_limit < start_t:
+                end_limit = market_close
 
         curr_t = start_t
         idx = 0
@@ -1283,8 +1287,10 @@ def get_trending_oi_timeseries(
             minutes_from_midnight = pt_dt.hour * 60 + pt_dt.minute
             slot = minutes_from_midnight // interval_minutes
             slot_mins = slot * interval_minutes
+            if slot_mins < 9 * 60 + 15:
+                slot_mins = 9 * 60 + 15
             slot_time_str = f"{slot_mins // 60:02d}:{slot_mins % 60:02d}:00"
-            if slot_time_str < "09:10:00" or slot_time_str > "15:30:00":
+            if slot_time_str > "15:30:00":
                 continue
             pt_copy = dict(pt)
             pt_copy["time_str"] = slot_time_str

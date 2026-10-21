@@ -9,7 +9,7 @@ import json
 import math
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services.fyers_auth import (
     get_fyers_index_spot,
@@ -218,11 +218,17 @@ def get_upcoming_expiries(symbol: str = "NIFTY") -> list[str]:
         except Exception as e:
             log.warning(f"Failed to fetch expiries from FYERS for {sym}: {e}")
 
-    # Fallback schedules
-    FALLBACK_SCHEDULES = {
-        "NIFTY": ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"],
-    }
-    return FALLBACK_SCHEDULES.get(sym, ["06-OCT-2026", "13-OCT-2026", "19-OCT-2026", "27-OCT-2026"])
+    # Dynamic fallback schedules for offline/simulated periods:
+    # Generate next 4 upcoming weekly expiry dates starting from today
+    today_d = now.date()
+    target_weekday = 1  # Tuesday for NIFTY
+    days_ahead = (target_weekday - today_d.weekday()) % 7
+    curr = today_d + timedelta(days=days_ahead)
+    fallback = []
+    for _ in range(4):
+        fallback.append(curr.strftime("%d-%b-%Y").upper())
+        curr += timedelta(days=7)
+    return fallback
 
 
 def get_live_spot_price(symbol: str = "NIFTY") -> tuple[float, float, str]:
