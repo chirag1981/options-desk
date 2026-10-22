@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Diagnostics &bull; NIFTY Options Selling Desk{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <div class="page-title-group">
+            <h2>Read-Only System Diagnostics & Verification</h2>
+            <p>Real-time checks for broker connectivity, quote freshness, portfolio risk budget limits, and paper trading isolation.</p>
+        </div>
+        <div class="page-actions">
+            <button class="btn-3d btn-gold btn-sm" onclick="fetchDiagnostics()" title="Execute Real-Time Health Diagnostics" aria-label="Re-run Checks">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                <span>Re-run Checks</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="desk-card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+            <h3>Diagnostic Health Checks</h3>
+            <span class="status-chip chip-green" id="diag-overall-status">CHECKING...</span>
+        </div>
+        <div class="card-body no-padding">
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Check Name</th>
+                            <th>Status</th>
+                            <th>Verification Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody id="diag-checks-tbody">
+                        <tr><td colspan="3" class="text-center">Running diagnostics...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fetchDiagnostics() {
+    fetch('/api/diagnostics')
+        .then(res => res.json())
+        .then(data => {
+            const tbody = document.getElementById('diag-checks-tbody');
+            const statusEl = document.getElementById('diag-overall-status');
+            statusEl.textContent = data.overall_status || "HEALTHY";
+            tbody.innerHTML = '';
+            (data.checks || []).forEach(c => {
+                const tr = document.createElement('tr');
+                const isPass = c.status === 'PASS';
+                tr.innerHTML = `
+                    <td class="font-bold">${c.name}</td>
+                    <td><span class="status-chip ${isPass ? 'chip-green' : 'chip-orange'}">${c.status}</span></td>
+                    <td class="text-muted">${c.detail}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        })
+        .catch(err => console.error("Diagnostics error:", err));
+}
+document.addEventListener('DOMContentLoaded', fetchDiagnostics);
+</script>
+{% endblock %}

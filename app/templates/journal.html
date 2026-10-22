@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Trade Journal &bull; NIFTY Options Selling Desk{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <div class="page-title-group">
+            <h2>Paper Trading Journal & Audit Log</h2>
+            <p>Auditable record of all defined-risk options-selling executions, MTM valuations, exits, and statutory charges.</p>
+        </div>
+        <div class="page-actions">
+            <a href="{{ url_for('main.api_export_csv') }}" class="btn-3d btn-gold btn-sm" title="Export Closed Trades to CSV" aria-label="Export Journal CSV">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Export Journal CSV</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary Metrics -->
+    <div class="journal-metrics-row">
+        <div class="metric-card">
+            <span class="mc-label">Net Realized P&L</span>
+            <span class="mc-val" id="jm-net-pnl">₹0.00</span>
+            <span class="mc-sub">After all statutory charges</span>
+        </div>
+        <div class="metric-card">
+            <span class="mc-label">Win Rate</span>
+            <span class="mc-val" id="jm-win-rate">0.0%</span>
+            <span class="mc-sub" id="jm-win-loss-count">0 Wins / 0 Losses</span>
+        </div>
+        <div class="metric-card">
+            <span class="mc-label">Profit Factor</span>
+            <span class="mc-val" id="jm-profit-factor">0.00</span>
+            <span class="mc-sub">Gross Gains / Gross Losses</span>
+        </div>
+        <div class="metric-card">
+            <span class="mc-label">Transaction Costs</span>
+            <span class="mc-val text-red" id="jm-costs">₹0.00</span>
+            <span class="mc-sub">Brokerage, STT, Exchange, GST</span>
+        </div>
+    </div>
+
+    <!-- Trades Table -->
+    <div class="desk-card table-card">
+        <div class="card-header">
+            <h3>Trade History</h3>
+            <div class="filter-group">
+                <button class="filter-btn active" data-filter="ALL" title="Show All Trades">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    <span>All</span>
+                </button>
+                <button class="filter-btn" data-filter="INTRADAY" title="Filter Intraday Spreads">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    <span>Intraday</span>
+                </button>
+                <button class="filter-btn" data-filter="POSITIONAL" title="Filter Positional Spreads">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span>Positional</span>
+                </button>
+            </div>
+        </div>
+        <div class="card-body no-padding">
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th># ID</th>
+                            <th>Engine</th>
+                            <th>Strategy</th>
+                            <th>Expiry</th>
+                            <th>Entry Time</th>
+                            <th>Entry Credit</th>
+                            <th>Exit Time</th>
+                            <th>Exit Status</th>
+                            <th>Gross P&L</th>
+                            <th>Fees</th>
+                            <th>Net P&L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="journal-trades-tbody">
+                        <tr><td colspan="11" class="text-center">Loading trade journal history...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/journal.js') }}"></script>
+{% endblock %}

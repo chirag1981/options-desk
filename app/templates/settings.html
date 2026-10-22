@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Settings &bull; NIFTY Options Selling Desk{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <div class="page-title-group">
+            <h2>Engine & Risk Configuration</h2>
+            <p>Active parameters for Intraday and Positional defined-risk options-selling engines and shared risk guards.</p>
+        </div>
+    </div>
+
+    <div class="settings-grid">
+        <div class="desk-card">
+            <div class="card-header">
+                <h3>Shared Portfolio Risk Limits</h3>
+            </div>
+            <div class="card-body">
+                <div class="setting-row">
+                    <span class="setting-label">Total Paper Capital</span>
+                    <span class="setting-val font-mono">₹{{ "{:,.2f}".format(config.TOTAL_ACCOUNT_EQUITY) }}</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Max Risk Per Trade</span>
+                    <span class="setting-val font-mono">{{ config.MAX_RISK_PER_TRADE_PCT }}% (₹{{ "{:,.2f}".format(config.TOTAL_ACCOUNT_EQUITY * config.MAX_RISK_PER_TRADE_PCT / 100) }})</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Max Combined Portfolio Risk</span>
+                    <span class="setting-val font-mono">{{ config.MAX_COMBINED_PORTFOLIO_RISK_PCT }}% (₹{{ "{:,.2f}".format(config.TOTAL_ACCOUNT_EQUITY * config.MAX_COMBINED_PORTFOLIO_RISK_PCT / 100) }})</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Daily Drawdown Circuit Breaker</span>
+                    <span class="setting-val font-mono text-red">{{ config.MAX_DAILY_LOSS_PCT }}% (₹{{ "{:,.2f}".format(config.TOTAL_ACCOUNT_EQUITY * config.MAX_DAILY_LOSS_PCT / 100) }})</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Consecutive Loss Cooldown</span>
+                    <span class="setting-val font-mono">{{ config.CONSECUTIVE_LOSS_COOLDOWN_MINS }} Minutes</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="desk-card">
+            <div class="card-header">
+                <h3>Engine Operational Policies</h3>
+            </div>
+            <div class="card-body">
+                <div class="setting-row">
+                    <span class="setting-label">Underlying Symbol</span>
+                    <span class="setting-val font-mono">{{ config.SYMBOL }} (Lot Size: {{ config.LOT_SIZE }})</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Strike Step</span>
+                    <span class="setting-val font-mono">{{ config.STRIKE_STEP }} Points</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Intraday Entry Window</span>
+                    <span class="setting-val font-mono">{{ config.INTRADAY_ENTRY_START }} to {{ config.INTRADAY_ENTRY_CUTOFF }} IST</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Intraday Session Auto-Exit</span>
+                    <span class="setting-val font-mono text-orange">{{ config.INTRADAY_SESSION_CLOSE_TIME }} IST</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Min Net Credit Required</span>
+                    <span class="setting-val font-mono">{{ config.MIN_NET_CREDIT_PTS }} Points</span>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Min Spot Wall Cushion</span>
+                    <span class="setting-val font-mono">{{ config.MIN_SPOT_CUSHION_PTS }} Points</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

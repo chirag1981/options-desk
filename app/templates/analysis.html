@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}OI Analysis &bull; NIFTY Options Selling Desk{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <div class="page-title-group">
+            <h2>Deep-Dive Open Interest & Key Levels</h2>
+            <p>Strike-level Put and Call Open Interest flow, writer momentum, and support/resistance walls.</p>
+        </div>
+        <div class="page-actions" style="display:flex; align-items:center; gap:0.75rem;">
+            <button class="btn-3d btn-secondary btn-sm" onclick="fetchAnalysisData()" title="Refresh Market Data Immediately" aria-label="Refresh Data">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                <span>Refresh</span>
+            </button>
+            <span class="refresh-pill" id="analysis-refresh-pill">Auto-Refreshing (15s)</span>
+        </div>
+    </div>
+
+    <div class="analysis-summary-grid">
+        <div class="desk-card">
+            <div class="card-header">
+                <h3>Underlying Market Bias</h3>
+            </div>
+            <div class="card-body">
+                <div class="analysis-metric-row">
+                    <span class="am-label">NIFTY 50 Spot</span>
+                    <span class="am-val" id="an-spot">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">Market Bias</span>
+                    <span class="bias-badge" id="an-bias">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">Market Regime</span>
+                    <span class="regime-badge" id="an-regime">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">Put-Call Ratio (PCR)</span>
+                    <span class="am-val font-mono" id="an-pcr">--</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="desk-card">
+            <div class="card-header">
+                <h3>Key Structural OI Boundaries</h3>
+            </div>
+            <div class="card-body">
+                <div class="analysis-metric-row">
+                    <span class="am-label">R1 Call Wall (Ceiling)</span>
+                    <span class="am-val font-mono text-red" id="an-r1">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">R2 Secondary Resistance</span>
+                    <span class="am-val font-mono" id="an-r2">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">S1 Put Wall (Floor)</span>
+                    <span class="am-val font-mono text-green" id="an-s1">--</span>
+                </div>
+                <div class="analysis-metric-row">
+                    <span class="am-label">S2 Secondary Support</span>
+                    <span class="am-val font-mono" id="an-s2">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strike Level Chain Breakdown -->
+    <div class="desk-card table-card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+            <h3>Option Chain Strikes Snapshot</h3>
+            <span id="chain-expiry-label">Active Expiry: --</span>
+        </div>
+        <div class="card-body no-padding">
+            <div class="table-responsive">
+                <table class="data-table chain-table">
+                    <thead>
+                        <tr class="chain-header-top">
+                            <th colspan="4" class="text-center call-bg">CALLS (CE)</th>
+                            <th class="text-center strike-bg">STRIKE</th>
+                            <th colspan="4" class="text-center put-bg">PUTS (PE)</th>
+                        </tr>
+                        <tr>
+                            <th class="call-bg">OI</th>
+                            <th class="call-bg">ΔOI</th>
+                            <th class="call-bg">Bid</th>
+                            <th class="call-bg">Ask</th>
+                            <th class="strike-bg text-center">Strike Price</th>
+                            <th class="put-bg">Bid</th>
+                            <th class="put-bg">Ask</th>
+                            <th class="put-bg">ΔOI</th>
+                            <th class="put-bg">OI</th>
+                        </tr>
+                    </thead>
+                    <tbody id="chain-tbody">
+                        <tr><td colspan="9" class="text-center">Loading live option chain...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+{% endblock %}

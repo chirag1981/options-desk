@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard &bull; NIFTY Options Selling Desk{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- PANEL 1: STRATEGY SELECTOR & TRADE SETUP (HERO HORIZONTAL POSITION) -->
+    <div class="desk-card panel-setup">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">01</span>
+                <h3>Strategy & Setup</h3>
+            </div>
+            <div class="engine-tabs">
+                <button class="engine-tab active" data-engine="INTRADAY" title="5-Minute Confirmation, 15:20 Cutoff">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    <span>INTRADAY</span>
+                </button>
+                <button class="engine-tab" data-engine="POSITIONAL" title="Daily/Weekly Trend Context">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span>POSITIONAL</span>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="setup-horizontal-deck">
+                <div class="setup-deck-left">
+                    <!-- AUTO-SELECTION INTELLIGENCE BANNER -->
+                    <div class="auto-selection-card" id="auto-selection-card">
+                        <div class="as-card-top">
+                            <div class="as-badge-group">
+                                <span class="as-badge-gold" id="as-badge-gold">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                    <span id="as-badge-text">AUTO-SELECT: COMPUTING...</span>
+                                </span>
+                                <span class="as-mode-pill" id="as-mode-pill">EVALUATING</span>
+                            </div>
+                            <div class="as-action-group">
+                                <button class="btn-3d btn-as-toggle" id="btn-toggle-auto-trade" title="Toggle autonomous paper trade execution on each market update cycle">
+                                    <span class="as-status-dot paused" id="as-status-dot"></span>
+                                    <span id="as-toggle-label">Auto-Trade: OFF</span>
+                                </button>
+                                <button class="btn-3d btn-as-execute" id="btn-auto-execute-now" title="Instantly execute all data-selected strategies in paper mode" disabled>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                    <span>Execute Auto-Selected</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="as-card-content">
+                            <div class="as-chips-row" id="as-chips-row">
+                                <span class="text-muted font-sm">Scanning market regime & option chain...</span>
+                            </div>
+                            <div class="as-rationale-text" id="as-rationale-text">
+                                Evaluating live OI flow, PCR bias, and wall boundaries for optimal defined-risk strategy selection...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Strategy Selector Pills -->
+                    <div class="strategy-selector-row">
+                        <button class="strat-pill active" data-strat="BULL_PUT" title="Bull Put Credit Spread">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                            <span>Bull Put</span>
+                        </button>
+                        <button class="strat-pill" data-strat="BEAR_CALL" title="Bear Call Credit Spread">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            <span>Bear Call</span>
+                        </button>
+                        <button class="strat-pill" data-strat="IRON_CONDOR" title="Iron Condor (4 Legs)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="8" width="18" height="8" rx="2"></rect></svg>
+                            <span>Iron Condor</span>
+                        </button>
+                        <button class="strat-pill disabled" data-strat="IRON_BUTTERFLY" title="Gated per specification">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"></path></svg>
+                            <span>Iron Butterfly (Gated)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="setup-deck-right">
+                    <div class="setup-detail-box" id="setup-detail-box">
+                        <div class="setup-status-row">
+                            <span class="setup-strat-title" id="setup-strat-title">Bull Put Credit Spread</span>
+                            <span class="eligibility-chip" id="setup-eligibility-chip">WAIT / NO TRADE</span>
+                        </div>
+
+                        <div class="legs-table-wrapper">
+                            <table class="legs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Leg Action</th>
+                                        <th>Strike</th>
+                                        <th>Type</th>
+                                        <th>Side Quote</th>
+                                        <th>Order Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="setup-legs-body">
+                                    <tr><td colspan="5" class="text-center">Awaiting strategy candidate...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="payoff-grid">
+                            <div class="payoff-item highlight-cost">
+                                <span class="po-label">Req. Margin (Cost)</span>
+                                <span class="po-val text-gold" id="po-margin-req">₹--</span>
+                            </div>
+                            <div class="payoff-item">
+                                <span class="po-label">Est. Fees & Taxes</span>
+                                <span class="po-val" id="po-charges">₹--</span>
+                            </div>
+                            <div class="payoff-item">
+                                <span class="po-label">Net Credit</span>
+                                <span class="po-val text-gold" id="po-net-credit">-- pts</span>
+                            </div>
+                            <div class="payoff-item">
+                                <span class="po-label">Max Profit</span>
+                                <span class="po-val text-green" id="po-max-profit">₹--</span>
+                            </div>
+                            <div class="payoff-item">
+                                <span class="po-label">Max Loss</span>
+                                <span class="po-val text-red" id="po-max-loss">₹--</span>
+                            </div>
+                            <div class="payoff-item">
+                                <span class="po-label">R : R Ratio</span>
+                                <span class="po-val" id="po-rr-ratio">--</span>
+                            </div>
+                        </div>
+
+                        <div class="setup-rationale-box" id="setup-rationale-box">
+                            <span>Rationale: Analyzing market regime...</span>
+                        </div>
+
+                        <div class="action-footer">
+                            <div class="lots-picker">
+                                <label for="trade-lots-select">Lots:</label>
+                                <select id="trade-lots-select" title="Lot Size: 65 Qty per lot">
+                                    <option value="1">1 Lot (65 Qty)</option>
+                                    <option value="2">2 Lots (130 Qty)</option>
+                                </select>
+                            </div>
+                            <div class="trade-cost-summary" id="trade-cost-summary" title="Total estimated capital required and statutory charges">
+                                <span class="tcs-item"><span class="tcs-label">Req. Margin:</span> <strong id="tcs-margin" class="text-gold">₹--</strong></span>
+                                <span class="tcs-sep">•</span>
+                                <span class="tcs-item"><span class="tcs-label">Est. Fees:</span> <strong id="tcs-fees">₹--</strong></span>
+                            </div>
+                            <button class="btn-3d btn-gold" id="btn-execute-paper" title="Execute Defined-Risk Paper Spread Order" aria-label="Execute Paper Trade" disabled>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                                <span>Execute Paper Trade</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL 2: MARKET REGIME & DATA QUALITY -->
+    <div class="desk-card panel-regime">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">02</span>
+                <h3>Market Regime & Data Quality</h3>
+            </div>
+            <span class="status-chip chip-gold" id="regime-status-chip">ANALYZING</span>
+        </div>
+        <div class="card-body">
+            <div class="regime-hero">
+                <div class="spot-metric">
+                    <span class="metric-label">NIFTY 50 SPOT</span>
+                    <span class="spot-large" id="spot-price">--</span>
+                    <span class="spot-chg" id="spot-chg">--%</span>
+                </div>
+                <div class="regime-metric">
+                    <span class="metric-label">REGIME CLASSIFICATION</span>
+                    <span class="regime-badge" id="market-regime-badge">--</span>
+                    <span class="bias-text" id="market-bias-text">Bias: --</span>
+                </div>
+            </div>
+
+            <div class="data-quality-grid">
+                <div class="dq-item">
+                    <span class="dq-label">Data Provider</span>
+                    <span class="dq-val" id="dq-provider">--</span>
+                </div>
+                <div class="dq-item">
+                    <span class="dq-label">Quote Freshness</span>
+                    <span class="dq-val" id="dq-freshness">LIVE (&le; 120s)</span>
+                </div>
+                <div class="dq-item">
+                    <span class="dq-label">ATM Straddle IV</span>
+                    <span class="dq-val" id="dq-iv">--%</span>
+                </div>
+                <div class="dq-item">
+                    <span class="dq-label">Active Expiry</span>
+                    <span class="dq-val" id="dq-expiry">--</span>
+                </div>
+            </div>
+
+            <div class="evidence-box">
+                <span class="evidence-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                    Regime Evidence Factors:
+                </span>
+                <ul class="evidence-list" id="regime-evidence-list">
+                    <li>Awaiting market data stream...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL 3: OI STRUCTURE & KEY LEVELS -->
+    <div class="desk-card panel-oi">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">03</span>
+                <h3>OI Structure & Key Levels</h3>
+            </div>
+            <span class="pcr-badge" id="pcr-badge">PCR: --</span>
+        </div>
+        <div class="card-body">
+            <div class="walls-grid">
+                <div class="wall-card wall-resistance">
+                    <div class="wall-header">
+                        <span class="wall-tag">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                            CALL OI WALL (R1)
+                        </span>
+                        <span class="wall-dist" id="dist-r1">-- pts above</span>
+                    </div>
+                    <div class="wall-strike" id="wall-r1">--</div>
+                    <div class="wall-footer">
+                        <span>Major Overhead Ceiling</span>
+                        <span id="wall-r2-sub">R2: --</span>
+                    </div>
+                </div>
+
+                <div class="wall-card wall-support">
+                    <div class="wall-header">
+                        <span class="wall-tag">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+                            PUT OI WALL (S1)
+                        </span>
+                        <span class="wall-dist" id="dist-s1">-- pts below</span>
+                    </div>
+                    <div class="wall-strike" id="wall-s1">--</div>
+                    <div class="wall-footer">
+                        <span>Major Underlying Floor</span>
+                        <span id="wall-s2-sub">S2: --</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-metrics-box">
+                <div class="flow-row">
+                    <span>Writer Momentum Flow</span>
+                    <span class="flow-badge" id="writer-momentum-badge">--</span>
+                </div>
+                <div class="flow-row">
+                    <span>Total Put OI vs Call OI</span>
+                    <span id="oi-ratio-vals">-- PE / -- CE</span>
+                </div>
+                <div class="flow-row">
+                    <span>Net ΔOI Position Shift</span>
+                    <span id="net-delta-val">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL 4: PORTFOLIO RISK -->
+    <div class="desk-card panel-risk">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">04</span>
+                <h3>Portfolio Risk Guard</h3>
+            </div>
+            <span class="risk-badge-shield">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                AUTHORITATIVE
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="risk-meter-wrapper">
+                <div class="risk-meter-label">
+                    <span>Combined Portfolio Risk</span>
+                    <span id="risk-pct-label">0.0% / 2.0% Max</span>
+                </div>
+                <div class="risk-bar-track">
+                    <div class="risk-bar-fill" id="risk-bar-fill" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="risk-breakdown-grid">
+                <div class="risk-stat">
+                    <span class="rs-label">Intraday Open Risk</span>
+                    <span class="rs-val" id="risk-intraday-open">₹0.00</span>
+                    <span class="rs-sub">Max: 2 Positions</span>
+                </div>
+                <div class="risk-stat">
+                    <span class="rs-label">Positional Open Risk</span>
+                    <span class="rs-val" id="risk-positional-open">₹0.00</span>
+                    <span class="rs-sub">Max: 2 Positions</span>
+                </div>
+                <div class="risk-stat">
+                    <span class="rs-label">Single Trade Cap</span>
+                    <span class="rs-val font-mono">₹5,000</span>
+                    <span class="rs-sub">0.5% Account Equity</span>
+                </div>
+                <div class="risk-stat">
+                    <span class="rs-label">Daily Loss Circuit</span>
+                    <span class="rs-val font-mono text-red">₹15,000</span>
+                    <span class="rs-sub">1.5% Hard Cutoff</span>
+                </div>
+            </div>
+
+            <div class="risk-guard-notes">
+                <span class="rg-status-dot green"></span>
+                <span id="risk-guard-status-text">All portfolio risk limits within safe capacity.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL 5: OPEN POSITIONS -->
+    <div class="desk-card panel-positions">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">05</span>
+                <h3>Active Open Positions</h3>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+                <span class="sync-badge" title="Active open positions auto-refresh every 1 minute">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span>1m sync</span>
+                </span>
+                <span class="count-pill" id="open-positions-count">0 OPEN</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="positions-list" id="open-positions-list">
+                <div class="empty-state">
+                    <div class="empty-icon-3d">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    </div>
+                    <p>No active paper positions. Market structure continuously monitored for eligible defined-risk credit spreads.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL 6: PERFORMANCE & JOURNAL -->
+    <div class="desk-card panel-performance">
+        <div class="card-header">
+            <div class="card-title-group">
+                <span class="card-panel-num">06</span>
+                <h3>Performance & Journal</h3>
+            </div>
+            <a href="{{ url_for('main.journal') }}" class="view-all-link" title="Open Full Journal">
+                <span>Full Journal</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </a>
+        </div>
+        <div class="card-body">
+            <div class="perf-stats-row">
+                <div class="perf-box">
+                    <span class="pb-label">Net Realized P&L</span>
+                    <span class="pb-val" id="perf-net-pnl">₹0.00</span>
+                </div>
+                <div class="perf-box">
+                    <span class="pb-label">Win Rate</span>
+                    <span class="pb-val" id="perf-win-rate">0.0%</span>
+                </div>
+                <div class="perf-box">
+                    <span class="pb-label">Profit Factor</span>
+                    <span class="pb-val" id="perf-profit-factor">0.00</span>
+                </div>
+                <div class="perf-box">
+                    <span class="pb-label">Total Trades</span>
+                    <span class="pb-val" id="perf-total-trades">0</span>
+                </div>
+            </div>
+
+            <div class="perf-engine-split">
+                <div class="engine-split-card">
+                    <span class="esc-engine">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                        Intraday Engine
+                    </span>
+                    <span class="esc-pnl" id="perf-intraday-pnl">₹0.00</span>
+                </div>
+                <div class="engine-split-card">
+                    <span class="esc-engine">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        Positional Engine
+                    </span>
+                    <span class="esc-pnl" id="perf-positional-pnl">₹0.00</span>
+                </div>
+            </div>
+
+            <div class="perf-footer">
+                <a href="{{ url_for('main.api_export_csv') }}" class="btn-3d btn-secondary" title="Export Closed Trades to CSV" aria-label="Export CSV">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Export CSV</span>
+                </a>
+                <span class="fees-disclaimer">Statutory NSE Costs & STT Deducted</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

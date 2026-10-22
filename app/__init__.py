@@ -1,49 +1,37 @@
 """
-app/__init__.py — Application Factory for FYERS Options Desk Terminal
+app/__init__.py — Flask Application Factory
+Initializes extensions, registers blueprints, creates database tables,
+and manages background scheduler lifecycle.
 """
 
 import os
-from datetime import timedelta
-from flask import Flask, render_template
-from flask_wtf.csrf import CSRFProtect
-
-csrf = CSRFProtect()
+from flask import Flask
+from app.config import Config
+from app.extensions import db
 
 
-def create_app(config_name: str = None) -> Flask:
-    app = Flask(__name__, template_folder="../templates", static_folder="../static")
-
-    # Configuration
-    secret_key = os.environ.get("SECRET_KEY", "fyers_options_desk_secret_key_2026_super_secure")
-    app.config["SECRET_KEY"] = secret_key
-    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
-    app.config["SESSION_COOKIE_SECURE"] = False  # Relaxed for local dev
-    app.config["SESSION_COOKIE_HTTPONLY"] = True
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+def create_app(config_class=Config) -> Flask:
+    """Application factory for NIFTY Options Selling Desk."""
+    app = Flask(__name__)
+    app.config.from_object(config_class)
 
     # Initialize extensions
-    csrf.init_app(app)
+    db.init_app(app)
 
-    # Register Option Desk Blueprint
-    from app.routes.options_desk import options_desk_bp
-    app.register_blueprint(options_desk_bp)
+    # Register blueprints
+    from app.routes import main_bp
+    app.register_blueprint(main_bp)
 
-    # Start background 3-minute options updater (only in active worker process, avoiding reloader parent)
-    is_reloader_parent = (os.environ.get("FLASK_DEBUG", "true").lower() in ("true", "1", "yes")) and (os.environ.get("WERKZEUG_RUN_MAIN") != "true")
-    if not is_reloader_parent:
-        try:
-            from app.services.options_scheduler import start_options_scheduler
-            start_options_scheduler(app)
-        except Exception:
-            pass
+    # Create tables
+    with app.app_context():
+        db.create_all()
 
-    # Error handlers
-    @app.errorhandler(404)
-    def page_not_found(e):
-        return render_template("404.html"), 404
+    # Start background scheduler if not in testing mode
+    is_testing = app.config.get("TESTING") or os.environ.get("PYTEST_CURRENT_TEST")
+    is_reloader = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
 
-    @app.errorhandler(500)
-    def internal_server_error(e):
-        return render_template("500.html"), 500
+    if not is_testing and is_reloader:
+        from app.scheduler import DeskScheduler
+        DeskScheduler.start(app, poll_interval_sec=20)
 
     return app
