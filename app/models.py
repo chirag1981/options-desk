@@ -168,6 +168,8 @@ class TradePosition(db.Model):
             "max_profit_inr": self.max_profit_inr,
             "status": self.status,
             "exit_time": self.exit_time.strftime("%Y-%m-%d %H:%M:%S") if self.exit_time else None,
+            "exit_spot": self.exit_spot,
+            "exit_net_debit_pts": self.exit_net_debit_pts,
             "exit_reason": self.exit_reason,
             "gross_pnl_inr": self.gross_pnl_inr,
             "transaction_costs_inr": self.transaction_costs_inr,

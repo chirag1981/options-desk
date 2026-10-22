@@ -199,21 +199,63 @@ def api_execute_candidate():
     payload = request.get_json() or {}
     strategy_id = payload.get("strategy_id")
     engine_type = payload.get("engine_type", "INTRADAY").upper()
-    lots = int(payload.get("lots", 1))
+    try:
+        lots = int(payload.get("lots", 1))
+        if lots < 1:
+            return jsonify({"status": "error", "message": "Lots must be a positive integer."}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid lots parameter."}), 400
+
+    if engine_type not in ("INTRADAY", "POSITIONAL"):
+        return jsonify({"status": "error", "message": f"Invalid engine_type: {engine_type}"}), 400
+
+    # Duplicate check: prevent duplicate open position for same strategy and engine
+    existing = TradePosition.query.filter_by(strategy_id=strategy_id, engine_type=engine_type, status="OPEN").first()
+    if existing:
+        return jsonify({
+            "status": "error",
+            "message": f"An open position for {strategy_id} ({engine_type}) already exists (ID: #{existing.id}). Duplicate entry blocked.",
+        }), 400
 
     chain_data = MarketDataProvider.get_option_chain()
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
 
-    # Build candidate
-    if strategy_id == "BULL_PUT":
-        candidate = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type=engine_type, lots=lots)
-    elif strategy_id == "BEAR_CALL":
-        candidate = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type=engine_type, lots=lots)
-    elif strategy_id == "IRON_CONDOR":
-        candidate = StrategyBuilder.build_iron_condor(analysis, chain, engine_type=engine_type, lots=lots)
+    # Evaluate via appropriate engine to respect session guards, regime, and confidence thresholds
+    engine = IntradayEngine if engine_type == "INTRADAY" else PositionalEngine
+    engine_candidates = engine.evaluate(analysis, chain)
+
+    matched_candidate = None
+    for cand in engine_candidates:
+        if cand.strategy_id == strategy_id:
+            matched_candidate = cand
+            break
+
+    if not matched_candidate:
+        reasons = [cand.rationale for cand in engine_candidates if not cand.is_eligible]
+        msg = f"{engine_type} engine did not generate an eligible candidate for {strategy_id}."
+        if reasons:
+            msg += f" Reasons: {'; '.join(reasons)}"
+        return jsonify({"status": "error", "message": msg}), 400
+
+    if not matched_candidate.is_eligible:
+        return jsonify({
+            "status": "error",
+            "message": f"Strategy {strategy_id} is not eligible: {matched_candidate.rationale}",
+        }), 400
+
+    # Re-build candidate with requested lots if lots > 1
+    if lots != matched_candidate.lots:
+        if strategy_id == "BULL_PUT":
+            candidate = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type=engine_type, lots=lots)
+        elif strategy_id == "BEAR_CALL":
+            candidate = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type=engine_type, lots=lots)
+        elif strategy_id == "IRON_CONDOR":
+            candidate = StrategyBuilder.build_iron_condor(analysis, chain, engine_type=engine_type, lots=lots)
+        else:
+            candidate = matched_candidate
     else:
-        return jsonify({"status": "error", "message": f"Strategy {strategy_id} is not eligible for execution."}), 400
+        candidate = matched_candidate
 
     # Risk Check
     risk_res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type=engine_type)

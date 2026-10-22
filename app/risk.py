@@ -66,6 +66,21 @@ class PortfolioRiskManager:
         with _risk_lock:
             cls._last_loss_exit_time = exit_time or datetime.now(IST)
             log.info(f"Loss exit registered at {cls._last_loss_exit_time}. 15-minute cooldown initiated.")
+            try:
+                audit = RiskAuditLog(
+                    timestamp=cls._last_loss_exit_time,
+                    engine_type="PORTFOLIO",
+                    event_type="LOSS_COOLDOWN_START",
+                    decision="COOLDOWN_INITIATED",
+                    trade_risk_inr=0.0,
+                    current_portfolio_risk_inr=0.0,
+                    reason="Consecutive loss cooldown initiated.",
+                )
+                db.session.add(audit)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                log.warning(f"Failed to persist loss cooldown audit log: {e}")
 
     @classmethod
     def evaluate_candidate_risk(
@@ -102,10 +117,38 @@ class PortfolioRiskManager:
                 )
 
             # 2. Consecutive Loss Cooldown Guard
-            if cls._last_loss_exit_time:
-                cooldown_delta = now_dt - cls._last_loss_exit_time
+            last_loss_time = cls._last_loss_exit_time
+            if last_loss_time is None:
+                try:
+                    # Check RiskAuditLog for persisted cooldown entry
+                    last_audit = RiskAuditLog.query.filter_by(
+                        event_type="LOSS_COOLDOWN_START"
+                    ).order_by(RiskAuditLog.timestamp.desc()).first()
+                    if last_audit and last_audit.timestamp:
+                        last_loss_time = last_audit.timestamp
+
+                    # Also check TradePosition for stopped out loss trades
+                    last_loss_pos = TradePosition.query.filter(
+                        TradePosition.status == "STOPPED_OUT",
+                        TradePosition.net_pnl_inr < 0,
+                        TradePosition.exit_time.isnot(None),
+                    ).order_by(TradePosition.exit_time.desc()).first()
+                    if last_loss_pos and last_loss_pos.exit_time:
+                        if last_loss_time is None or last_loss_pos.exit_time > last_loss_time:
+                            last_loss_time = last_loss_pos.exit_time
+                except Exception as e:
+                    log.warning(f"Failed to query last loss exit time: {e}")
+
+            if last_loss_time:
+                now_comp = now_dt
+                loss_comp = last_loss_time
+                if now_comp.tzinfo is not None and loss_comp.tzinfo is None:
+                    loss_comp = loss_comp.replace(tzinfo=now_comp.tzinfo)
+                elif now_comp.tzinfo is None and loss_comp.tzinfo is not None:
+                    now_comp = now_comp.replace(tzinfo=loss_comp.tzinfo)
+                cooldown_delta = now_comp - loss_comp
                 if cooldown_delta < timedelta(minutes=Config.CONSECUTIVE_LOSS_COOLDOWN_MINS):
-                    remaining_mins = Config.CONSECUTIVE_LOSS_COOLDOWN_MINS - int(cooldown_delta.total_seconds() / 60)
+                    remaining_mins = max(1, Config.CONSECUTIVE_LOSS_COOLDOWN_MINS - int(cooldown_delta.total_seconds() / 60))
                     rejections.append(f"Consecutive loss cooldown active ({remaining_mins} mins remaining).")
 
             # 3. Query Active Positions and Daily Realized Loss from Database
@@ -134,7 +177,8 @@ class PortfolioRiskManager:
                         daily_realized_loss += abs(pos.net_pnl_inr)
 
             except Exception as e:
-                log.warning(f"Database query in risk evaluation failed: {e}")
+                log.error(f"Database query in risk evaluation failed: {e}", exc_info=True)
+                rejections.append("CRITICAL: Portfolio risk database verification failed. Trade blocked for safety.")
 
             # 4. Engine Concurrent Position Cap
             max_positions = Config.MAX_INTRADAY_POSITIONS if engine_type == "INTRADAY" else Config.MAX_POSITIONAL_POSITIONS

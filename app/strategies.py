@@ -35,7 +35,9 @@ class OptionLegSpec:
     quantity: int = 65
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d["price"] = self.bid if self.action == "SELL" else self.ask
+        return d
 
 
 @dataclass
@@ -60,6 +62,7 @@ class SpreadCandidate:
     rejection_reasons: List[str] = field(default_factory=list)
     confidence_score: float = 0.0
     rationale: str = ""
+    spot_price: float = 0.0
 
     @property
     def has_uncovered_short(self) -> bool:
@@ -213,6 +216,7 @@ class StrategyBuilder:
             rejection_reasons=rejections,
             confidence_score=analysis.confidence_score,
             rationale=rationale,
+            spot_price=spot,
         )
 
     @classmethod
@@ -318,6 +322,7 @@ class StrategyBuilder:
             rejection_reasons=rejections,
             confidence_score=analysis.confidence_score,
             rationale=rationale,
+            spot_price=spot,
         )
 
     @classmethod
@@ -390,6 +395,7 @@ class StrategyBuilder:
             rejection_reasons=rejections,
             confidence_score=analysis.confidence_score,
             rationale=rationale,
+            spot_price=analysis.spot_price,
         )
 
     @classmethod
@@ -433,6 +439,7 @@ class StrategyBuilder:
             rejection_reasons=rejections,
             confidence_score=0.0,
             rationale=f"Rejection: {'; '.join(rejections)}",
+            spot_price=analysis.spot_price,
         )
 
 

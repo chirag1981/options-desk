@@ -60,11 +60,23 @@ class DeskScheduler:
         log.info("DeskScheduler stopping.")
 
     @classmethod
+    def is_market_open(cls, dt: Optional[datetime] = None) -> bool:
+        """Checks if current time is within Indian equity derivative market hours (Mon-Fri 09:15 - 15:30 IST)."""
+        now = dt or datetime.now(IST)
+        if now.weekday() >= 5:  # Saturday=5, Sunday=6
+            return False
+        time_str = now.strftime("%H:%M:%S")
+        return "09:15:00" <= time_str <= "15:30:00"
+
+    @classmethod
     def _run_loop(cls, interval_sec: int):
         while cls._running:
             try:
                 with cls._app.app_context():
-                    cls.run_cycle()
+                    if cls.is_market_open() or cls._app.config.get("TESTING", False):
+                        cls.run_cycle()
+                    else:
+                        log.debug("Market closed (Mon-Fri 09:15-15:30 IST). Scheduler idle.")
             except Exception as e:
                 log.error(f"Error in DeskScheduler cycle: {e}")
 

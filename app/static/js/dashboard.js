@@ -502,7 +502,7 @@ function renderPerformance(sum) {
         elNetPnl.className = `pb-val ${sum.total_net_pnl_inr >= 0 ? 'text-green' : 'text-red'}`;
     }
 
-    const elPnlBreakdown = document.getElementById('perf-pnl-breakdown');
+    const elPnlBreakdown = document.getElementById('perf-pnl-sub');
     if (elPnlBreakdown) {
         const real = sum.realized_net_pnl_inr || 0;
         const mtm = sum.unrealized_pnl_inr || 0;

@@ -106,7 +106,7 @@ class PaperTradingManager:
                 lots=candidate.lots,
                 quantity=candidate.quantity,
                 entry_time=now_dt,
-                entry_spot=float(candidate.breakevens[0] if candidate.breakevens else 24500.0),
+                entry_spot=float(candidate.spot_price or (candidate.breakevens[0] if candidate.breakevens else 24500.0)),
                 entry_net_credit_pts=candidate.net_credit_pts,
                 max_loss_inr=candidate.max_loss_inr,
                 max_profit_inr=candidate.max_profit_inr,
@@ -184,6 +184,9 @@ class PaperTradingManager:
                 gross_pnl = (pos.entry_net_credit_pts - pos.current_net_debit_pts) * pos.quantity
                 pos.current_pnl_inr = round(gross_pnl - pos.transaction_costs_inr, 2)
 
+                today_str = now_dt.strftime("%d-%b-%Y").upper()
+                is_expiry_day = (pos.expiry.upper() in (today_str, now_dt.strftime("%Y-%m-%d")))
+
                 # 1. Target Check
                 if pos.current_net_debit_pts <= pos.target_credit_pts:
                     cls.close_position(pos.id, exit_spot=spot_price, reason="TARGET_HIT")
@@ -193,6 +196,9 @@ class PaperTradingManager:
                 # 3. Intraday Session Cutoff (15:20 IST)
                 elif pos.engine_type == "INTRADAY" and now_time >= Config.INTRADAY_SESSION_CLOSE_TIME:
                     cls.close_position(pos.id, exit_spot=spot_price, reason="SESSION_EXIT")
+                # 4. Positional Pre-Expiry Exit (14:30 IST on expiry day)
+                elif pos.engine_type == "POSITIONAL" and is_expiry_day and now_time >= Config.POSITIONAL_PRE_EXPIRY_EXIT_TIME:
+                    cls.close_position(pos.id, exit_spot=spot_price, reason="PRE_EXPIRY_EXIT")
 
                 updated_positions.append(pos.to_dict())
 
@@ -275,6 +281,10 @@ class AutoTradeEngine:
         Evaluates auto-selected candidates and executes eligible paper trades if auto-trade is enabled.
         """
         if not cls.is_enabled():
+            return []
+
+        if getattr(analysis, "data_status", "") != "FYERS_LIVE":
+            log.info("Auto-trade dormant: requires live FYERS market data stream.")
             return []
 
         from app.strategies import AutoStrategySelector
