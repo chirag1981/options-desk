@@ -42,22 +42,21 @@ class PerformanceAnalytics:
         win_rate = round((win_count / len(closed_trades) * 100.0), 1) if closed_trades else 0.0
 
         total_gross_pnl = sum(p.gross_pnl_inr for p in closed_trades)
-        total_costs = sum(p.transaction_costs_inr for p in closed_trades)
-        total_net_pnl = sum(p.net_pnl_inr for p in closed_trades)
+        total_costs = sum(p.transaction_costs_inr for p in positions)
+        realized_net_pnl = sum(p.net_pnl_inr for p in closed_trades)
+        unrealized_pnl = round(sum(p.current_pnl_inr for p in open_trades), 2)
+        combined_net_pnl = round(realized_net_pnl + unrealized_pnl, 2)
 
         total_gains = sum(p.net_pnl_inr for p in wins)
         total_losses = abs(sum(p.net_pnl_inr for p in losses))
         profit_factor = round(total_gains / total_losses, 2) if total_losses > 0 else (round(total_gains, 2) if total_gains > 0 else 0.0)
 
-        # Engine breakdown
-        intraday_trades = [p for p in closed_trades if p.engine_type == "INTRADAY"]
-        positional_trades = [p for p in closed_trades if p.engine_type == "POSITIONAL"]
+        # Engine breakdown (includes realized + live open MTM)
+        intraday_all = [p for p in positions if p.engine_type == "INTRADAY"]
+        positional_all = [p for p in positions if p.engine_type == "POSITIONAL"]
 
-        intraday_net_pnl = round(sum(p.net_pnl_inr for p in intraday_trades), 2)
-        positional_net_pnl = round(sum(p.net_pnl_inr for p in positional_trades), 2)
-
-        # Unrealized P&L
-        unrealized_pnl = round(sum(p.current_pnl_inr for p in open_trades), 2)
+        intraday_net_pnl = round(sum((p.net_pnl_inr if p.status != "OPEN" else p.current_pnl_inr) for p in intraday_all), 2)
+        positional_net_pnl = round(sum((p.net_pnl_inr if p.status != "OPEN" else p.current_pnl_inr) for p in positional_all), 2)
 
         return {
             "total_trades": total_trades,
@@ -69,12 +68,14 @@ class PerformanceAnalytics:
             "profit_factor": profit_factor,
             "total_gross_pnl_inr": round(total_gross_pnl, 2),
             "total_transaction_costs_inr": round(total_costs, 2),
-            "total_net_pnl_inr": round(total_net_pnl, 2),
+            "realized_net_pnl_inr": round(realized_net_pnl, 2),
             "unrealized_pnl_inr": unrealized_pnl,
+            "total_net_pnl_inr": combined_net_pnl,
+            "combined_net_pnl_inr": combined_net_pnl,
             "intraday_net_pnl_inr": intraday_net_pnl,
             "positional_net_pnl_inr": positional_net_pnl,
             "total_account_equity": Config.TOTAL_ACCOUNT_EQUITY,
-            "current_equity": round(Config.TOTAL_ACCOUNT_EQUITY + total_net_pnl + unrealized_pnl, 2),
+            "current_equity": round(Config.TOTAL_ACCOUNT_EQUITY + combined_net_pnl, 2),
         }
 
     @classmethod

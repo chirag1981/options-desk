@@ -42,7 +42,7 @@ def test_paper_execution_and_mtm_lifecycle(app_ctx):
     candidate = SpreadCandidate(
         strategy_id="BULL_PUT",
         strategy_name="Bull Put Spread",
-        engine_type="INTRADAY",
+        engine_type="POSITIONAL",
         symbol="NIFTY",
         expiry="27-OCT-2026",
         lots=1,

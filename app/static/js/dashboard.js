@@ -120,12 +120,6 @@ function renderMarketRegime(an) {
         headerSpotVal.textContent = `NIFTY: ₹${an.spot_price.toLocaleString('en-IN', { minimumFractionDigits: 1 })} (${an.spot_change_pct >= 0 ? '+' : ''}${an.spot_change_pct.toFixed(2)}%)`;
     }
 
-    const providerBadge = document.getElementById('header-provider-badge');
-    if (providerBadge) {
-        providerBadge.textContent = an.data_status === 'FYERS_LIVE' ? 'FYERS LIVE' : 'SIMULATION DEMO';
-        providerBadge.className = an.data_status === 'FYERS_LIVE' ? 'provider-badge' : 'provider-badge chip-orange';
-    }
-
     // Panel 1 Elements
     const spotEl = document.getElementById('spot-price');
     if (spotEl) spotEl.textContent = `₹${an.spot_price.toLocaleString('en-IN', { minimumFractionDigits: 1 })}`;
@@ -508,14 +502,27 @@ function renderPerformance(sum) {
         elNetPnl.className = `pb-val ${sum.total_net_pnl_inr >= 0 ? 'text-green' : 'text-red'}`;
     }
 
+    const elPnlBreakdown = document.getElementById('perf-pnl-breakdown');
+    if (elPnlBreakdown) {
+        const real = sum.realized_net_pnl_inr || 0;
+        const mtm = sum.unrealized_pnl_inr || 0;
+        elPnlBreakdown.textContent = `Realized: ${real >= 0 ? '+' : ''}₹${real.toLocaleString('en-IN', {minimumFractionDigits: 0})} | MTM: ${mtm >= 0 ? '+' : ''}₹${mtm.toLocaleString('en-IN', {minimumFractionDigits: 0})}`;
+    }
+
     const elWinRate = document.getElementById('perf-win-rate');
     if (elWinRate) elWinRate.textContent = `${sum.win_rate_pct}%`;
+
+    const elWinSub = document.getElementById('perf-win-sub');
+    if (elWinSub) elWinSub.textContent = `${sum.win_count || 0} Wins / ${sum.loss_count || 0} Losses`;
 
     const elPf = document.getElementById('perf-profit-factor');
     if (elPf) elPf.textContent = sum.profit_factor.toFixed(2);
 
     const elTrades = document.getElementById('perf-total-trades');
-    if (elTrades) elTrades.textContent = sum.closed_trades_count || 0;
+    if (elTrades) elTrades.textContent = sum.total_trades || 0;
+
+    const elTradesSub = document.getElementById('perf-trades-sub');
+    if (elTradesSub) elTradesSub.textContent = `${sum.open_trades_count || 0} Open / ${sum.closed_trades_count || 0} Closed`;
 
     const elIntradayPnl = document.getElementById('perf-intraday-pnl');
     if (elIntradayPnl) {

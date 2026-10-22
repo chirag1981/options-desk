@@ -4,6 +4,7 @@ Handles page rendering and lightweight HTTP endpoints, delegating all domain
 calculations to the respective service modules.
 """
 
+import os
 import logging
 from flask import Blueprint, render_template, jsonify, request, Response
 

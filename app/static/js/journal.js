@@ -7,6 +7,8 @@ let currentFilter = 'ALL';
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     fetchJournalData();
+    // Auto-sync journal every 10 seconds
+    setInterval(fetchJournalData, 10000);
 });
 
 function initFilters() {
@@ -35,6 +37,13 @@ async function fetchJournalData() {
         if (netPnlEl) {
             netPnlEl.textContent = `${sum.total_net_pnl_inr >= 0 ? '+' : ''}₹${sum.total_net_pnl_inr.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
             netPnlEl.className = `mc-val ${sum.total_net_pnl_inr >= 0 ? 'text-green' : 'text-red'}`;
+        }
+
+        const pnlSubEl = document.getElementById('jm-pnl-sub');
+        if (pnlSubEl) {
+            const real = sum.realized_net_pnl_inr || 0;
+            const mtm = sum.unrealized_pnl_inr || 0;
+            pnlSubEl.textContent = `Realized: ${real >= 0 ? '+' : ''}₹${real.toLocaleString('en-IN', {minimumFractionDigits: 2})} | MTM: ${mtm >= 0 ? '+' : ''}₹${mtm.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
         }
 
         const winRateEl = document.getElementById('jm-win-rate');
