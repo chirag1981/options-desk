@@ -9,7 +9,11 @@
             <h2>Read-Only System Diagnostics & Verification</h2>
             <p>Real-time checks for broker connectivity, quote freshness, portfolio risk budget limits, and paper trading isolation.</p>
         </div>
-        <div class="page-actions">
+        <div class="page-actions" style="display:flex; align-items:center; gap:0.65rem;">
+            <a href="{{ url_for('main.dashboard') }}" class="btn-3d btn-secondary btn-sm" title="Return to Trading Dashboard">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                <span>Dashboard</span>
+            </a>
             <button class="btn-3d btn-gold btn-sm" onclick="fetchDiagnostics()" title="Execute Real-Time Health Diagnostics" aria-label="Re-run Checks">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                 <span>Re-run Checks</span>

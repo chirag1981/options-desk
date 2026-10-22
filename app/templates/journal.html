@@ -9,10 +9,14 @@
             <h2>Paper Trading Journal & Audit Log</h2>
             <p>Auditable record of all defined-risk options-selling executions, MTM valuations, exits, and statutory charges.</p>
         </div>
-        <div class="page-actions">
+        <div class="page-actions" style="display:flex; align-items:center; gap:0.65rem;">
+            <a href="{{ url_for('main.dashboard') }}" class="btn-3d btn-secondary btn-sm" title="Return to Trading Dashboard">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                <span>Dashboard</span>
+            </a>
             <a href="{{ url_for('main.api_export_csv') }}" class="btn-3d btn-gold btn-sm" title="Export Closed Trades to CSV" aria-label="Export Journal CSV">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                <span>Export Journal CSV</span>
+                <span>Export CSV</span>
             </a>
         </div>
     </div>

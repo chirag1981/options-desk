@@ -9,6 +9,16 @@
             <h2>Engine & Risk Configuration</h2>
             <p>Active parameters for Intraday and Positional defined-risk options-selling engines and shared risk guards.</p>
         </div>
+        <div class="page-actions" style="display:flex; align-items:center; gap:0.65rem;">
+            <a href="{{ url_for('main.dashboard') }}" class="btn-3d btn-secondary btn-sm" title="Return to Trading Dashboard">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                <span>Dashboard</span>
+            </a>
+            <a href="{{ url_for('main.diagnostics_page') }}" class="btn-3d btn-gold btn-sm" title="Run System Diagnostics">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                <span>Diagnostics</span>
+            </a>
+        </div>
     </div>
 
     <div class="settings-grid">

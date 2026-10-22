@@ -9,10 +9,14 @@
             <h2>Deep-Dive Open Interest & Key Levels</h2>
             <p>Strike-level Put and Call Open Interest flow, writer momentum, and support/resistance walls.</p>
         </div>
-        <div class="page-actions" style="display:flex; align-items:center; gap:0.75rem;">
-            <button class="btn-3d btn-secondary btn-sm" onclick="fetchAnalysisData()" title="Refresh Market Data Immediately" aria-label="Refresh Data">
+        <div class="page-actions" style="display:flex; align-items:center; gap:0.65rem;">
+            <a href="{{ url_for('main.dashboard') }}" class="btn-3d btn-secondary btn-sm" title="Return to Trading Dashboard">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                <span>Dashboard</span>
+            </a>
+            <button class="btn-3d btn-gold btn-sm" onclick="fetchAnalysisData()" title="Refresh Market Data Immediately" aria-label="Refresh Data">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                <span>Refresh</span>
+                <span>Refresh Data</span>
             </button>
             <span class="refresh-pill" id="analysis-refresh-pill">Auto-Refreshing (15s)</span>
         </div>
