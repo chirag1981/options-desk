@@ -180,7 +180,7 @@ def api_positions():
 
     open_positions = TradePosition.query.filter_by(status="OPEN").order_by(TradePosition.id.desc()).all()
     closed_positions = TradePosition.query.filter(
-        TradePosition.status.in_(["CLOSED", "STOPPED_OUT", "TARGET_HIT", "SESSION_EXIT"])
+        TradePosition.status != "OPEN"
     ).order_by(TradePosition.id.desc()).limit(20).all()
 
     summary = PerformanceAnalytics.get_portfolio_summary()

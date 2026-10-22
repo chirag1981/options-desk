@@ -31,7 +31,7 @@ class PerformanceAnalytics:
         positions = TradePosition.query.all()
 
         total_trades = len(positions)
-        closed_trades = [p for p in positions if p.status in ("CLOSED", "STOPPED_OUT", "TARGET_HIT", "SESSION_EXIT")]
+        closed_trades = [p for p in positions if p.status != "OPEN"]
         open_trades = [p for p in positions if p.status == "OPEN"]
 
         wins = [p for p in closed_trades if p.net_pnl_inr > 0]
