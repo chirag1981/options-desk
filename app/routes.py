@@ -22,6 +22,25 @@ log = logging.getLogger("routes")
 main_bp = Blueprint("main", __name__)
 
 
+@main_bp.app_context_processor
+def inject_global_market_quote():
+    """Injects live NIFTY spot quote into all templates so navbar is always populated."""
+    try:
+        spot, spot_chg, status = MarketDataProvider.get_spot_price()
+        return {
+            "nav_spot_price": spot,
+            "nav_spot_change_pct": spot_chg,
+            "nav_spot_status": status,
+        }
+    except Exception as e:
+        log.warning(f"Failed injecting nav spot quote: {e}")
+        return {
+            "nav_spot_price": 24500.0,
+            "nav_spot_change_pct": 0.35,
+            "nav_spot_status": "SIMULATED_DEMO",
+        }
+
+
 # ---------------- PAGE ROUTES ----------------
 
 @main_bp.route("/")

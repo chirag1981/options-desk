@@ -94,7 +94,7 @@
             <div class="header-right">
                 <div class="live-pill" id="header-spot-pill" title="Live NIFTY 50 Spot Quote">
                     <span class="dot-live"></span>
-                    <span id="header-spot-val">NIFTY: --</span>
+                    <span id="header-spot-val" class="font-mono">NIFTY: ₹{{ "{:,.1f}".format(nav_spot_price) }} ({{ "+" if nav_spot_change_pct >= 0 else "" }}{{ "{:.2f}".format(nav_spot_change_pct) }}%)</span>
                 </div>
                 <div class="sync-badge" title="Entire project data auto-refreshes every 5 minutes">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
@@ -114,6 +114,29 @@
                 &bull; Paper-Trading Simulation</p>
         </div>
     </footer>
+
+    <!-- Global Nav Spot Quote Updater (Runs on all pages) -->
+    <script>
+    async function updateGlobalNavSpot() {
+        try {
+            const res = await fetch('/api/market-data');
+            const json = await res.json();
+            if (json.status === 'success' && json.data) {
+                const an = json.data;
+                const el = document.getElementById('header-spot-val');
+                if (el) {
+                    const isPos = (an.spot_change_pct || 0) >= 0;
+                    el.textContent = `NIFTY: ₹${an.spot_price.toLocaleString('en-IN', { minimumFractionDigits: 1 })} (${isPos ? '+' : ''}${an.spot_change_pct.toFixed(2)}%)`;
+                }
+            }
+        } catch (e) {
+            // Silently fallback to server-rendered spot quote
+        }
+    }
+    document.addEventListener('DOMContentLoaded', updateGlobalNavSpot);
+    // Refresh spot quote every 1 minute
+    setInterval(updateGlobalNavSpot, 60000);
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>
