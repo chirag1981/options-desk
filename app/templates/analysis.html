@@ -7,7 +7,7 @@
     <div class="page-header">
         <div class="page-title-group">
             <h2>Deep-Dive Open Interest & Key Levels</h2>
-            <p>Strike-level Put and Call Open Interest flow, writer momentum, and support/resistance walls.</p>
+            <p>Live strike-level Put and Call Open Interest flow, writer momentum, and structural support/resistance walls.</p>
         </div>
         <div class="page-actions" style="display:flex; align-items:center; gap:0.65rem;">
             <a href="{{ url_for('main.dashboard') }}" class="btn-3d btn-secondary btn-sm" title="Return to Trading Dashboard">
@@ -18,65 +18,134 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                 <span>Refresh Data</span>
             </button>
-            <span class="refresh-pill" id="analysis-refresh-pill">Auto-Refreshing (15s)</span>
+            <span class="sync-badge" id="analysis-sync-badge" title="Market data auto-refreshes every 5 minutes">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span>5m sync</span>
+            </span>
         </div>
     </div>
 
     <div class="analysis-summary-grid">
+        <!-- CARD 1: UNDERLYING MARKET BIAS -->
         <div class="desk-card">
             <div class="card-header">
-                <h3>Underlying Market Bias</h3>
+                <div class="card-title-group">
+                    <span class="card-panel-num">01</span>
+                    <h3>Underlying Market Bias</h3>
+                </div>
+                <span class="pcr-badge" id="an-pcr-badge">PCR: --</span>
             </div>
             <div class="card-body">
-                <div class="analysis-metric-row">
-                    <span class="am-label">NIFTY 50 Spot</span>
-                    <span class="am-val font-mono" id="an-spot">--</span>
+                <div class="regime-hero" style="border-bottom:none; padding-bottom:0;">
+                    <div class="spot-metric">
+                        <span class="metric-label">NIFTY 50 Spot</span>
+                        <div class="spot-large" id="an-spot">--</div>
+                        <span class="spot-chg" id="an-spot-chg">--</span>
+                    </div>
+                    <div class="regime-metric">
+                        <span class="metric-label">Market Bias & Regime</span>
+                        <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                            <span class="bias-badge" id="an-bias">--</span>
+                            <span class="regime-badge" id="an-regime">--</span>
+                        </div>
+                        <span class="bias-text" id="an-momentum-text">Writer Momentum: --</span>
+                    </div>
                 </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">Market Bias</span>
-                    <span class="bias-badge" id="an-bias">--</span>
-                </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">Market Regime</span>
-                    <span class="regime-badge" id="an-regime">--</span>
-                </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">Put-Call Ratio (PCR)</span>
-                    <span class="am-val font-mono" id="an-pcr">--</span>
+
+                <div class="data-quality-grid" style="margin-top:0.85rem; margin-bottom:0;">
+                    <div class="dq-item">
+                        <span class="dq-label">Put-Call Ratio (PCR)</span>
+                        <span class="dq-val" id="an-pcr-val">--</span>
+                    </div>
+                    <div class="dq-item">
+                        <span class="dq-label">Total PE OI vs CE OI</span>
+                        <span class="dq-val" id="an-oi-totals">--</span>
+                    </div>
+                    <div class="dq-item">
+                        <span class="dq-label">Net ΔOI Position Shift</span>
+                        <span class="dq-val" id="an-net-delta">--</span>
+                    </div>
+                    <div class="dq-item">
+                        <span class="dq-label">ATM Implied Volatility</span>
+                        <span class="dq-val" id="an-atm-iv">--</span>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <!-- CARD 2: KEY STRUCTURAL OI BOUNDARIES -->
         <div class="desk-card">
             <div class="card-header">
-                <h3>Key Structural OI Boundaries</h3>
+                <div class="card-title-group">
+                    <span class="card-panel-num">02</span>
+                    <h3>Key Structural OI Boundaries</h3>
+                </div>
+                <span class="status-chip chip-gold" id="an-boundaries-status">BOUNDARIES ACTIVE</span>
             </div>
             <div class="card-body">
-                <div class="analysis-metric-row">
-                    <span class="am-label">R1 Call Wall (Ceiling)</span>
-                    <span class="am-val font-mono text-red" id="an-r1">--</span>
+                <div class="walls-grid" style="margin-bottom:0.75rem;">
+                    <!-- R1 CALL WALL -->
+                    <div class="wall-card wall-resistance">
+                        <div class="wall-header">
+                            <span class="wall-tag">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                                R1 CALL WALL (CEILING)
+                            </span>
+                            <span class="wall-dist" id="an-r1-dist">-- pts away</span>
+                        </div>
+                        <div class="wall-strike" id="an-r1-strike">--</div>
+                        <div class="wall-footer">
+                            <span>Major Institutional Resistance</span>
+                            <span id="an-r2-sub">R2: --</span>
+                        </div>
+                    </div>
+
+                    <!-- S1 PUT WALL -->
+                    <div class="wall-card wall-support">
+                        <div class="wall-header">
+                            <span class="wall-tag">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+                                S1 PUT WALL (FLOOR)
+                            </span>
+                            <span class="wall-dist" id="an-s1-dist">-- pts away</span>
+                        </div>
+                        <div class="wall-strike" id="an-s1-strike">--</div>
+                        <div class="wall-footer">
+                            <span>Major Institutional Support</span>
+                            <span id="an-s2-sub">S2: --</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">R2 Secondary Resistance</span>
-                    <span class="am-val font-mono" id="an-r2">--</span>
-                </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">S1 Put Wall (Floor)</span>
-                    <span class="am-val font-mono text-green" id="an-s1">--</span>
-                </div>
-                <div class="analysis-metric-row">
-                    <span class="am-label">S2 Secondary Support</span>
-                    <span class="am-val font-mono" id="an-s2">--</span>
+
+                <div class="flow-metrics-box">
+                    <div class="flow-row">
+                        <span>Safe Resistance Cushion</span>
+                        <span class="font-mono text-red" id="an-r1-cushion">--</span>
+                    </div>
+                    <div class="flow-row">
+                        <span>Safe Support Cushion</span>
+                        <span class="font-mono text-green" id="an-s1-cushion">--</span>
+                    </div>
+                    <div class="flow-row">
+                        <span>Confidence & Regime Strength</span>
+                        <span class="flow-badge" id="an-confidence-badge">--</span>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Strike Level Chain Breakdown -->
+    <!-- LIVE OPTION CHAIN DATA -->
     <div class="desk-card table-card" style="margin-top: 1.5rem;">
         <div class="card-header">
-            <h3>Option Chain Strikes Snapshot</h3>
-            <span id="chain-expiry-label">Active Expiry: --</span>
+            <div class="card-title-group">
+                <span class="card-panel-num">03</span>
+                <h3>Live Option Chain Data (OI & Market Structure)</h3>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="count-pill" id="chain-expiry-label">Active Expiry: --</span>
+                <span class="status-chip chip-gold" id="chain-status-chip">LIVE CHAIN</span>
+            </div>
         </div>
         <div class="card-body no-padding">
             <div class="table-responsive">

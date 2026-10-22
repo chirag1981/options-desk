@@ -59,12 +59,14 @@ def settings_page():
 
 @main_bp.route("/api/market-data")
 def api_market_data():
-    """Returns current spot price, OI walls, PCR, and regime classification."""
+    """Returns current spot price, OI walls, PCR, regime classification, and live strike chain."""
     chain_data = MarketDataProvider.get_option_chain()
     analysis = MarketAnalyzer.analyze_chain(chain_data)
+    chain = chain_data.get("chain_by_strike", {})
     return jsonify({
         "status": "success",
         "data": analysis.to_dict(),
+        "chain_by_strike": chain,
     })
 
 
