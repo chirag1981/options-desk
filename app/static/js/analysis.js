@@ -1,17 +1,17 @@
 /**
  * app/static/js/analysis.js — Deep-Dive Live Option Chain & Key Levels Controller
- * Auto-refreshes every 5 minutes in sync with project data lifecycle standards.
+ * Auto-refreshes every 3 minutes in sync with project data lifecycle standards.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchAnalysisData();
-    // Refresh market data every 5 minutes (300,000 ms) in accordance with project data sync standard
-    setInterval(fetchAnalysisData, 300000);
+    // Refresh market data every 3 minutes (180,000 ms) in accordance with project data sync standard
+    setInterval(fetchAnalysisData, 180000);
 });
 
 async function fetchAnalysisData() {
     try {
-        const res = await fetch('/api/market-data');
+        const res = await fetch('/api/market-data', { cache: 'no-store' });
         const json = await res.json();
         if (json.status !== 'success') return;
 

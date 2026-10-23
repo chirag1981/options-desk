@@ -344,3 +344,14 @@ def api_fyers_set_token():
         "message": "FYERS access token updated successfully! Live data activated."
     })
 
+
+@main_bp.after_request
+def add_no_cache_headers(response):
+    """Ensures API responses are never cached by browsers so polls always receive fresh data."""
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+

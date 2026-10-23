@@ -13,8 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. Active Open Positions auto-refreshed every 1 Minute (60,000 ms)
     setInterval(fetchPositionsData, 60000);
 
-    // 2. Entire project data (Market Regime, OI Structure, Strategy Candidates, Setup) auto-refreshed every 5 Minutes (300,000 ms)
-    setInterval(fetchProjectData, 300000);
+    // 2. Entire project data (Market Regime, OI Structure, Strategy Candidates, Setup) auto-refreshed every 3 Minutes (180,000 ms)
+    setInterval(fetchProjectData, 180000);
 });
 
 function initControls() {
@@ -67,12 +67,12 @@ function initControls() {
 }
 
 /**
- * Refreshes Entire Project Data (5-Minute Cycle)
+ * Refreshes Entire Project Data (3-Minute Cycle)
  * Fetches market regime, spot quote, OI structure & walls, auto-selection intelligence, and candidate payoffs.
  */
 async function fetchProjectData() {
     try {
-        const candRes = await fetch('/api/candidates').then(r => r.json());
+        const candRes = await fetch('/api/candidates', { cache: 'no-store' }).then(r => r.json());
         if (candRes.status === 'success') {
             currentCandidates = candRes;
             renderMarketRegime(candRes.analysis);
@@ -81,7 +81,7 @@ async function fetchProjectData() {
             renderStrategySetup();
         }
     } catch (err) {
-        console.warn("Project data polling warning (5m):", err);
+        console.warn("Project data polling warning (3m):", err);
     }
 }
 
@@ -91,7 +91,7 @@ async function fetchProjectData() {
  */
 async function fetchPositionsData() {
     try {
-        const posRes = await fetch('/api/positions').then(r => r.json());
+        const posRes = await fetch('/api/positions', { cache: 'no-store' }).then(r => r.json());
         if (posRes.status === 'success') {
             renderRiskAndPositions(posRes);
             renderPerformance(posRes.summary);

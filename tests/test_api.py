@@ -72,3 +72,13 @@ def test_api_positions_and_export_csv(client):
     assert r2.status_code == 200
     assert r2.mimetype == "text/csv"
     assert b"Trade ID,Engine,Strategy" in r2.data
+
+
+def test_api_no_cache_headers(client):
+    """Verifies that API polling endpoints return no-store/no-cache headers to prevent stale browser data."""
+    res = client.get("/api/candidates")
+    assert res.status_code == 200
+    assert "no-store" in res.headers.get("Cache-Control", "")
+    assert "no-cache" in res.headers.get("Cache-Control", "")
+    assert res.headers.get("Pragma") == "no-cache"
+

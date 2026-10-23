@@ -36,7 +36,7 @@ Only fully hedged credit spreads are permitted (strictly zero naked options allo
 
 ### 5. Independent Refresh Cycles
 - **Active Open Positions**: Synchronized every **1 Minute** (60,000 ms) with real-time mark-to-market (MTM) P&L, stop-loss and profit target monitoring.
-- **Entire Project Data**: Synchronized every **5 Minutes** (300,000 ms) with fresh option chain data, market regime analysis, OI wall shifts, and strategy candidate recalculations.
+- **Entire Project Data**: Synchronized every **3 Minutes** (180,000 ms) with fresh option chain data, market regime analysis, OI wall shifts, and strategy candidate recalculations.
 
 ---
 
