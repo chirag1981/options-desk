@@ -25,17 +25,29 @@ IST = ZoneInfo("Asia/Kolkata")
 
 class TransactionCostEngine:
     """
-    Calculates official statutory NSE transaction fees and taxes for options trading.
-    Authoritative statutory sources:
-    - Brokerage: Flat ₹20 per executed order leg.
-    - STT (Securities Transaction Tax) on Option Sell Turnover:
-      * Prior to Oct 1, 2024: 0.0625% (0.000625)
-      * Oct 1, 2024 to March 31, 2026: 0.10% (0.0010) (Finance Act No. 2, 2024)
-      * Effective April 1, 2026: 0.15% (0.0015) (Union Budget 2026 / NSE Circular)
-    - Exchange Turnover Fee: 0.05% (0.0005) on premium turnover.
-    - SEBI Turnover Fee: ₹10 per crore = 0.0001% (0.000001) on premium turnover.
-    - Stamp Duty: 0.003% (0.00003) on buy-side option turnover.
-    - GST: 18% on (Brokerage + Exchange turnover fees).
+    Calculates official statutory NSE and broker transaction fees and taxes for options trading.
+    Intended Broker: FYERS Securities (Online discount broker).
+    
+    Authoritative Statutory & Broker Sources:
+    1. Brokerage: Flat ₹20 per executed order leg (FYERS Tariff Schedule).
+    2. STT (Securities Transaction Tax) on Option Sell Turnover:
+       - Prior to Oct 1, 2024: 0.0625% (0.000625)
+       - Oct 1, 2024 to March 31, 2026: 0.10% (0.0010) (Finance Act No. 2, 2024)
+       - Effective April 1, 2026: 0.15% (0.0015) (Union Budget 2026 / NSE Circular)
+    3. NSE Exchange Turnover Charges (Options Premium):
+       - Prior to Oct 1, 2024: 0.05% (0.00050)
+       - Effective Oct 1, 2024: 0.03503% (0.0003503 or ₹35.03/lakh)
+         (NSE Circular Ref: NSE/FA/64232 under SEBI True-to-Label directive SEBI/HO/MRD/TPD-1/P/CIR/2024/92)
+    4. IPFT (Investor Protection Fund Trust):
+       - 0.0005% (0.000005 or ₹50 per crore) on total premium turnover (NSE Circular).
+    5. SEBI Turnover Fee:
+       - 0.0001% (0.000001 or ₹10 per crore) on total premium turnover (SEBI (Payment of Fees) Regulations).
+    6. Stamp Duty (Indian Stamp Act):
+       - 0.003% (0.00003 or ₹300 per crore) on buy-side option turnover.
+    7. Clearing Charges:
+       - 0.0% (FYERS self-clears through NSE Clearing Limited / NCL).
+    8. GST:
+       - 18% on (Brokerage + Exchange turnover charges + SEBI turnover fee + IPFT).
     """
 
     @classmethod
@@ -53,23 +65,58 @@ class TransactionCostEngine:
             return 0.001500  # 0.15% effective April 1, 2026
 
     @classmethod
-    def calculate_order_costs(
+    def get_exchange_turnover_rate(cls, as_of_date: Optional[date] = None) -> float:
+        """
+        Determines the NSE exchange turnover charge rate on options premium.
+        Authoritative Sources:
+        - Prior to Oct 1, 2024: 0.05% (0.00050)
+        - Effective Oct 1, 2024: 0.03503% (0.0003503 or ₹35.03/lakh)
+          (NSE Circular Ref: NSE/FA/64232 under SEBI Circular SEBI/HO/MRD/TPD-1/P/CIR/2024/92)
+        """
+        from datetime import date as dt_date
+        if as_of_date is None:
+            as_of_date = datetime.now(IST).date()
+
+        if as_of_date < dt_date(2024, 10, 1):
+            return Config.EXCHANGE_TURNOVER_LEGACY_PCT
+        return Config.EXCHANGE_TURNOVER_PCT
+
+    @classmethod
+    def get_ipft_rate(cls, as_of_date: Optional[date] = None) -> float:
+        """Determines the Investor Protection Fund Trust (IPFT) rate on options premium."""
+        return Config.IPFT_TURNOVER_PCT
+
+    @classmethod
+    def get_sebi_turnover_rate(cls, as_of_date: Optional[date] = None) -> float:
+        """Determines the SEBI turnover fee rate on options premium."""
+        return Config.SEBI_TURNOVER_PCT
+
+    @classmethod
+    def get_stamp_duty_buy_rate(cls, as_of_date: Optional[date] = None) -> float:
+        """Determines the Stamp Duty rate on buy-side options premium."""
+        return Config.STAMP_DUTY_BUY_PCT
+
+    @classmethod
+    def calculate_order_costs_breakdown(
         cls,
         legs: List[Dict[str, Any]],
         lots: int = 1,
         trade_date: Optional[date] = None,
-    ) -> float:
+    ) -> Dict[str, float]:
         """
-        Computes statutory fees for entering or exiting spread legs.
-        Applies date-effective STT rates so historical trades are not retrospectively miscalculated.
+        Computes detailed itemized statutory and broker fees for entering or exiting spread legs.
+        Returns exact floating-point breakdown of all cost components.
         """
         total_brokerage = len(legs) * Config.BROKERAGE_PER_ORDER
-        total_stt = 0.0
-        total_exchange_fee = 0.0
-        total_stamp_duty = 0.0
         total_turnover = 0.0
+        buy_turnover = 0.0
+        sell_turnover = 0.0
 
         stt_sell_rate = cls.get_stt_sell_rate(trade_date)
+        exchange_rate = cls.get_exchange_turnover_rate(trade_date)
+        ipft_rate = cls.get_ipft_rate(trade_date)
+        sebi_rate = cls.get_sebi_turnover_rate(trade_date)
+        stamp_duty_rate = cls.get_stamp_duty_buy_rate(trade_date)
         authoritative_lot_size = Config.get_lot_size(trade_date)
 
         for leg in legs:
@@ -80,17 +127,52 @@ class TransactionCostEngine:
             total_turnover += turnover
 
             if action == "SELL":
-                total_stt += turnover * stt_sell_rate
+                sell_turnover += turnover
             elif action == "BUY":
-                total_stamp_duty += turnover * Config.STAMP_DUTY_BUY_PCT
+                buy_turnover += turnover
 
-            total_exchange_fee += turnover * Config.EXCHANGE_TURNOVER_PCT
+        stt = sell_turnover * stt_sell_rate
+        exchange_fee = total_turnover * exchange_rate
+        ipft = total_turnover * ipft_rate
+        sebi_fee = total_turnover * sebi_rate
+        stamp_duty = buy_turnover * stamp_duty_rate
+        clearing_fee = total_turnover * Config.CLEARING_CHARGES_PCT
 
-        total_sebi_fee = total_turnover * Config.SEBI_TURNOVER_PCT
-        gst = (total_brokerage + total_exchange_fee + total_sebi_fee) * Config.GST_PCT
+        # GST is 18% on (Brokerage + Exchange turnover fee + SEBI turnover fee + IPFT)
+        taxable_base = total_brokerage + exchange_fee + sebi_fee + ipft
+        gst = taxable_base * Config.GST_PCT
 
-        total_charges = total_brokerage + total_stt + total_exchange_fee + total_sebi_fee + total_stamp_duty + gst
-        return round(total_charges, 2)
+        total = total_brokerage + stt + exchange_fee + ipft + sebi_fee + stamp_duty + clearing_fee + gst
+
+        return {
+            "brokerage": total_brokerage,
+            "turnover": total_turnover,
+            "buy_turnover": buy_turnover,
+            "sell_turnover": sell_turnover,
+            "stt": stt,
+            "exchange_fee": exchange_fee,
+            "ipft": ipft,
+            "sebi_fee": sebi_fee,
+            "stamp_duty": stamp_duty,
+            "clearing_fee": clearing_fee,
+            "gst_taxable_base": taxable_base,
+            "gst": gst,
+            "total": total,
+        }
+
+    @classmethod
+    def calculate_order_costs(
+        cls,
+        legs: List[Dict[str, Any]],
+        lots: int = 1,
+        trade_date: Optional[date] = None,
+    ) -> float:
+        """
+        Computes total statutory and broker fees rounded to 2 decimal places.
+        Applies date-effective STT and exchange rates so historical trades are accurately calculated.
+        """
+        breakdown = cls.calculate_order_costs_breakdown(legs, lots=lots, trade_date=trade_date)
+        return round(breakdown["total"], 2)
 
 
 

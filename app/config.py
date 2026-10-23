@@ -104,12 +104,16 @@ class Config:
     INTRADAY_SESSION_CLOSE_TIME = "15:20:00"
     POSITIONAL_PRE_EXPIRY_EXIT_TIME = "14:30:00"  # Expiry day exit
 
-    # Statutory NSE Charges Base Rates
-    BROKERAGE_PER_ORDER = 20.0
-    EXCHANGE_TURNOVER_PCT = 0.0005          # 0.05% of premium turnover
-    SEBI_TURNOVER_PCT = 0.000001           # ₹10 per crore (0.0001%)
-    STAMP_DUTY_BUY_PCT = 0.00003           # 0.003% on buy turnover
-    GST_PCT = 0.18                         # 18% on (Brokerage + Exchange fees)
+    # Intended Broker & Statutory Fee Schedule (FYERS / NSE Derivative Segment)
+    BROKER_NAME = "FYERS"
+    BROKERAGE_PER_ORDER = 20.0             # ₹20 flat per executed order leg
+    EXCHANGE_TURNOVER_PCT = 0.0003503      # 0.03503% (₹35.03/lakh) post-Oct 1, 2024 (NSE/FA/64232)
+    EXCHANGE_TURNOVER_LEGACY_PCT = 0.00050 # 0.05% legacy pre-Oct 1, 2024 rate
+    IPFT_TURNOVER_PCT = 0.000005           # ₹50 per crore (0.0005%) on premium turnover
+    SEBI_TURNOVER_PCT = 0.000001           # ₹10 per crore (0.0001%) on premium turnover
+    STAMP_DUTY_BUY_PCT = 0.00003           # 0.003% on buy turnover (Indian Stamp Rules)
+    CLEARING_CHARGES_PCT = 0.0             # Nil (self-clearing via NSE Clearing Limited)
+    GST_PCT = 0.18                         # 18% on (Brokerage + Exchange + SEBI + IPFT)
 
     # Auto-Trading Control
     AUTO_TRADE_ENABLED: bool = False

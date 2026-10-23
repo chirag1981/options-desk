@@ -12,25 +12,33 @@ from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# Versioned Contract Specifications by Date
-# Format: list of (effective_from_date, effective_to_date, lot_size, strike_step)
+# Versioned Contract Specifications by Date & Expiry Series
+# Authoritative Source: National Stock Exchange of India (NSE) Circulars:
+# 1. Circular No. NSE/FAOP/61328 (Dated Mar 28, 2024; Effective Apr 26, 2024): NIFTY lot size 25.
+# 2. Circular No. NSE/FAOP/64625 (Dated Oct 18, 2024; Effective Nov 20, 2024): NIFTY lot size revised from 25 to 75.
+# 3. Circular No. NSE/FAOP/70616 (Dated Oct 3, 2025; Effective EOD Oct 28, 2025):
+#    - NIFTY lot size revised from 75 to 65.
+#    - TRANSITIONAL TREATMENT: Existing weekly and monthly contracts expiring in November 2025
+#      and December 2025 continued with existing lot size of 75 until expiry.
+#    - Existing quarterly/half-yearly contracts transitioned at EOD on December 30, 2025.
+#    - First revised-lot weekly and monthly contracts took effect starting with January 2026 expiry series.
 NIFTY_SPEC_SCHEDULE = [
     {
         "effective_from": date(2020, 1, 1),
         "effective_to": date(2024, 11, 19),
         "lot_size": 25,
         "strike_step": 50.0,
-        "circular": "NSE/FAOP/PRE_2024",
+        "circular": "NSE/FAOP/61328",
     },
     {
         "effective_from": date(2024, 11, 20),
-        "effective_to": date(2025, 10, 27),
+        "effective_to": date(2025, 12, 30),
         "lot_size": 75,
         "strike_step": 50.0,
-        "circular": "NSE/FAOP/64625",
+        "circular": "NSE/FAOP/64625 & NSE/FAOP/70616 Transition",
     },
     {
-        "effective_from": date(2025, 10, 28),
+        "effective_from": date(2025, 12, 31),
         "effective_to": date(2099, 12, 31),
         "lot_size": 65,
         "strike_step": 50.0,

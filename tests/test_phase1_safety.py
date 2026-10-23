@@ -323,31 +323,78 @@ def test_stt_rate_date_effectiveness():
     assert TransactionCostEngine.get_stt_sell_rate(date(2026, 10, 23)) == 0.001500
 
 
+def test_exchange_turnover_rate_date_effectiveness():
+    """
+    Verifies NSE exchange turnover charge rate transition:
+    - Pre-Oct 1, 2024: 0.050% (0.00050)
+    - Effective Oct 1, 2024: 0.03503% (0.0003503) per NSE Circular NSE/FA/64232 under SEBI True-to-Label
+    """
+    # Pre-Oct 2024
+    assert TransactionCostEngine.get_exchange_turnover_rate(date(2024, 9, 30)) == 0.00050
+
+    # Effective Oct 1, 2024 onward
+    assert TransactionCostEngine.get_exchange_turnover_rate(date(2024, 10, 1)) == 0.0003503
+    assert TransactionCostEngine.get_exchange_turnover_rate(date(2025, 12, 15)) == 0.0003503
+    assert TransactionCostEngine.get_exchange_turnover_rate(date(2026, 10, 23)) == 0.0003503
+
+
+def test_individual_fee_components_authoritative_rates():
+    """
+    Verifies that IPFT, SEBI turnover fees, stamp duty, and clearing charges
+    strictly adhere to official statutory and broker guidelines.
+    """
+    # IPFT: 0.0005% (₹50 / crore)
+    assert TransactionCostEngine.get_ipft_rate(date(2026, 10, 23)) == 0.000005
+
+    # SEBI turnover fee: 0.0001% (₹10 / crore)
+    assert TransactionCostEngine.get_sebi_turnover_rate(date(2026, 10, 23)) == 0.000001
+
+    # Stamp duty: 0.003% (₹300 / crore on buy turnover)
+    assert TransactionCostEngine.get_stamp_duty_buy_rate(date(2026, 10, 23)) == 0.00003
+
+    # Brokerage per order leg (FYERS: ₹20 flat)
+    assert Config.BROKERAGE_PER_ORDER == 20.0
+
+    # Clearing charges (FYERS: Nil / self-cleared via NCL)
+    assert Config.CLEARING_CHARGES_PCT == 0.0
+
+
 def test_order_costs_deterministic_calculation():
     """
     Verifies exact statutory fees calculation for a 1-lot spread.
-    Leg 1: SELL 65 qty @ 50.0 (turnover = 3250)
-    Leg 2: BUY 65 qty @ 30.0 (turnover = 1950)
-    Total premium turnover = 5200.
-    Brokerage = 2 * 20 = 40.
-    Exchange turnover = 5200 * 0.0005 = 2.60.
-    GST (18% on Brokerage + Exchange) = 0.18 * 42.60 = 7.668.
-    SEBI = 5200 * 0.000001 = 0.0052.
-    Stamp duty (buy side) = 1950 * 0.00003 = 0.0585.
-    STT (sell side) on 2026-04-01: 3250 * 0.0015 = 4.875.
-    Expected total = 40 + 2.60 + 7.668 + 0.0052 + 0.0585 + 4.875 = 55.2067 -> 55.21.
+    Intended Broker: FYERS Securities
+    Leg 1: SELL 65 qty @ 50.0 (turnover = ₹3,250.00)
+    Leg 2: BUY 65 qty @ 30.0 (turnover = ₹1,950.00)
+    Total premium turnover = ₹5,200.00
+    Brokerage = 2 * ₹20.0 = ₹40.00
+    NSE Exchange turnover fee (post-Oct 1, 2024) = 5,200 * 0.0003503 = ₹1.82156
+    IPFT (0.0005%) = 5,200 * 0.000005 = ₹0.02600
+    SEBI fee (0.0001%) = 5,200 * 0.000001 = ₹0.00520
+    Stamp duty (buy side, 0.003%) = 1,950 * 0.00003 = ₹0.05850
+    GST taxable base = 40.00 + 1.82156 + 0.02600 + 0.00520 = ₹41.85276
+    GST (18%) = 41.85276 * 0.18 = ₹7.5334968
+
+    Case 1: On 2026-04-01, STT is 0.15% (3,250 * 0.0015 = ₹4.875)
+    Expected total = 40 + 4.875 + 1.82156 + 0.02600 + 0.00520 + 0.05850 + 7.5334968 = ₹54.3197568 -> ₹54.32
+
+    Case 2: On 2026-03-31, STT is 0.10% (3,250 * 0.0010 = ₹3.250)
+    Expected total = 40 + 3.250 + 1.82156 + 0.02600 + 0.00520 + 0.05850 + 7.5334968 = ₹52.6947568 -> ₹52.69
+
+    Case 3: Pre-Oct 1, 2024 (e.g. 2024-09-30, STT 0.0625%, Exchange 0.05%)
+    Expected total = ₹52.39
     """
     legs = [
         {"action": "SELL", "price": 50.0, "quantity": 65},
         {"action": "BUY", "price": 30.0, "quantity": 65},
     ]
     cost_apr_2026 = TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2026, 4, 1))
-    assert cost_apr_2026 == 55.21
+    assert cost_apr_2026 == 54.32
 
-    # On 2026-03-31, STT is 0.10% (3250 * 0.001 = 3.25)
-    # Expected total = 40 + 2.60 + 7.668 + 0.0052 + 0.0585 + 3.25 = 53.5817 -> 53.58.
     cost_mar_2026 = TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2026, 3, 31))
-    assert cost_mar_2026 == 53.58
+    assert cost_mar_2026 == 52.69
+
+    cost_sep_2024 = TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2024, 9, 30))
+    assert cost_sep_2024 == 52.39
 
 
 # ---------------- 6. Risk Evaluation with Transaction Costs ----------------
@@ -390,13 +437,64 @@ def test_risk_evaluation_includes_transaction_costs(app_ctx):
 def test_contract_registry_versioned_lot_sizes():
     """
     Verifies authoritative NIFTY lot sizes across official NSE historical revision dates:
-    - Pre-Nov 20, 2024: 25
-    - Nov 20, 2024 to Oct 27, 2025: 75
-    - Oct 28, 2025 onward: 65 (Circular NSE/FAOP/70616)
+    - Pre-Nov 20, 2024: 25 (Circular NSE/FAOP/61328)
+    - Nov 20, 2024 to Dec 30, 2025: 75 (Circular NSE/FAOP/64625 & Transitional Schedule)
+    - Dec 31, 2025 onward: 65 (Circular NSE/FAOP/70616)
     """
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 6, 1)) == 25
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 3, 1)) == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 11, 27)) == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 30)) == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 31)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 1)) == 65
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 10, 23)) == 65
+
+
+def test_nifty_lot_size_transition_boundaries_official_circulars():
+    """
+    Verifies the 6 mandatory boundary conditions per NSE circulars:
+    1. November 2025 NIFTY expiry (27-NOV-2025) -> lot size 75
+    2. December 2025 NIFTY expiry (24-DEC-2025) -> lot size 75
+    3. First eligible revised-lot weekly expiry (01-JAN-2026) -> lot size 65
+    4. First eligible revised-lot monthly expiry (29-JAN-2026) -> lot size 65
+    5. Historical 25-lot contracts (27-JUN-2024) -> lot size 25
+    6. Current 65-lot contracts (27-OCT-2026) -> lot size 65
+    """
+    # 1. November 2025 NIFTY expiry
+    valid, _, lot_nov25 = ContractRegistry.validate_contract("NIFTY25NOV24000PE", strike=24000.0, expiry="27-NOV-2025", provided_lot_size=75)
+    assert valid is True
+    assert lot_nov25 == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 11, 27)) == 75
+
+    # 2. December 2025 NIFTY expiry
+    valid, _, lot_dec25 = ContractRegistry.validate_contract("NIFTY25DEC24000PE", strike=24000.0, expiry="24-DEC-2025", provided_lot_size=75)
+    assert valid is True
+    assert lot_dec25 == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 24)) == 75
+
+    # 3. First eligible revised-lot weekly expiry (January 2026)
+    valid, _, lot_jan_weekly = ContractRegistry.validate_contract("NIFTY2610124000PE", strike=24000.0, expiry="01-JAN-2026", provided_lot_size=65)
+    assert valid is True
+    assert lot_jan_weekly == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 1)) == 65
+
+    # 4. First eligible revised-lot monthly expiry (January 2026)
+    valid, _, lot_jan_monthly = ContractRegistry.validate_contract("NIFTY26JAN24000PE", strike=24000.0, expiry="29-JAN-2026", provided_lot_size=65)
+    assert valid is True
+    assert lot_jan_monthly == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 29)) == 65
+
+    # 5. Historical 25-lot contracts
+    valid, _, lot_hist25 = ContractRegistry.validate_contract("NIFTY24JUN24000PE", strike=24000.0, expiry="27-JUN-2024", provided_lot_size=25)
+    assert valid is True
+    assert lot_hist25 == 25
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 6, 27)) == 25
+
+    # 6. Current 65-lot contracts
+    valid, _, lot_curr65 = ContractRegistry.validate_contract("NIFTY26OCT24500PE", strike=24500.0, expiry="27-OCT-2026", provided_lot_size=65)
+    assert valid is True
+    assert lot_curr65 == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 10, 27)) == 65
 
 
 def test_contract_validation_rejects_invalid_strike_or_lot():
@@ -422,23 +520,57 @@ def test_iron_butterfly_remains_strictly_disabled():
     assert any("Iron Butterfly active entry is disabled" in r for r in ib_cand.rejection_reasons)
 
 
-# ---------------- 9. Hardening: GST Taxable Base Completeness ----------------
+# ---------------- 9. Hardening: GST Taxable Base & Component Breakdown ----------------
 
 def test_gst_taxable_base_includes_sebi_turnover_fee():
     """
     Verifies that GST taxable base strictly includes Brokerage, Exchange turnover charges,
-    and SEBI turnover fees under official statutory guidelines.
+    SEBI turnover fees, and IPFT, while excluding STT and Stamp Duty.
+    Also verifies exact component breakdown against published broker tariffs (FYERS).
     """
     legs = [
         {"action": "SELL", "price": 50.0, "quantity": 65},
         {"action": "BUY", "price": 30.0, "quantity": 65},
     ]
-    # Turnover = 5200. Brokerage = 40. Exchange = 2.60. SEBI = 0.0052.
-    # Base = 40 + 2.60 + 0.0052 = 42.6052. GST = 0.18 * 42.6052 = 7.668936.
-    # Stamp duty = 0.0585. STT (Apr 2026) = 4.875.
-    # Total = 40 + 4.875 + 2.60 + 0.0052 + 0.0585 + 7.668936 = 55.207636 -> ₹55.21
-    total_cost = TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2026, 4, 1))
-    assert total_cost == 55.21
+    breakdown = TransactionCostEngine.calculate_order_costs_breakdown(legs, lots=1, trade_date=date(2026, 4, 1))
+
+    # 1. Turnover verification
+    assert breakdown["sell_turnover"] == 3250.0
+    assert breakdown["buy_turnover"] == 1950.0
+    assert breakdown["turnover"] == 5200.0
+
+    # 2. Brokerage (FYERS: ₹20 / leg)
+    assert breakdown["brokerage"] == 40.0
+
+    # 3. Exchange turnover charge (post-Oct 1, 2024: 0.03503%)
+    assert round(breakdown["exchange_fee"], 5) == round(5200.0 * 0.0003503, 5)
+
+    # 4. IPFT separated from exchange turnover charge (0.0005%)
+    assert round(breakdown["ipft"], 4) == round(5200.0 * 0.000005, 4)
+
+    # 5. SEBI turnover fee (₹10 / crore = 0.0001%)
+    assert round(breakdown["sebi_fee"], 4) == round(5200.0 * 0.000001, 4)
+
+    # 6. Stamp duty (buy side only: 0.003%)
+    assert round(breakdown["stamp_duty"], 4) == round(1950.0 * 0.00003, 4)
+
+    # 7. Clearing charges (0.0 for FYERS self-clearing member)
+    assert breakdown["clearing_fee"] == 0.0
+
+    # 8. STT (sell side only: 0.15% effective April 1, 2026)
+    assert round(breakdown["stt"], 3) == round(3250.0 * 0.0015, 3)
+
+    # 9. GST taxable base strictly includes Brokerage + Exchange + SEBI + IPFT (excludes STT & Stamp Duty)
+    expected_base = breakdown["brokerage"] + breakdown["exchange_fee"] + breakdown["sebi_fee"] + breakdown["ipft"]
+    assert round(breakdown["gst_taxable_base"], 5) == round(expected_base, 5)
+
+    # 10. GST (18%)
+    expected_gst = expected_base * 0.18
+    assert round(breakdown["gst"], 5) == round(expected_gst, 5)
+
+    # 11. Total rounded cost
+    assert round(breakdown["total"], 2) == 54.32
+    assert TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2026, 4, 1)) == 54.32
 
 
 # ---------------- 10. Hardening: Daily Loss Circuit Breaker & Cooldown ----------------
