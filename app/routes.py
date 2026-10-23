@@ -35,9 +35,9 @@ def inject_global_market_quote():
     except Exception as e:
         log.warning(f"Failed injecting nav spot quote: {e}")
         return {
-            "nav_spot_price": 24500.0,
-            "nav_spot_change_pct": 0.35,
-            "nav_spot_status": "SIMULATED_DEMO",
+            "nav_spot_price": 0.0,
+            "nav_spot_change_pct": 0.0,
+            "nav_spot_status": "DISCONNECTED",
         }
 
 
@@ -71,7 +71,8 @@ def diagnostics_page():
 @main_bp.route("/settings")
 def settings_page():
     """Renders engine settings and risk configuration page."""
-    return render_template("settings.html", config=Config)
+    spot, chg, status = MarketDataProvider.get_spot_price()
+    return render_template("settings.html", config=Config, fyers_connected=(status == "FYERS_LIVE"))
 
 
 # ---------------- REST API ENDPOINTS ----------------
@@ -80,6 +81,14 @@ def settings_page():
 def api_market_data():
     """Returns current spot price, OI walls, PCR, regime classification, and live strike chain."""
     chain_data = MarketDataProvider.get_option_chain()
+    if chain_data.get("spot_price", 0.0) <= 0:
+        return jsonify({
+            "status": "warning",
+            "message": "Live FYERS broker stream not connected. Please connect FYERS in Settings to stream live market data.",
+            "data_status": chain_data.get("data_status", "DISCONNECTED"),
+            "data": None,
+            "chain_by_strike": {},
+        })
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
     return jsonify({
@@ -92,7 +101,27 @@ def api_market_data():
 @main_bp.route("/api/candidates")
 def api_candidates():
     """Returns generated strategy candidates for Intraday and Positional engines."""
+    from app.trading import AutoTradeEngine
     chain_data = MarketDataProvider.get_option_chain()
+    if chain_data.get("spot_price", 0.0) <= 0:
+        return jsonify({
+            "status": "warning",
+            "message": "Live FYERS broker stream not connected. Please connect FYERS in Settings to stream live market data.",
+            "data_status": chain_data.get("data_status", "DISCONNECTED"),
+            "analysis": None,
+            "intraday": [],
+            "positional": [],
+            "previews": [],
+            "auto_selection": {
+                "selected_strategies": [],
+                "selected_strategy_id": None,
+                "strategy_name": "AWAITING LIVE FEED",
+                "mode": "DISCONNECTED",
+                "rationale": "Live FYERS market data feed is disconnected. Connect FYERS in Settings to stream live market data."
+            },
+            "auto_trade_enabled": AutoTradeEngine.is_enabled(),
+        })
+
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
 
@@ -106,7 +135,6 @@ def api_candidates():
     ib_cand = StrategyBuilder.build_iron_butterfly(analysis, chain, engine_type="INTRADAY")
 
     from app.strategies import AutoStrategySelector
-    from app.trading import AutoTradeEngine
     auto_sel = AutoStrategySelector.evaluate_auto_selection(analysis, chain)
 
     all_previews = [bp_cand.to_dict(), bc_cand.to_dict(), ic_cand.to_dict(), ib_cand.to_dict()]
@@ -146,6 +174,11 @@ def api_execute_auto_now():
     """Immediately executes all currently auto-selected strategies."""
     from app.trading import AutoTradeEngine
     chain_data = MarketDataProvider.get_option_chain()
+    if chain_data.get("spot_price", 0.0) <= 0:
+        return jsonify({
+            "status": "warning",
+            "message": "Auto-execution blocked: Live FYERS market data stream is disconnected. Please connect FYERS in Settings to execute paper trades."
+        })
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
 
@@ -218,6 +251,11 @@ def api_execute_candidate():
         }), 400
 
     chain_data = MarketDataProvider.get_option_chain()
+    if chain_data.get("spot_price", 0.0) <= 0:
+        return jsonify({
+            "status": "error",
+            "message": "Execution blocked: Live FYERS market data stream is disconnected. Please connect FYERS in Settings to execute paper trades.",
+        }), 400
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
 
@@ -316,32 +354,68 @@ def api_diagnostics():
 
 @main_bp.route("/api/fyers/set-token", methods=["POST"])
 def api_fyers_set_token():
-    """Allows updating the daily FYERS access token."""
-    import json
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    from app.market_data import MarketDataProvider, TOKEN_CACHE_FILE
-    from app.config import Config
+    """Explicitly saves and activates a FYERS access token."""
+    from app.market_data import MarketDataProvider
 
     payload = request.get_json() or {}
     token = payload.get("access_token", "").strip()
     if not token:
         return jsonify({"status": "error", "message": "No access_token provided"}), 400
 
-    IST = ZoneInfo("Asia/Kolkata")
-    today_str = datetime.now(IST).strftime("%Y-%m-%d")
-    MarketDataProvider._access_token = token
-    MarketDataProvider._token_date = today_str
-    try:
-        os.makedirs(Config.INSTANCE_DIR, exist_ok=True)
-        with open(TOKEN_CACHE_FILE, "w") as f:
-            json.dump({"date": today_str, "access_token": token}, f)
-    except Exception as e:
-        log.error(f"Failed writing token cache: {e}")
+    saved = MarketDataProvider.set_access_token(token)
+    if not saved:
+        return jsonify({"status": "error", "message": "Failed saving token to disk cache."}), 500
 
+    spot, chg, status = MarketDataProvider.get_spot_price()
+    if status == "FYERS_LIVE":
+        return jsonify({
+            "status": "success",
+            "message": f"FYERS Access Token verified! Live feed active (NIFTY Spot: ₹{spot:,.1f}).",
+            "data_status": "FYERS_LIVE",
+            "spot_price": spot,
+        })
+    else:
+        return jsonify({
+            "status": "warning",
+            "message": "Token saved to cache, but FYERS returned invalid token or market closed. Please verify token.",
+            "data_status": status,
+        })
+
+
+@main_bp.route("/api/fyers/connect", methods=["POST"])
+def api_fyers_connect():
+    """Performs automated zero-click authentication with FYERS."""
+    from app.market_data import MarketDataProvider
+    token = MarketDataProvider._authenticate_headless()
+    if token:
+        MarketDataProvider.set_access_token(token)
+        spot, chg, status = MarketDataProvider.get_spot_price()
+        return jsonify({
+            "status": "success",
+            "message": f"FYERS Zero-Click Login Successful! Live stream connected (NIFTY Spot: ₹{spot:,.1f}).",
+            "data_status": status,
+            "spot_price": spot,
+        })
+    else:
+        return jsonify({
+            "status": "error",
+            "message": "Automated FYERS login failed or rate-limited. You can paste an access token directly below.",
+        }), 400
+
+
+@main_bp.route("/api/fyers/status")
+def api_fyers_status():
+    """Returns current live broker stream status."""
+    from app.market_data import MarketDataProvider
+    spot, chg, status = MarketDataProvider.get_spot_price()
     return jsonify({
         "status": "success",
-        "message": "FYERS access token updated successfully! Live data activated."
+        "data_status": status,
+        "is_live": status == "FYERS_LIVE",
+        "spot_price": spot,
+        "spot_change_pct": chg,
+        "token_date": MarketDataProvider._token_date,
+        "has_token": bool(MarketDataProvider._access_token),
     })
 
 

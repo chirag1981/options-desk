@@ -11,6 +11,7 @@ import os
 import json
 import time
 import base64
+import hashlib
 import logging
 import threading
 import urllib.parse
@@ -107,7 +108,7 @@ class MarketDataProvider:
         redirect_uri = Config.FYERS_REDIRECT_URI
 
         if not all([fy_id, app_id, app_secret, totp_key, pin]):
-            log.warning("FYERS credentials missing in configuration. Running in simulation mode.")
+            log.warning("FYERS credentials missing in configuration.")
             return None
 
         try:
@@ -118,34 +119,29 @@ class MarketDataProvider:
                 "Content-Type": "application/json"
             })
 
-            # 1. Send Login OTP via TOTP
-            totp = pyotp.TOTP(totp_key.replace(" ", "").strip())
-            current_otp = totp.now()
-
-            send_otp_url = "https://api-t2.fyers.in/vagator/v2/send_login_otp_v2"
+            # 1. Send Login OTP
+            send_otp_url = "https://api-t2.fyers.in/vagator/v2/send_login_otp"
             res1 = session.post(send_otp_url, json={"fy_id": fy_id, "app_id": "2"}, timeout=10)
             if res1.status_code == 429:
-                log.warning("FYERS API login endpoint rate-limited (HTTP 429). Cooldown active for 10 minutes; simulation mode engaged.")
+                log.warning("FYERS API login endpoint rate-limited (HTTP 429). Cooldown active.")
                 cls._auth_cooldown_seconds = 600.0
                 return None
             elif res1.status_code != 200:
-                log.warning(f"FYERS Step 1 failed ({res1.status_code}). Running simulation mode.")
+                log.warning(f"FYERS Step 1 failed ({res1.status_code}): {res1.text}")
                 return None
 
             request_key = res1.json().get("request_key")
             if not request_key:
-                log.warning("FYERS Step 1: Missing request_key in response.")
+                log.warning(f"FYERS Step 1: Missing request_key in response: {res1.text}")
                 return None
 
             # 2. Verify TOTP
+            totp = pyotp.TOTP(totp_key.replace(" ", "").strip())
+            current_otp = totp.now()
             verify_otp_url = "https://api-t2.fyers.in/vagator/v2/verify_otp"
-            res2 = session.post(verify_otp_url, json={"request_key": request_key, "otp": current_otp}, timeout=10)
-            if res2.status_code == 429:
-                log.warning("FYERS Step 2 rate-limited (HTTP 429). Cooldown active.")
-                cls._auth_cooldown_seconds = 600.0
-                return None
-            elif res2.status_code != 200:
-                log.warning(f"FYERS Step 2 failed ({res2.status_code}).")
+            res2 = session.post(verify_otp_url, json={"request_key": request_key, "otp": str(current_otp)}, timeout=10)
+            if res2.status_code != 200:
+                log.warning(f"FYERS Step 2 failed ({res2.status_code}): {res2.text}")
                 return None
 
             request_key_2 = res2.json().get("request_key")
@@ -154,26 +150,20 @@ class MarketDataProvider:
                 return None
 
             # 3. Verify PIN
-            verify_pin_url = "https://api-t2.fyers.in/vagator/v2/verify_pin_v2"
+            verify_pin_url = "https://api-t2.fyers.in/vagator/v2/verify_pin"
             res3 = session.post(verify_pin_url, json={"request_key": request_key_2, "identity_type": "pin", "identifier": pin}, timeout=10)
-            if res3.status_code == 429:
-                log.warning("FYERS Step 3 rate-limited (HTTP 429). Cooldown active.")
-                cls._auth_cooldown_seconds = 600.0
-                return None
-            elif res3.status_code != 200:
-                log.warning(f"FYERS Step 3 failed ({res3.status_code}).")
+            if res3.status_code != 200:
+                log.warning(f"FYERS Step 3 failed ({res3.status_code}): {res3.text}")
                 return None
 
-            token_data = res3.json().get("data", {})
-            auth_token = token_data.get("token")
-            if not auth_token:
-                log.warning("FYERS Step 3: Missing bearer auth_token.")
+            bearer_token = res3.json().get("data", {}).get("access_token") or res3.json().get("data", {}).get("token")
+            if not bearer_token:
+                log.warning("FYERS Step 3: Missing bearer_token.")
                 return None
 
-            # 4. Exchange for Auth Code via token API
-            app_id_full = f"{app_id}-{Config.FYERS_APP_TYPE}"
-            token_url = "https://api-t1.fyers.in/api/v3/token"
-            payload_token = {
+            # 4. Generate Auth Code
+            headers = {"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"}
+            payload_4 = {
                 "fyers_id": fy_id,
                 "app_id": app_id,
                 "redirect_uri": redirect_uri,
@@ -185,37 +175,43 @@ class MarketDataProvider:
                 "response_type": "code",
                 "create_cookie": True,
             }
-            session.headers["Authorization"] = f"Bearer {auth_token}"
-            res4 = session.post(token_url, json=payload_token, timeout=10)
-            if res4.status_code != 308:
-                log.warning(f"FYERS Step 4 failed ({res4.status_code}).")
-                return None
+            res4 = session.post(
+                "https://api-t1.fyers.in/api/v3/generate-authcode",
+                headers=headers,
+                json=payload_4,
+                timeout=10,
+            ).json()
 
-            redirect_loc = res4.json().get("Url", "")
-            parsed_url = urllib.parse.urlparse(redirect_loc)
-            query_params = urllib.parse.parse_qs(parsed_url.query)
-            auth_code = query_params.get("auth_code", [None])[0]
+            auth_code = res4.get("auth_code")
+            if not auth_code and "Url" in res4:
+                parsed_url = urllib.parse.urlparse(res4["Url"])
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+                auth_code = query_params.get("auth_code", [None])[0]
 
             if not auth_code:
-                log.warning(f"FYERS Step 4: No auth_code in redirect url: {redirect_loc}")
+                log.warning(f"FYERS Step 4: No auth_code received: {res4}")
                 return None
 
-            # 5. Generate Access Token using official SDK
-            session_model = fyersModel.SessionModel(
-                client_id=app_id_full,
-                secret_key=app_secret,
-                redirect_uri=redirect_uri,
-                response_type="code",
-                grant_type="authorization_code",
-            )
-            session_model.set_token(auth_code)
-            resp = session_model.generate_token()
+            # 5. Validate Auth Code & Exchange for Access Token
+            client_id = f"{app_id}-{Config.FYERS_APP_TYPE}"
+            app_id_hash = hashlib.sha256(f"{client_id}:{app_secret}".encode("utf-8")).hexdigest()
+            payload_5 = {
+                "grant_type": "authorization_code",
+                "appIdHash": app_id_hash,
+                "code": auth_code,
+            }
+            res5 = session.post(
+                "https://api-t1.fyers.in/api/v3/validate-authcode",
+                json=payload_5,
+                timeout=10,
+            ).json()
 
-            if resp.get("s") == "ok" and resp.get("access_token"):
+            token = res5.get("access_token")
+            if token:
                 log.info("FYERS Zero-Click Authentication Successful.")
-                return resp["access_token"]
+                return token
             else:
-                log.error(f"FYERS Step 5 failed: {resp}")
+                log.error(f"FYERS Step 5 failed: {res5}")
                 return None
 
         except Exception as e:
@@ -232,10 +228,51 @@ class MarketDataProvider:
         return fyersModel.FyersModel(client_id=app_id_full, is_async=False, token=token, log_path="")
 
     @classmethod
+    def _is_test_mode(cls) -> bool:
+        """Determines if application is running in isolated pytest test suite."""
+        try:
+            from flask import current_app
+            if current_app and current_app.config.get("TESTING"):
+                return True
+        except RuntimeError:
+            pass
+        return os.environ.get("OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA", "0") == "1"
+
+    @classmethod
+    def set_access_token(cls, token: str) -> bool:
+        """Sets and persists an active FYERS access token."""
+        today_str = datetime.now(IST).strftime("%Y-%m-%d")
+        with _auth_lock:
+            cls._access_token = token.strip()
+            cls._token_date = today_str
+            cls._client = None
+            try:
+                os.makedirs(Config.INSTANCE_DIR, exist_ok=True)
+                with open(TOKEN_CACHE_FILE, "w") as f:
+                    json.dump({"date": today_str, "access_token": token.strip()}, f)
+                return True
+            except Exception as e:
+                log.error(f"Failed writing token cache: {e}")
+                return False
+
+    @classmethod
+    def invalidate_token(cls):
+        """Clears expired token from memory and cache file."""
+        with _auth_lock:
+            cls._access_token = None
+            cls._token_date = None
+            cls._client = None
+            if os.path.exists(TOKEN_CACHE_FILE):
+                try:
+                    os.remove(TOKEN_CACHE_FILE)
+                except Exception:
+                    pass
+
+    @classmethod
     def get_spot_price(cls) -> Tuple[float, float, str]:
         """
         Returns (spot_price, spot_change_pct, data_provider).
-        Falls back to simulation if FYERS is unavailable.
+        Live FYERS stream is strictly required; simulated demo data is disabled in runtime.
         """
         client = cls.get_fyers_client()
         if client:
@@ -247,11 +284,17 @@ class MarketDataProvider:
                     chp = float(quote_data.get("chp", 0.0) or 0.0)
                     if ltp > 0:
                         return ltp, chp, "FYERS_LIVE"
+                elif resp.get("code") == -15:
+                    log.warning("FYERS token expired or invalid (code -15). Invalidating cached token.")
+                    cls.invalidate_token()
             except Exception as e:
                 log.warning(f"FYERS quote error: {e}")
 
-        # Simulated Fallback for offline development / testing
-        return 24500.0, 0.35, "SIMULATED_DEMO"
+        # Unit testing mode fixture only (pytest)
+        if cls._is_test_mode():
+            return 24500.0, 0.35, "TEST_MOCK"
+
+        return 0.0, 0.0, "DISCONNECTED"
 
     @classmethod
     def parse_option_quote(cls, opt: Dict[str, Any]) -> Dict[str, Any]:
@@ -289,7 +332,7 @@ class MarketDataProvider:
     @classmethod
     def get_option_chain(cls, expiry: Optional[str] = None) -> Dict[str, Any]:
         """
-        Fetches option chain from FYERS or generates validated mock chain.
+        Fetches live option chain from FYERS or provides test fixture in unit testing mode.
         Returns normalized dictionary with:
         - spot_price
         - expiry
@@ -332,17 +375,27 @@ class MarketDataProvider:
                             "data_status": "FYERS_LIVE",
                         }
             except Exception as e:
-                log.warning(f"FYERS Option Chain failed: {e}. Falling back to simulated data.")
+                log.warning(f"FYERS Option Chain failed: {e}")
 
-        # Validated Realistic Simulation Chain
-        active_exp = expiry or datetime.now(IST).strftime("%d-%b-%Y").upper()
-        chain_by_strike = cls._generate_mock_chain(spot)
+        # Unit testing mode fixture only (pytest)
+        if cls._is_test_mode():
+            active_exp = expiry or datetime.now(IST).strftime("%d-%b-%Y").upper()
+            chain_by_strike = cls._generate_mock_chain(spot or 24500.0)
+            return {
+                "spot_price": spot or 24500.0,
+                "spot_change_pct": spot_chg or 0.35,
+                "expiry": active_exp,
+                "chain_by_strike": chain_by_strike,
+                "data_status": "TEST_MOCK",
+            }
+
+        # Runtime/Production without live feed: strict zero-simulation
         return {
-            "spot_price": spot,
-            "spot_change_pct": spot_chg,
-            "expiry": active_exp,
-            "chain_by_strike": chain_by_strike,
-            "data_status": "SIMULATED_DEMO",
+            "spot_price": 0.0,
+            "spot_change_pct": 0.0,
+            "expiry": "",
+            "chain_by_strike": {},
+            "data_status": "DISCONNECTED",
         }
 
     @classmethod

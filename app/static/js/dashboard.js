@@ -73,15 +73,66 @@ function initControls() {
 async function fetchProjectData() {
     try {
         const candRes = await fetch('/api/candidates', { cache: 'no-store' }).then(r => r.json());
-        if (candRes.status === 'success') {
+        if (candRes.status === 'success' && candRes.analysis) {
             currentCandidates = candRes;
             renderMarketRegime(candRes.analysis);
             renderOIStructure(candRes.analysis);
             renderAutoSelection(candRes.auto_selection, candRes.auto_trade_enabled);
             renderStrategySetup();
+        } else if (candRes.data_status === 'DISCONNECTED' || !candRes.analysis) {
+            renderDisconnectedState(candRes.message);
         }
     } catch (err) {
         console.warn("Project data polling warning (3m):", err);
+    }
+}
+
+function renderDisconnectedState(msg) {
+    const headerSpotVal = document.getElementById('header-spot-val');
+    if (headerSpotVal) headerSpotVal.textContent = 'FYERS: DISCONNECTED';
+
+    const headerSpotDot = document.getElementById('header-spot-dot');
+    if (headerSpotDot) headerSpotDot.className = 'dot-live disconnected';
+
+    const spotEl = document.getElementById('spot-price');
+    if (spotEl) spotEl.textContent = 'DISCONNECTED';
+
+    const spotChg = document.getElementById('spot-chg');
+    if (spotChg) {
+        spotChg.textContent = 'OFFLINE';
+        spotChg.className = 'spot-chg text-red';
+    }
+
+    const regimeBadge = document.getElementById('market-regime-badge');
+    if (regimeBadge) regimeBadge.textContent = 'OFFLINE';
+
+    const biasText = document.getElementById('market-bias-text');
+    if (biasText) biasText.textContent = 'Awaiting Live Feed';
+
+    const dqProvider = document.getElementById('dq-provider');
+    if (dqProvider) dqProvider.textContent = 'DISCONNECTED';
+
+    const asRationale = document.getElementById('as-rationale-text');
+    if (asRationale) {
+        asRationale.innerHTML = `<span style="color:#ef4444; font-weight:600;">🔴 Live FYERS market data stream disconnected.</span> ${msg || 'Go to <a href="/settings" style="color:var(--color-primary); text-decoration:underline;">Settings</a> to connect live broker feed.'}`;
+    }
+
+    const asBadgeText = document.getElementById('as-badge-text');
+    if (asBadgeText) asBadgeText.textContent = 'AWAITING LIVE BROKER FEED';
+
+    const asModePill = document.getElementById('as-mode-pill');
+    if (asModePill) asModePill.textContent = 'OFFLINE';
+
+    const btnExecPaper = document.getElementById('btn-execute-paper');
+    if (btnExecPaper) {
+        btnExecPaper.disabled = true;
+        btnExecPaper.title = 'Paper execution strictly requires live FYERS broker market data feed';
+    }
+
+    const btnAutoNow = document.getElementById('btn-auto-execute-now');
+    if (btnAutoNow) {
+        btnAutoNow.disabled = true;
+        btnAutoNow.title = 'Auto-execution strictly requires live FYERS broker market data feed';
     }
 }
 

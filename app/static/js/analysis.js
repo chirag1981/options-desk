@@ -13,7 +13,16 @@ async function fetchAnalysisData() {
     try {
         const res = await fetch('/api/market-data', { cache: 'no-store' });
         const json = await res.json();
-        if (json.status !== 'success') return;
+        if (json.status !== 'success' || !json.data) {
+            const chainStatus = document.getElementById('chain-status-chip');
+            if (chainStatus) {
+                chainStatus.textContent = 'DISCONNECTED';
+                chainStatus.className = 'status-chip chip-red';
+            }
+            const anSpot = document.getElementById('an-spot');
+            if (anSpot) anSpot.textContent = 'DISCONNECTED';
+            return;
+        }
 
         const an = json.data;
         const chainByStrike = json.chain_by_strike || {};
@@ -104,8 +113,8 @@ async function fetchAnalysisData() {
 
         const chainStatus = document.getElementById('chain-status-chip');
         if (chainStatus) {
-            chainStatus.textContent = an.data_status === 'FYERS_LIVE' ? 'LIVE BROKER DATA' : 'SIMULATED DATA';
-            chainStatus.className = `status-chip ${an.data_status === 'FYERS_LIVE' ? 'chip-green' : 'chip-gold'}`;
+            chainStatus.textContent = an.data_status === 'FYERS_LIVE' ? 'LIVE BROKER DATA' : 'DISCONNECTED';
+            chainStatus.className = `status-chip ${an.data_status === 'FYERS_LIVE' ? 'chip-green' : 'chip-red'}`;
         }
 
         // 4. Render Live Option Chain Table directly from live chain_by_strike

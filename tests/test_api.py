@@ -82,3 +82,18 @@ def test_api_no_cache_headers(client):
     assert "no-cache" in res.headers.get("Cache-Control", "")
     assert res.headers.get("Pragma") == "no-cache"
 
+
+def test_fyers_endpoints(client):
+    """Verifies FYERS status check and token updating endpoints."""
+    # Status endpoint
+    r1 = client.get("/api/fyers/status")
+    assert r1.status_code == 200
+    d1 = r1.get_json()
+    assert d1["status"] == "success"
+    assert "is_live" in d1
+
+    # Empty token set rejection
+    r2 = client.post("/api/fyers/set-token", json={"access_token": ""})
+    assert r2.status_code == 400
+
+

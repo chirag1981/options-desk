@@ -145,8 +145,8 @@ class SystemDiagnostics:
         checks = [
             {
                 "name": "FYERS API v3 Authentication",
-                "status": "PASS" if has_fyers_token else "SIMULATED",
-                "detail": "Authenticated Token Active" if has_fyers_token else "Using Validated Simulation Provider",
+                "status": "PASS" if has_fyers_token else "DISCONNECTED",
+                "detail": "Authenticated Live Token Active" if has_fyers_token else "FYERS Broker Disconnected (Authenticate or enter token in Settings)",
             },
             {
                 "name": "Underlying Spot Quote",

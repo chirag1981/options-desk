@@ -22,6 +22,53 @@
     </div>
 
     <div class="settings-grid">
+        <!-- FYERS BROKER LIVE CONNECTION & TOKEN MANAGEMENT -->
+        <div class="desk-card" style="grid-column: 1 / -1; margin-bottom: 0.5rem;">
+            <div class="card-header">
+                <h3>FYERS Broker Live Feed & Authentication</h3>
+                <span class="status-chip {{ 'chip-green' if fyers_connected else 'chip-red' }}" id="fyers-conn-chip">
+                    {{ 'LIVE BROKER STREAM' if fyers_connected else 'DISCONNECTED' }}
+                </span>
+            </div>
+            <div class="card-body">
+                <div style="display:flex; gap:1.5rem; align-items:flex-start; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:280px;">
+                        <p class="text-muted" style="margin-bottom:0.75rem; font-size:0.875rem; line-height:1.5;">
+                            All market analysis, candidate generation, and paper trade execution run strictly on <strong>100% Live FYERS Market Data</strong>. Diagnostic and synthetic simulations are disabled in runtime.
+                        </p>
+                        <div class="setting-row">
+                            <span class="setting-label">FYERS App ID</span>
+                            <span class="setting-val font-mono">{{ config.FYERS_APP_ID or 'Not Set' }}</span>
+                        </div>
+                        <div class="setting-row">
+                            <span class="setting-label">FYERS User ID</span>
+                            <span class="setting-val font-mono">{{ config.FYERS_ID or 'Not Set' }}</span>
+                        </div>
+                        <div style="margin-top:1rem;">
+                            <button id="btn-fyers-auto-login" class="btn-3d btn-primary" onclick="connectFyersZeroClick()" style="padding:0.6rem 1.25rem;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                                <span>Connect Live FYERS (Zero-Click Login)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="flex:1; min-width:280px; background:var(--color-surface); padding:1.25rem; border-radius:8px; border:1px solid var(--color-border);">
+                        <h4 style="margin-bottom:0.4rem; font-size:0.95rem;">Manual Access Token Entry</h4>
+                        <p class="text-muted" style="font-size:0.8rem; margin-bottom:0.85rem; line-height:1.4;">
+                            If automated zero-click login is rate-limited by broker cooldown, paste your FYERS v3 access token below to activate live streaming immediately.
+                        </p>
+                        <div style="display:flex; gap:0.5rem;">
+                            <input type="password" id="fyers-token-input" placeholder="Paste FYERS Access Token here..." class="form-control" style="flex:1; font-family:monospace; font-size:0.85rem; padding:0.5rem 0.75rem; border:1px solid var(--color-border); border-radius:4px;" />
+                            <button class="btn-3d btn-gold" onclick="saveFyersTokenManual()" style="white-space:nowrap; padding:0.5rem 1rem;">
+                                Save & Connect
+                            </button>
+                        </div>
+                        <div id="fyers-token-msg" style="margin-top:0.6rem; font-size:0.85rem; font-weight:500;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="desk-card">
             <div class="card-header">
                 <h3>Shared Portfolio Risk Limits</h3>
@@ -80,7 +127,82 @@
                     <span class="setting-val font-mono">{{ config.MIN_SPOT_CUSHION_PTS }} Points</span>
                 </div>
             </div>
-        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function connectFyersZeroClick() {
+    const btn = document.getElementById('btn-fyers-auto-login');
+    const chip = document.getElementById('fyers-conn-chip');
+    const msgEl = document.getElementById('fyers-token-msg');
+    btn.disabled = true;
+    btn.innerHTML = '<span>Connecting to FYERS...</span>';
+    if (msgEl) {
+        msgEl.textContent = 'Executing automated zero-click TOTP login with FYERS...';
+        msgEl.style.color = 'var(--color-primary)';
+    }
+
+    try {
+        const res = await fetch('/api/fyers/connect', { method: 'POST' });
+        const json = await res.json();
+        if (json.status === 'success') {
+            chip.textContent = 'LIVE BROKER STREAM';
+            chip.className = 'status-chip chip-green';
+            msgEl.textContent = json.message;
+            msgEl.style.color = '#10b981';
+            setTimeout(() => { window.location.reload(); }, 1500);
+        } else {
+            msgEl.textContent = json.message || 'Automated login failed.';
+            msgEl.style.color = '#ef4444';
+        }
+    } catch (err) {
+        msgEl.textContent = 'Network or server error while connecting.';
+        msgEl.style.color = '#ef4444';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg><span>Connect Live FYERS (Zero-Click Login)</span>';
+    }
+}
+
+async function saveFyersTokenManual() {
+    const input = document.getElementById('fyers-token-input');
+    const chip = document.getElementById('fyers-conn-chip');
+    const msgEl = document.getElementById('fyers-token-msg');
+    const token = (input.value || '').trim();
+
+    if (!token) {
+        msgEl.textContent = 'Please enter a valid FYERS access token.';
+        msgEl.style.color = '#ef4444';
+        return;
+    }
+
+    msgEl.textContent = 'Validating and activating access token...';
+    msgEl.style.color = 'var(--color-primary)';
+
+    try {
+        const res = await fetch('/api/fyers/set-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ access_token: token })
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+            chip.textContent = 'LIVE BROKER STREAM';
+            chip.className = 'status-chip chip-green';
+            msgEl.textContent = json.message;
+            msgEl.style.color = '#10b981';
+            input.value = '';
+            setTimeout(() => { window.location.reload(); }, 1500);
+        } else {
+            msgEl.textContent = json.message || 'Token verification failed.';
+            msgEl.style.color = json.status === 'warning' ? '#f59e0b' : '#ef4444';
+        }
+    } catch (err) {
+        msgEl.textContent = 'Error saving token.';
+        msgEl.style.color = '#ef4444';
+    }
+}
+</script>
 {% endblock %}
