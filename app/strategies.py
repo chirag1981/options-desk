@@ -81,17 +81,29 @@ class SpreadCandidate:
         return TransactionCostEngine.calculate_order_costs(legs_dict, self.lots)
 
     @property
-    def total_estimated_round_trip_costs_inr(self) -> float:
-        """Calculates round-trip entry + exit estimated statutory transaction costs."""
+    def estimated_entry_costs_inr(self) -> float:
+        """Calculates estimated entry statutory transaction costs at entry bid/ask."""
         from app.trading import TransactionCostEngine
         legs_dict = [l.to_dict() for l in self.legs]
-        entry_cost = TransactionCostEngine.calculate_order_costs(legs_dict, self.lots)
+        return TransactionCostEngine.calculate_order_costs(legs_dict, self.lots)
+
+    @property
+    def estimated_exit_costs_inr(self) -> float:
+        """
+        Calculates conservative estimated exit transaction costs assuming position closing
+        at current opposite quotes (buying back SELL legs at Ask, selling BUY legs at Bid).
+        """
+        from app.trading import TransactionCostEngine
         exit_legs_dict = [
-            {"action": "BUY" if l.action == "SELL" else "SELL", "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
+            {"action": "BUY" if l.action == "SELL" else "SELL", "price": l.ask if l.action == "SELL" else l.bid, "quantity": l.quantity}
             for l in self.legs
         ]
-        exit_cost = TransactionCostEngine.calculate_order_costs(exit_legs_dict, self.lots)
-        return round(entry_cost + exit_cost, 2)
+        return TransactionCostEngine.calculate_order_costs(exit_legs_dict, self.lots)
+
+    @property
+    def total_estimated_round_trip_costs_inr(self) -> float:
+        """Calculates round-trip entry + exit estimated statutory transaction costs."""
+        return round(self.estimated_entry_costs_inr + self.estimated_exit_costs_inr, 2)
 
     @property
     def total_risk_with_costs_inr(self) -> float:
@@ -119,6 +131,8 @@ class SpreadCandidate:
         d["legs"] = [l.to_dict() for l in self.legs]
         d["has_uncovered_short"] = self.has_uncovered_short
         d["estimated_costs_inr"] = self.estimated_costs_inr
+        d["estimated_entry_costs_inr"] = self.estimated_entry_costs_inr
+        d["estimated_exit_costs_inr"] = self.estimated_exit_costs_inr
         d["total_estimated_round_trip_costs_inr"] = self.total_estimated_round_trip_costs_inr
         d["total_risk_with_costs_inr"] = self.total_risk_with_costs_inr
         d["estimated_margin_inr"] = self.estimated_margin_inr

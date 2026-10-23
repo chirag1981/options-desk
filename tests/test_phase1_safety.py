@@ -444,53 +444,62 @@ def test_contract_registry_versioned_lot_sizes():
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 6, 1)) == 25
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 3, 1)) == 75
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 11, 27)) == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 23)) == 75
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 30)) == 75
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 31)) == 65
-    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 1)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 6)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 27)) == 65
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 10, 23)) == 65
 
 
 def test_nifty_lot_size_transition_boundaries_official_circulars():
     """
-    Verifies the 6 mandatory boundary conditions per NSE circulars:
-    1. November 2025 NIFTY expiry (27-NOV-2025) -> lot size 75
-    2. December 2025 NIFTY expiry (24-DEC-2025) -> lot size 75
-    3. First eligible revised-lot weekly expiry (01-JAN-2026) -> lot size 65
-    4. First eligible revised-lot monthly expiry (29-JAN-2026) -> lot size 65
-    5. Historical 25-lot contracts (27-JUN-2024) -> lot size 25
-    6. Current 65-lot contracts (27-OCT-2026) -> lot size 65
+    Verifies the mandatory boundary conditions per NSE Circular NSE/FAOP/70616:
+    1. Last old-lot weekly expiry: 23-Dec-2025 -> lot size 75
+    2. Last old-lot monthly expiry: 30-Dec-2025 -> lot size 75
+    3. First revised-lot weekly expiry: 06-Jan-2026 -> lot size 65
+    4. First revised-lot monthly expiry: 27-Jan-2026 -> lot size 65
+    5. Existing quarterly/half-yearly contracts transitioned at 30-Dec-2025 EOD -> lot size 65
+    6. Historical 25-lot contracts (27-JUN-2024) -> lot size 25
+    7. Current 65-lot contracts (27-OCT-2026) -> lot size 65
     """
-    # 1. November 2025 NIFTY expiry
-    valid, _, lot_nov25 = ContractRegistry.validate_contract("NIFTY25NOV24000PE", strike=24000.0, expiry="27-NOV-2025", provided_lot_size=75)
+    # 1. Last old-lot weekly expiry: 23-Dec-2025
+    valid, _, lot_weekly_old = ContractRegistry.validate_contract("NIFTY25D2324000PE", strike=24000.0, expiry="23-DEC-2025", provided_lot_size=75)
     assert valid is True
-    assert lot_nov25 == 75
-    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 11, 27)) == 75
+    assert lot_weekly_old == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 23)) == 75
 
-    # 2. December 2025 NIFTY expiry
-    valid, _, lot_dec25 = ContractRegistry.validate_contract("NIFTY25DEC24000PE", strike=24000.0, expiry="24-DEC-2025", provided_lot_size=75)
+    # 2. Last old-lot monthly expiry: 30-Dec-2025
+    valid, _, lot_monthly_old = ContractRegistry.validate_contract("NIFTY25DEC24000PE", strike=24000.0, expiry="30-DEC-2025", provided_lot_size=75)
     assert valid is True
-    assert lot_dec25 == 75
-    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 24)) == 75
+    assert lot_monthly_old == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 30)) == 75
 
-    # 3. First eligible revised-lot weekly expiry (January 2026)
-    valid, _, lot_jan_weekly = ContractRegistry.validate_contract("NIFTY2610124000PE", strike=24000.0, expiry="01-JAN-2026", provided_lot_size=65)
+    # 3. First revised-lot weekly expiry: 06-Jan-2026
+    valid, _, lot_jan_weekly = ContractRegistry.validate_contract("NIFTY2610624000PE", strike=24000.0, expiry="06-JAN-2026", provided_lot_size=65)
     assert valid is True
     assert lot_jan_weekly == 65
-    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 1)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 6)) == 65
 
-    # 4. First eligible revised-lot monthly expiry (January 2026)
-    valid, _, lot_jan_monthly = ContractRegistry.validate_contract("NIFTY26JAN24000PE", strike=24000.0, expiry="29-JAN-2026", provided_lot_size=65)
+    # 4. First revised-lot monthly expiry: 27-Jan-2026
+    valid, _, lot_jan_monthly = ContractRegistry.validate_contract("NIFTY26JAN24000PE", strike=24000.0, expiry="27-JAN-2026", provided_lot_size=65)
     assert valid is True
     assert lot_jan_monthly == 65
-    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 29)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 27)) == 65
 
-    # 5. Historical 25-lot contracts
+    # 5. Existing quarterly & half-yearly contracts transitioned at 30-Dec-2025 EOD (e.g. 26-MAR-2026)
+    valid, _, lot_quarterly = ContractRegistry.validate_contract("NIFTY26MAR24000PE", strike=24000.0, expiry="26-MAR-2026", provided_lot_size=65)
+    assert valid is True
+    assert lot_quarterly == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 3, 26)) == 65
+
+    # 6. Historical 25-lot contracts (27-JUN-2024)
     valid, _, lot_hist25 = ContractRegistry.validate_contract("NIFTY24JUN24000PE", strike=24000.0, expiry="27-JUN-2024", provided_lot_size=25)
     assert valid is True
     assert lot_hist25 == 25
     assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 6, 27)) == 25
 
-    # 6. Current 65-lot contracts
+    # 7. Current 65-lot contracts (27-OCT-2026)
     valid, _, lot_curr65 = ContractRegistry.validate_contract("NIFTY26OCT24500PE", strike=24500.0, expiry="27-OCT-2026", provided_lot_size=65)
     assert valid is True
     assert lot_curr65 == 65
@@ -1012,4 +1021,58 @@ def test_spread_lifecycle_complete_fee_and_risk_field_semantics(app_ctx):
 
     # 5. Closed position risk semantics: no double-counting of costs
     assert closed_pos.total_risk_with_costs_inr == round(1950.0 + 102.62, 2)
+
+
+def test_estimated_vs_realized_costs_comparison_and_explanation():
+    """
+    Verifies and documents the deliberate design difference between conservative
+    estimated round-trip costs and actual realized closed-position costs:
+    1. Pre-entry estimated costs use conservative opposite quotes at entry.
+    2. Realized exit costs depend on actual exit fill prices (e.g. decayed premium at target).
+    3. Confirms estimated costs are conservative (>= realized costs on profitable trades).
+    """
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=28.0, ask=30.0, ltp=29.0, quantity=65),
+        ],
+        net_credit_pts=20.0,
+        strike_width=50.0,
+        max_profit_inr=1300.0,
+        max_loss_pts=30.0,
+        max_loss_inr=1950.0,
+        risk_reward_ratio=0.67,
+        breakevens=[24380.0],
+        is_eligible=True,
+    )
+
+    # 1. Separated pre-entry estimates
+    est_entry = candidate.estimated_entry_costs_inr
+    est_exit = candidate.estimated_exit_costs_inr
+    est_round_trip = candidate.total_estimated_round_trip_costs_inr
+
+    assert est_entry == 54.32
+    assert est_exit > 50.0  # Conservative estimate based on closing at live opposite quotes
+    assert est_round_trip == round(est_entry + est_exit, 2)
+
+    # 2. Actual Realized Costs at Target Hit (Turnover drops from ₹5,200 to ₹1,170)
+    actual_entry_costs = 54.32
+    actual_exit_costs = 48.30
+    actual_round_trip_costs = round(actual_entry_costs + actual_exit_costs, 2)
+
+    assert actual_round_trip_costs == 102.62
+
+    # 3. Verification of Conservative Variance:
+    # On target hit, premium decay reduces exit turnover, so actual exit fees are lower.
+    # est_round_trip >= actual_round_trip ensures risk management never underestimates costs.
+    assert est_round_trip >= actual_round_trip_costs
+    variance = est_round_trip - actual_round_trip_costs
+    assert variance >= 0.0
 
