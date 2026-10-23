@@ -935,3 +935,81 @@ def test_contract_lot_size_resolves_from_contract_expiry_series():
     )
     assert is_valid_2026 is True
     assert lot_2026 == 65
+
+
+# ---------------- 14. Hardening: Complete Spread Lifecycle & Risk Field Semantics ----------------
+
+def test_spread_lifecycle_complete_fee_and_risk_field_semantics(app_ctx):
+    """
+    Verifies complete lifecycle of a 2-leg credit spread:
+    1. Pre-entry candidate risk sizing with estimated round-trip costs.
+    2. Atomic execution and recording of initial entry transaction_costs_inr.
+    3. Open position total_risk_with_costs_inr reflects entry costs + estimated exit costs.
+    4. MTM valuation and gross vs net P&L tracking.
+    5. Clean exit, recording realized total round-trip costs, final gross & net P&L.
+    6. Closed position total_risk_with_costs_inr strictly avoids double-counting.
+    """
+    # 1. Setup Candidate
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=28.0, ask=30.0, ltp=29.0, quantity=65),
+        ],
+        net_credit_pts=20.0,
+        strike_width=50.0,
+        max_profit_inr=1300.0,
+        max_loss_pts=30.0,
+        max_loss_inr=1950.0,
+        risk_reward_ratio=0.67,
+        breakevens=[24380.0],
+        is_eligible=True,
+    )
+
+    # Pre-entry checks
+    pre_entry_costs = candidate.total_estimated_round_trip_costs_inr
+    assert pre_entry_costs > 100.0
+    assert candidate.total_risk_with_costs_inr == round(1950.0 + pre_entry_costs, 2)
+
+    # 2. Execute Entry
+    success, msg, pos = PaperTradingManager.execute_candidate(candidate)
+    assert success is True
+    assert pos.status == "OPEN"
+    # Entry costs recorded in pos.transaction_costs_inr
+    entry_costs = pos.transaction_costs_inr
+    assert entry_costs == 54.32
+
+    # In OPEN state: total_risk_with_costs_inr = max_loss_inr + 2 * entry_costs (entry paid + estimated exit)
+    assert pos.total_risk_with_costs_inr == round(1950.0 + 2.0 * 54.32, 2)
+
+    # 3. MTM Evaluation with target hit (Buyback debit drops to 6.0 pts)
+    # Leg 1 (SELL) buyback ask drops to 12.0; Leg 2 (BUY) close bid drops to 6.0
+    chain_update = {
+        24400.0: {"PE": {"symbol": "NIFTY24400PE", "bid": 11.5, "ask": 12.0, "ltp": 12.0}},
+        24350.0: {"PE": {"symbol": "NIFTY24350PE", "bid": 6.0, "ask": 6.5, "ltp": 6.0}},
+    }
+    PaperTradingManager.update_open_positions_mtm(chain_update, spot_price=24600.0)
+
+    # Position should have triggered TARGET_HIT
+    closed_pos = db.session.get(TradePosition, pos.id)
+    assert closed_pos.status == "TARGET_HIT"
+
+    # 4. Verify Final Realized Metrics
+    # Gross P&L = (20.0 - 6.0) * 65 = 14.0 * 65 = +910.00
+    assert closed_pos.gross_pnl_inr == 910.00
+
+    # Total Round-Trip Costs = Entry (54.32) + Exit (48.30) = 102.62
+    assert closed_pos.transaction_costs_inr == 102.62
+
+    # Net P&L = 910.00 - 102.62 = +807.38
+    assert closed_pos.net_pnl_inr == 807.38
+
+    # 5. Closed position risk semantics: no double-counting of costs
+    assert closed_pos.total_risk_with_costs_inr == round(1950.0 + 102.62, 2)
+
