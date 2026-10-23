@@ -270,9 +270,9 @@ class MarketDataProvider:
         bid = float(raw_bid) if (raw_bid is not None and str(raw_bid).strip() != "") else 0.0
         ask = float(raw_ask) if (raw_ask is not None and str(raw_ask).strip() != "") else 0.0
         ltp = float(raw_ltp) if (raw_ltp is not None and str(raw_ltp).strip() != "") else 0.0
-        oi = int(raw_oi) if (raw_oi is not None and str(raw_oi).strip() != "") else 0
-        change_oi = int(raw_chg_oi) if (raw_chg_oi is not None and str(raw_chg_oi).strip() != "") else 0
-        vol = int(raw_vol) if (raw_vol is not None and str(raw_vol).strip() != "") else 0
+        oi = int(raw_oi) if (raw_oi is not None and str(raw_oi).strip() != "") else None
+        change_oi = int(raw_chg_oi) if (raw_chg_oi is not None and str(raw_chg_oi).strip() != "") else None
+        vol = int(raw_vol) if (raw_vol is not None and str(raw_vol).strip() != "") else None
         iv = float(raw_iv) if (raw_iv is not None and str(raw_iv).strip() != "") else 0.0
 
         return {

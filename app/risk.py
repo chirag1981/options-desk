@@ -162,7 +162,7 @@ class PortfolioRiskManager:
                 # Active open positions
                 open_positions = TradePosition.query.filter_by(status="OPEN").all()
                 for pos in open_positions:
-                    current_portfolio_risk += pos.max_loss_inr
+                    current_portfolio_risk += getattr(pos, "total_risk_with_costs_inr", pos.max_loss_inr)
                     if pos.engine_type.upper() == engine_type:
                         active_engine_positions += 1
 

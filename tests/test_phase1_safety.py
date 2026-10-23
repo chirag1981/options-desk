@@ -12,13 +12,14 @@ Verifies:
 """
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 import pytest
 
 from app import create_app
 from app.config import Config
 from app.extensions import db
+from app.models import TradePosition, PositionLeg, RiskAuditLog
 from app.contracts import ContractRegistry
 from app.trading import TransactionCostEngine, PaperTradingManager, AutoTradeEngine
 from app.safety import ExecutionSafetyGate
@@ -419,3 +420,386 @@ def test_iron_butterfly_remains_strictly_disabled():
     ib_cand = StrategyBuilder.build_iron_butterfly(analysis, {})
     assert ib_cand.is_eligible is False
     assert any("Iron Butterfly active entry is disabled" in r for r in ib_cand.rejection_reasons)
+
+
+# ---------------- 9. Hardening: GST Taxable Base Completeness ----------------
+
+def test_gst_taxable_base_includes_sebi_turnover_fee():
+    """
+    Verifies that GST taxable base strictly includes Brokerage, Exchange turnover charges,
+    and SEBI turnover fees under official statutory guidelines.
+    """
+    legs = [
+        {"action": "SELL", "price": 50.0, "quantity": 65},
+        {"action": "BUY", "price": 30.0, "quantity": 65},
+    ]
+    # Turnover = 5200. Brokerage = 40. Exchange = 2.60. SEBI = 0.0052.
+    # Base = 40 + 2.60 + 0.0052 = 42.6052. GST = 0.18 * 42.6052 = 7.668936.
+    # Stamp duty = 0.0585. STT (Apr 2026) = 4.875.
+    # Total = 40 + 4.875 + 2.60 + 0.0052 + 0.0585 + 7.668936 = 55.207636 -> ₹55.21
+    total_cost = TransactionCostEngine.calculate_order_costs(legs, lots=1, trade_date=date(2026, 4, 1))
+    assert total_cost == 55.21
+
+
+# ---------------- 10. Hardening: Daily Loss Circuit Breaker & Cooldown ----------------
+
+def test_daily_loss_circuit_breaker_halts_trading(app_ctx):
+    """
+    Verifies that when daily realized losses breach the 1.5% limit (₹15,000),
+    trading is halted and any subsequent candidate is rejected.
+    """
+    now_dt = datetime.now(IST)
+
+    # 1. Create a closed position with realized net loss > ₹15,000
+    pos = TradePosition(
+        engine_type="INTRADAY",
+        strategy_id="BEAR_CALL",
+        strategy_name="Bear Call Spread",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=3,
+        quantity=195,
+        entry_time=now_dt - timedelta(hours=2),
+        entry_spot=24500.0,
+        entry_net_credit_pts=15.0,
+        max_loss_inr=16000.0,
+        max_profit_inr=2925.0,
+        target_credit_pts=4.5,
+        stop_loss_pts=22.5,
+        current_net_debit_pts=93.0,
+        status="STOPPED_OUT",
+        exit_time=now_dt - timedelta(hours=1),
+        exit_spot=24620.0,
+        exit_net_debit_pts=93.0,
+        exit_reason="STOPPED_OUT",
+        gross_pnl_inr=-15210.0,
+        transaction_costs_inr=165.63,
+        net_pnl_inr=-15375.63,  # Breached ₹15,000 circuit breaker!
+    )
+    db.session.add(pos)
+    db.session.commit()
+
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=30.0, ask=32.0, ltp=31.0, quantity=65),
+        ],
+        net_credit_pts=18.0,
+        strike_width=50.0,
+        max_profit_inr=1170.0,
+        max_loss_pts=32.0,
+        max_loss_inr=2080.0,
+        risk_reward_ratio=0.56,
+        breakevens=[24382.0],
+        is_eligible=True,
+    )
+
+    # Clear memory cooldown so test isolates daily loss check
+    PortfolioRiskManager._last_loss_exit_time = None
+    res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=now_dt)
+    assert res.approved is False
+    assert any("Daily realized loss" in r and "breached 1.5% limit" in r for r in res.rejection_reasons)
+
+
+def test_daily_loss_resets_on_new_trading_day(app_ctx):
+    """Verifies that yesterday's realized loss does not count against today's limit."""
+    now_dt = datetime.now(IST)
+    yesterday_dt = now_dt - timedelta(days=1)
+
+    # Position stopped out yesterday
+    pos = TradePosition(
+        engine_type="INTRADAY",
+        strategy_id="BEAR_CALL",
+        strategy_name="Bear Call Spread",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=3,
+        quantity=195,
+        entry_time=yesterday_dt - timedelta(hours=2),
+        entry_spot=24500.0,
+        entry_net_credit_pts=15.0,
+        max_loss_inr=16000.0,
+        max_profit_inr=2925.0,
+        target_credit_pts=4.5,
+        stop_loss_pts=22.5,
+        status="STOPPED_OUT",
+        exit_time=yesterday_dt,
+        exit_spot=24620.0,
+        exit_reason="STOPPED_OUT",
+        gross_pnl_inr=-15210.0,
+        transaction_costs_inr=165.63,
+        net_pnl_inr=-15375.63,
+    )
+    db.session.add(pos)
+    db.session.commit()
+
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=30.0, ask=32.0, ltp=31.0, quantity=65),
+        ],
+        net_credit_pts=18.0,
+        strike_width=50.0,
+        max_profit_inr=1170.0,
+        max_loss_pts=32.0,
+        max_loss_inr=2080.0,
+        risk_reward_ratio=0.56,
+        breakevens=[24382.0],
+        is_eligible=True,
+    )
+
+    PortfolioRiskManager._last_loss_exit_time = None
+    res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=now_dt)
+    # Today's daily realized loss is 0.0, so the candidate should NOT be rejected for daily loss
+    assert not any("Daily realized loss" in r for r in res.rejection_reasons)
+
+
+def test_consecutive_loss_cooldown_blocks_immediate_reentry(app_ctx):
+    """Verifies that an exit with a loss triggers a 15-minute cooldown blocking re-entry."""
+    base_time = datetime(2026, 10, 23, 10, 0, 0, tzinfo=IST)
+    PortfolioRiskManager.register_loss_exit(exit_time=base_time)
+
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=30.0, ask=32.0, ltp=31.0, quantity=65),
+        ],
+        net_credit_pts=18.0,
+        strike_width=50.0,
+        max_profit_inr=1170.0,
+        max_loss_pts=32.0,
+        max_loss_inr=2080.0,
+        risk_reward_ratio=0.56,
+        breakevens=[24382.0],
+        is_eligible=True,
+    )
+
+    # 1. At 10:05 (5 minutes after loss exit, within 15 min cooldown)
+    eval_time_5m = base_time + timedelta(minutes=5)
+    res_5m = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=eval_time_5m)
+    assert res_5m.approved is False
+    assert any("Consecutive loss cooldown active" in r for r in res_5m.rejection_reasons)
+
+    # 2. At 10:16 (16 minutes after loss exit, cooldown has expired)
+    eval_time_16m = base_time + timedelta(minutes=16)
+    res_16m = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=eval_time_16m)
+    assert not any("Consecutive loss cooldown active" in r for r in res_16m.rejection_reasons)
+    assert res_16m.approved is True
+
+
+def test_cooldown_restores_from_database_on_restart(app_ctx):
+    """Verifies that cooldown state is restored from RiskAuditLog even if memory state is cleared."""
+    base_time = datetime(2026, 10, 23, 11, 0, 0, tzinfo=IST)
+    PortfolioRiskManager.register_loss_exit(exit_time=base_time)
+
+    # Simulate server restart by clearing in-memory variable
+    PortfolioRiskManager._last_loss_exit_time = None
+
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=30.0, ask=32.0, ltp=31.0, quantity=65),
+        ],
+        net_credit_pts=18.0,
+        strike_width=50.0,
+        max_profit_inr=1170.0,
+        max_loss_pts=32.0,
+        max_loss_inr=2080.0,
+        risk_reward_ratio=0.56,
+        breakevens=[24382.0],
+        is_eligible=True,
+    )
+
+    # Querying 8 minutes after base_time must restore cooldown from database
+    eval_time = base_time + timedelta(minutes=8)
+    res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=eval_time)
+    assert res.approved is False
+    assert any("Consecutive loss cooldown active" in r for r in res.rejection_reasons)
+
+
+# ---------------- 11. Hardening: Consistent Open Portfolio Risk Calculation ----------------
+
+def test_combined_open_risk_includes_open_positions_with_costs(app_ctx):
+    """
+    Proves that combined open portfolio risk consistently includes transaction costs
+    for both existing open positions and new candidates without double-counting.
+    """
+    now_dt = datetime.now(IST)
+
+    # Open position with max_loss_inr = ₹16,000 and entry costs = ₹110.
+    # Total committed risk of open position = 16,000 + 2 * 110 = ₹16,220.
+    pos = TradePosition(
+        engine_type="POSITIONAL",
+        strategy_id="BEAR_CALL",
+        strategy_name="Bear Call Spread",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=2,
+        quantity=130,
+        entry_time=now_dt - timedelta(hours=1),
+        entry_spot=24500.0,
+        entry_net_credit_pts=20.0,
+        max_loss_inr=16000.0,
+        max_profit_inr=2600.0,
+        target_credit_pts=6.0,
+        stop_loss_pts=30.0,
+        status="OPEN",
+        transaction_costs_inr=110.42,  # Entry costs paid
+    )
+    db.session.add(pos)
+    db.session.commit()
+
+    # Candidate with max_loss_inr = ₹3,700 and round-trip costs = ₹110.42.
+    # Candidate total risk with costs = 3,700 + 110.42 = ₹3,810.42.
+    # Combined projected risk = 16,220.84 + 3,810.42 = ₹20,031.26 > ₹20,000 ceiling -> REJECTED!
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=52.0, ltp=51.0, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=30.0, ask=32.0, ltp=31.0, quantity=65),
+        ],
+        net_credit_pts=18.0,
+        strike_width=50.0,
+        max_profit_inr=1170.0,
+        max_loss_pts=56.92,
+        max_loss_inr=3700.0,
+        risk_reward_ratio=0.31,
+        breakevens=[24382.0],
+        is_eligible=True,
+    )
+
+    PortfolioRiskManager._last_loss_exit_time = None
+    res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type="INTRADAY", now_dt=now_dt)
+    assert res.approved is False
+    assert any("Projected portfolio risk" in r and "exceeds 2.0% ceiling" in r for r in res.rejection_reasons)
+
+
+# ---------------- 12. Hardening: Missing Quotes Guard on MTM & Exits ----------------
+
+def test_missing_quote_prevents_mtm_valuation_and_phantom_exit(app_ctx):
+    """
+    Verifies that missing or non-positive bids/asks on open legs during MTM update
+    safely abort the MTM calculation rather than evaluating 0 debit and falsely triggering profit target.
+    """
+    now_dt = datetime.now(IST)
+    pos = TradePosition(
+        engine_type="INTRADAY",
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        entry_time=now_dt - timedelta(minutes=30),
+        entry_spot=24500.0,
+        entry_net_credit_pts=20.0,
+        max_loss_inr=2000.0,
+        max_profit_inr=1300.0,
+        target_credit_pts=6.0,  # Target hit if debit <= 6.0
+        stop_loss_pts=30.0,
+        status="OPEN",
+        current_net_debit_pts=20.0,
+        current_pnl_inr=0.0,
+    )
+    db.session.add(pos)
+    db.session.flush()
+
+    leg1 = PositionLeg(position_id=pos.id, symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", quantity=65, entry_price=50.0, current_price=50.0)
+    leg2 = PositionLeg(position_id=pos.id, symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", quantity=65, entry_price=30.0, current_price=30.0)
+    db.session.add(leg1)
+    db.session.add(leg2)
+    db.session.commit()
+
+    # Provide option chain where short strike 24400 has missing Ask (0.0)
+    broken_chain = {
+        24400.0: {"PE": {"symbol": "NIFTY24400PE", "bid": 45.0, "ask": 0.0, "ltp": 0.0}},
+        24350.0: {"PE": {"symbol": "NIFTY24350PE", "bid": 25.0, "ask": 27.0, "ltp": 26.0}},
+    }
+
+    # Update MTM
+    PaperTradingManager.update_open_positions_mtm(broken_chain, spot_price=24500.0)
+
+    # Position MUST remain OPEN with unchanged debit; must NOT be closed as TARGET_HIT
+    refreshed_pos = db.session.get(TradePosition, pos.id)
+    assert refreshed_pos.status == "OPEN"
+    assert refreshed_pos.current_net_debit_pts == 20.0
+
+
+def test_parse_option_quote_preserves_none_for_missing_oi_and_volume():
+    """Confirms MarketDataProvider preserves None when OI or Volume is absent in provider response."""
+    raw_opt = {
+        "symbol": "NSE:NIFTY26OCT24500CE",
+        "ltp": 45.0,
+        "bid": 44.0,
+        "ask": 46.0,
+        # oi and volume are omitted
+    }
+    cleaned = MarketDataProvider.parse_option_quote(raw_opt)
+    assert cleaned["oi"] is None
+    assert cleaned["change_oi"] is None
+    assert cleaned["volume"] is None
+    assert cleaned["bid"] == 44.0
+    assert cleaned["ask"] == 46.0
+
+
+# ---------------- 13. Hardening: Contract Metadata Expiry Series Resolution ----------------
+
+def test_contract_lot_size_resolves_from_contract_expiry_series():
+    """
+    Verifies that ContractRegistry determines authoritative lot size based on the contract's
+    expiry series specification, preserving historical contract identity.
+    """
+    # 1. Contract from historical June 2024 series -> lot size 25
+    is_valid_2024, _, lot_2024 = ContractRegistry.validate_contract(
+        symbol="NIFTY24JUN24000PE", strike=24000.0, expiry="27-JUN-2024", provided_lot_size=25
+    )
+    assert is_valid_2024 is True
+    assert lot_2024 == 25
+
+    # 2. Contract from intermediate March 2025 series -> lot size 75
+    is_valid_2025, _, lot_2025 = ContractRegistry.validate_contract(
+        symbol="NIFTY25MAR24000PE", strike=24000.0, expiry="27-MAR-2025", provided_lot_size=75
+    )
+    assert is_valid_2025 is True
+    assert lot_2025 == 75
+
+    # 3. Contract from current October 2026 series -> lot size 65
+    is_valid_2026, _, lot_2026 = ContractRegistry.validate_contract(
+        symbol="NIFTY26OCT24500PE", strike=24500.0, expiry="27-OCT-2026", provided_lot_size=65
+    )
+    assert is_valid_2026 is True
+    assert lot_2026 == 65

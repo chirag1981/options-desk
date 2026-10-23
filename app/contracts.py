@@ -87,15 +87,26 @@ class ContractRegistry:
         if not expiry or not expiry.strip():
             return False, "Missing contract expiry.", 0
 
-        # 3. Determine Authoritative Lot Size
-        expected_lot_size = cls.get_authoritative_lot_size("NIFTY", as_of_date)
+        # 3. Determine Authoritative Lot Size from Contract Expiry Series
+        effective_date = as_of_date
+        if expiry and expiry.strip():
+            for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d%b%Y"):
+                try:
+                    effective_date = datetime.strptime(expiry.strip().upper(), fmt).date()
+                    break
+                except ValueError:
+                    pass
+        if effective_date is None:
+            effective_date = datetime.now(IST).date()
+
+        expected_lot_size = cls.get_authoritative_lot_size("NIFTY", effective_date)
 
         # 4. If provider supplied a lot size, verify it matches exchange specification
         if provided_lot_size is not None and provided_lot_size > 0:
             if provided_lot_size != expected_lot_size:
                 return (
                     False,
-                    f"Provider lot size ({provided_lot_size}) does not match authoritative NSE lot size ({expected_lot_size}) for date {as_of_date}.",
+                    f"Provider lot size ({provided_lot_size}) does not match authoritative NSE lot size ({expected_lot_size}) for contract series {expiry} (effective date {effective_date}).",
                     0,
                 )
 

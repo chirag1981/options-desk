@@ -87,7 +87,7 @@ class TransactionCostEngine:
             total_exchange_fee += turnover * Config.EXCHANGE_TURNOVER_PCT
 
         total_sebi_fee = total_turnover * Config.SEBI_TURNOVER_PCT
-        gst = (total_brokerage + total_exchange_fee) * Config.GST_PCT
+        gst = (total_brokerage + total_exchange_fee + total_sebi_fee) * Config.GST_PCT
 
         total_charges = total_brokerage + total_stt + total_exchange_fee + total_sebi_fee + total_stamp_duty + gst
         return round(total_charges, 2)
@@ -197,10 +197,18 @@ class PaperTradingManager:
 
                     # To close a position: buy back SELL legs at Ask; sell BUY legs at Bid
                     if leg.action == "SELL":
-                        current_close_price = float(stk_quotes.get("ask", 0.0) or stk_quotes.get("ltp", 0.0))
+                        raw_ask = stk_quotes.get("ask")
+                        if raw_ask is None or float(raw_ask) <= 0:
+                            all_quotes_valid = False
+                            break
+                        current_close_price = float(raw_ask)
                         buyback_cost += current_close_price
                     elif leg.action == "BUY":
-                        current_close_price = float(stk_quotes.get("bid", 0.0) or stk_quotes.get("ltp", 0.0))
+                        raw_bid = stk_quotes.get("bid")
+                        if raw_bid is None or float(raw_bid) <= 0:
+                            all_quotes_valid = False
+                            break
+                        current_close_price = float(raw_bid)
                         buyback_cost -= current_close_price
 
                     leg.current_price = current_close_price

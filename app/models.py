@@ -149,6 +149,20 @@ class TradePosition(db.Model):
     
     legs = db.relationship("PositionLeg", backref="position", cascade="all, delete-orphan", lazy="joined")
 
+    @property
+    def total_risk_with_costs_inr(self) -> float:
+        """
+        Calculates total committed risk including round-trip transaction costs.
+        For an OPEN position, transaction_costs_inr represents entry costs paid;
+        closing the position incurs exit costs, so round-trip costs = 2 * transaction_costs_inr.
+        For a closed position, transaction_costs_inr already contains realized entry + exit costs.
+        """
+        if self.status == "OPEN":
+            round_trip_costs = 2.0 * (self.transaction_costs_inr or 0.0)
+        else:
+            round_trip_costs = self.transaction_costs_inr or 0.0
+        return round((self.max_loss_inr or 0.0) + round_trip_costs, 2)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -165,6 +179,7 @@ class TradePosition(db.Model):
             "current_net_debit_pts": self.current_net_debit_pts,
             "current_pnl_inr": self.current_pnl_inr,
             "max_loss_inr": self.max_loss_inr,
+            "total_risk_with_costs_inr": self.total_risk_with_costs_inr,
             "max_profit_inr": self.max_profit_inr,
             "status": self.status,
             "exit_time": self.exit_time.strftime("%Y-%m-%d %H:%M:%S") if self.exit_time else None,
