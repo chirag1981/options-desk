@@ -98,22 +98,22 @@ class PortfolioRiskManager:
         engine_type = engine_type.upper().strip()
         rejections = []
 
-        total_equity = Config.TOTAL_ACCOUNT_EQUITY
-        max_per_trade_risk = (Config.MAX_RISK_PER_TRADE_PCT / 100.0) * total_equity
-        max_combined_risk = (Config.MAX_COMBINED_PORTFOLIO_RISK_PCT / 100.0) * total_equity
-        max_daily_loss = (Config.MAX_DAILY_LOSS_PCT / 100.0) * total_equity
+        max_per_trade_risk = Config.get_max_risk_per_trade_inr()
+        max_combined_risk = Config.get_max_combined_portfolio_risk_inr()
+        max_daily_loss = Config.get_max_daily_loss_inr()
 
         with _risk_lock:
             # 1. Structural Invariant: Zero naked options permitted
             if candidate.has_uncovered_short:
                 rejections.append("CRITICAL: Uncovered short option detected. Naked options strictly forbidden.")
 
-            trade_risk = candidate.max_loss_inr
+            # Total risk includes gross maximum loss plus estimated round-trip transaction costs
+            trade_risk = getattr(candidate, "total_risk_with_costs_inr", candidate.max_loss_inr)
             if trade_risk <= 0:
                 rejections.append(f"Invalid maximum loss calculation ({trade_risk:.2f} INR).")
             elif trade_risk > max_per_trade_risk:
                 rejections.append(
-                    f"Trade risk (₹{trade_risk:,.2f}) exceeds {Config.MAX_RISK_PER_TRADE_PCT}% limit (₹{max_per_trade_risk:,.2f})."
+                    f"Trade risk including estimated costs (₹{trade_risk:,.2f}) exceeds {Config.MAX_RISK_PER_TRADE_PCT}% limit (₹{max_per_trade_risk:,.2f})."
                 )
 
             # 2. Consecutive Loss Cooldown Guard

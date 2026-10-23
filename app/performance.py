@@ -75,6 +75,9 @@ class PerformanceAnalytics:
             "intraday_net_pnl_inr": intraday_net_pnl,
             "positional_net_pnl_inr": positional_net_pnl,
             "total_account_equity": Config.TOTAL_ACCOUNT_EQUITY,
+            "max_portfolio_risk_inr": Config.get_max_portfolio_risk_inr(),
+            "max_trade_risk_inr": Config.get_max_risk_per_trade_inr(),
+            "daily_loss_circuit_inr": Config.get_daily_loss_limit_inr(),
             "current_equity": round(Config.TOTAL_ACCOUNT_EQUITY + combined_net_pnl, 2),
         }
 

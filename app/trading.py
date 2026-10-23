@@ -9,7 +9,7 @@ Handles:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -24,18 +24,44 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class TransactionCostEngine:
-    """Calculates official statutory NSE transaction fees and taxes for options trading."""
+    """
+    Calculates official statutory NSE transaction fees and taxes for options trading.
+    Authoritative statutory sources:
+    - Brokerage: Flat ₹20 per executed order leg.
+    - STT (Securities Transaction Tax) on Option Sell Turnover:
+      * Prior to Oct 1, 2024: 0.0625% (0.000625)
+      * Oct 1, 2024 to March 31, 2026: 0.10% (0.0010) (Finance Act No. 2, 2024)
+      * Effective April 1, 2026: 0.15% (0.0015) (Union Budget 2026 / NSE Circular)
+    - Exchange Turnover Fee: 0.05% (0.0005) on premium turnover.
+    - SEBI Turnover Fee: ₹10 per crore = 0.0001% (0.000001) on premium turnover.
+    - Stamp Duty: 0.003% (0.00003) on buy-side option turnover.
+    - GST: 18% on (Brokerage + Exchange turnover fees).
+    """
 
     @classmethod
-    def calculate_order_costs(cls, legs: List[Dict[str, Any]], lots: int = 1) -> float:
+    def get_stt_sell_rate(cls, as_of_date: Optional[date] = None) -> float:
+        """Determines the statutory STT rate on option sales based on trade execution date."""
+        from datetime import date as dt_date
+        if as_of_date is None:
+            as_of_date = datetime.now(IST).date()
+
+        if as_of_date < dt_date(2024, 10, 1):
+            return 0.000625  # 0.0625%
+        elif as_of_date < dt_date(2026, 4, 1):
+            return 0.001000  # 0.10%
+        else:
+            return 0.001500  # 0.15% effective April 1, 2026
+
+    @classmethod
+    def calculate_order_costs(
+        cls,
+        legs: List[Dict[str, Any]],
+        lots: int = 1,
+        trade_date: Optional[date] = None,
+    ) -> float:
         """
-        Computes statutory fees for entering or exiting spread legs:
-        - Brokerage: ₹20 per executed order leg.
-        - STT: 0.125% on sell-side option turnover.
-        - Exchange Turnover Fee: 0.05% of premium turnover.
-        - SEBI Turnover Fee: 0.0001% of premium turnover.
-        - Stamp Duty: 0.003% on buy-side option turnover.
-        - GST: 18% on (Brokerage + Exchange turnover fees).
+        Computes statutory fees for entering or exiting spread legs.
+        Applies date-effective STT rates so historical trades are not retrospectively miscalculated.
         """
         total_brokerage = len(legs) * Config.BROKERAGE_PER_ORDER
         total_stt = 0.0
@@ -43,15 +69,18 @@ class TransactionCostEngine:
         total_stamp_duty = 0.0
         total_turnover = 0.0
 
+        stt_sell_rate = cls.get_stt_sell_rate(trade_date)
+        authoritative_lot_size = Config.get_lot_size(trade_date)
+
         for leg in legs:
             action = leg.get("action", "").upper()
             price = float(leg.get("price", leg.get("entry_price", 0.0)) or 0.0)
-            qty = int(leg.get("quantity", Config.LOT_SIZE * lots))
+            qty = int(leg.get("quantity", authoritative_lot_size * lots))
             turnover = price * qty
             total_turnover += turnover
 
             if action == "SELL":
-                total_stt += turnover * Config.STT_SELL_PCT
+                total_stt += turnover * stt_sell_rate
             elif action == "BUY":
                 total_stamp_duty += turnover * Config.STAMP_DUTY_BUY_PCT
 
@@ -62,6 +91,7 @@ class TransactionCostEngine:
 
         total_charges = total_brokerage + total_stt + total_exchange_fee + total_sebi_fee + total_stamp_duty + gst
         return round(total_charges, 2)
+
 
 
 class PaperTradingManager:
@@ -86,15 +116,14 @@ class PaperTradingManager:
                 {"action": l.action, "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
                 for l in candidate.legs
             ]
-            entry_costs = TransactionCostEngine.calculate_order_costs(legs_data, lots=candidate.lots)
+            now_dt = datetime.now(IST)
+            entry_costs = TransactionCostEngine.calculate_order_costs(legs_data, lots=candidate.lots, trade_date=now_dt.date())
 
             # 2. Stop loss & target thresholds
             # Target = buyback at 30% of credit (capture 70% profit)
             target_debit = round(candidate.net_credit_pts * 0.30, 2)
             # Stop loss = buyback at 1.5x credit
             stop_loss_debit = round(candidate.net_credit_pts * 1.50, 2)
-
-            now_dt = datetime.now(IST)
 
             # 3. Create TradePosition record
             position = TradePosition(
@@ -225,7 +254,7 @@ class PaperTradingManager:
                 {"action": "BUY" if l.action == "SELL" else "SELL", "price": l.current_price, "quantity": l.quantity}
                 for l in pos.legs
             ]
-            exit_costs = TransactionCostEngine.calculate_order_costs(exit_legs_data, lots=pos.lots)
+            exit_costs = TransactionCostEngine.calculate_order_costs(exit_legs_data, lots=pos.lots, trade_date=now_dt.date())
 
             total_costs = pos.transaction_costs_inr + exit_costs
             gross_pnl = (pos.entry_net_credit_pts - pos.current_net_debit_pts) * pos.quantity
@@ -305,6 +334,13 @@ class AutoTradeEngine:
             if existing:
                 continue  # Already actively held
 
+            # Authoritative Execution Safety Gate Validation
+            from app.safety import ExecutionSafetyGate
+            is_safe, safety_msg = ExecutionSafetyGate.validate_execution(candidate, analysis, chain)
+            if not is_safe:
+                log.info(f"Auto-trade skipped {candidate.strategy_name} ({candidate.engine_type}) via safety gate: {safety_msg}")
+                continue
+
             # Evaluate Portfolio Risk
             risk_eval = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type=candidate.engine_type)
             if not risk_eval.approved:
@@ -345,6 +381,13 @@ class AutoTradeEngine:
             ).first()
             if existing:
                 already_open.append(f"{candidate.strategy_name} ({candidate.engine_type}) [Position #{existing.id}]")
+                continue
+
+            # Authoritative Execution Safety Gate Validation
+            from app.safety import ExecutionSafetyGate
+            is_safe, safety_msg = ExecutionSafetyGate.validate_execution(candidate, analysis, chain)
+            if not is_safe:
+                risk_blocked.append(f"{candidate.strategy_name} ({candidate.engine_type}) [Safety Gate]: {safety_msg}")
                 continue
 
             risk_eval = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type=candidate.engine_type)

@@ -257,6 +257,15 @@ def api_execute_candidate():
     else:
         candidate = matched_candidate
 
+    # Authoritative Execution Safety Gate
+    from app.safety import ExecutionSafetyGate
+    is_safe, safety_msg = ExecutionSafetyGate.validate_execution(candidate, analysis, chain)
+    if not is_safe:
+        return jsonify({
+            "status": "blocked_by_safety_gate",
+            "message": f"Execution safety gate rejected trade: {safety_msg}",
+        }), 400
+
     # Risk Check
     risk_res = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type=engine_type)
     if not risk_res.approved:

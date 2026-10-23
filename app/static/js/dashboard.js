@@ -347,7 +347,8 @@ function renderStrategySetup() {
     // Read user-selected lot count (defaults to 1)
     const lotsSelect = document.getElementById('trade-lots-select');
     const lots = lotsSelect ? (parseInt(lotsSelect.value) || 1) : 1;
-    const qty = 65 * lots;
+    const perLotQty = (cand.quantity && cand.lots) ? Math.round(cand.quantity / cand.lots) : (cand.quantity || 65);
+    const qty = perLotQty * lots;
 
     // Financial calculations scaled by selected lots
     const unitMargin = cand.estimated_margin_inr || (cand.strategy_id === 'IRON_CONDOR' ? 52000 : 38000);
@@ -423,11 +424,14 @@ function renderRiskAndPositions(data) {
 
     // Panel 4: Risk Meter
     const openRiskInr = openPositions.reduce((acc, p) => acc + (p.max_loss_inr || 0), 0);
-    const maxRiskInr = (summary.total_account_equity || 1000000) * 0.02; // 2%
-    const riskPct = Math.min(100, Math.round((openRiskInr / maxRiskInr) * 100));
+    const maxRiskInr = summary.max_portfolio_risk_inr || (summary.total_account_equity ? summary.total_account_equity * 0.02 : 20000);
+    const riskPct = maxRiskInr > 0 ? Math.min(100, Math.round((openRiskInr / maxRiskInr) * 100)) : 0;
 
     const riskPctLabel = document.getElementById('risk-pct-label');
-    if (riskPctLabel) riskPctLabel.textContent = `${(riskPct * 0.02).toFixed(1)}% / 2.0% Max`;
+    if (riskPctLabel) {
+        const openRiskPct = summary.total_account_equity ? ((openRiskInr / summary.total_account_equity) * 100).toFixed(2) : (riskPct * 0.02).toFixed(2);
+        riskPctLabel.textContent = `${openRiskPct}% / 2.0% Max`;
+    }
 
     const riskBarFill = document.getElementById('risk-bar-fill');
     if (riskBarFill) riskBarFill.style.width = `${riskPct}%`;

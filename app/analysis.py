@@ -92,20 +92,40 @@ class MarketAnalyzer:
             ce = quotes.get("CE") or {}
             pe = quotes.get("PE") or {}
 
-            ce_oi = int(ce.get("oi", 0) or 0)
-            pe_oi = int(pe.get("oi", 0) or 0)
-            ce_chg = int(ce.get("change_oi", 0) or 0)
-            pe_chg = int(pe.get("change_oi", 0) or 0)
+            raw_ce_oi = ce.get("oi")
+            raw_pe_oi = pe.get("oi")
+            raw_ce_chg = ce.get("change_oi")
+            raw_pe_chg = pe.get("change_oi")
 
-            total_ce_oi += ce_oi
-            total_pe_oi += pe_oi
-            total_ce_chg += ce_chg
-            total_pe_chg += pe_chg
+            if raw_ce_oi is not None:
+                try:
+                    ce_oi = int(raw_ce_oi)
+                    total_ce_oi += ce_oi
+                    if ce_oi > 0:
+                        ce_strikes_oi.append((stk, ce_oi))
+                except (ValueError, TypeError):
+                    pass
 
-            if pe_oi > 0:
-                pe_strikes_oi.append((stk, pe_oi))
-            if ce_oi > 0:
-                ce_strikes_oi.append((stk, ce_oi))
+            if raw_pe_oi is not None:
+                try:
+                    pe_oi = int(raw_pe_oi)
+                    total_pe_oi += pe_oi
+                    if pe_oi > 0:
+                        pe_strikes_oi.append((stk, pe_oi))
+                except (ValueError, TypeError):
+                    pass
+
+            if raw_ce_chg is not None:
+                try:
+                    total_ce_chg += int(raw_ce_chg)
+                except (ValueError, TypeError):
+                    pass
+
+            if raw_pe_chg is not None:
+                try:
+                    total_pe_chg += int(raw_pe_chg)
+                except (ValueError, TypeError):
+                    pass
 
             if stk == atm_strike:
                 ce_iv = float(ce.get("iv", 0.0) or 0.0)

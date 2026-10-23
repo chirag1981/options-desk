@@ -75,10 +75,28 @@ class SpreadCandidate:
 
     @property
     def estimated_costs_inr(self) -> float:
-        """Calculates exact statutory NSE brokerage, turnover fees and taxes for this strategy."""
+        """Calculates exact statutory NSE brokerage, turnover fees and taxes for this strategy entry."""
         from app.trading import TransactionCostEngine
         legs_dict = [l.to_dict() for l in self.legs]
         return TransactionCostEngine.calculate_order_costs(legs_dict, self.lots)
+
+    @property
+    def total_estimated_round_trip_costs_inr(self) -> float:
+        """Calculates round-trip entry + exit estimated statutory transaction costs."""
+        from app.trading import TransactionCostEngine
+        legs_dict = [l.to_dict() for l in self.legs]
+        entry_cost = TransactionCostEngine.calculate_order_costs(legs_dict, self.lots)
+        exit_legs_dict = [
+            {"action": "BUY" if l.action == "SELL" else "SELL", "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
+            for l in self.legs
+        ]
+        exit_cost = TransactionCostEngine.calculate_order_costs(exit_legs_dict, self.lots)
+        return round(entry_cost + exit_cost, 2)
+
+    @property
+    def total_risk_with_costs_inr(self) -> float:
+        """Theoretical maximum loss plus applicable estimated round-trip transaction costs."""
+        return round(self.max_loss_inr + self.total_estimated_round_trip_costs_inr, 2)
 
     @property
     def estimated_margin_inr(self) -> float:
@@ -101,6 +119,8 @@ class SpreadCandidate:
         d["legs"] = [l.to_dict() for l in self.legs]
         d["has_uncovered_short"] = self.has_uncovered_short
         d["estimated_costs_inr"] = self.estimated_costs_inr
+        d["total_estimated_round_trip_costs_inr"] = self.total_estimated_round_trip_costs_inr
+        d["total_risk_with_costs_inr"] = self.total_risk_with_costs_inr
         d["estimated_margin_inr"] = self.estimated_margin_inr
         d["net_credit_inr"] = round(self.net_credit_pts * self.quantity, 2)
         return d
@@ -121,15 +141,24 @@ class StrategyBuilder:
         engine_type: str = "INTRADAY",
         lots: int = 1,
     ) -> SpreadCandidate:
+        from app.contracts import ContractRegistry
         rejections = []
         spot = analysis.spot_price
         s1 = analysis.s1_support
         step = Config.STRIKE_STEP
-        lot_size = Config.LOT_SIZE * lots
+        lot_size = Config.get_lot_size() * lots
 
         # Select Short Put at or below S1; Long Put 1 step lower
         short_strike = math.floor(s1 / step) * step
         long_strike = short_strike - step
+
+        # Validate contract specifications
+        for stk in (short_strike, long_strike):
+            is_valid_c, c_err, _ = ContractRegistry.validate_contract(
+                "NIFTY", stk, analysis.expiry, provided_lot_size=Config.get_lot_size()
+            )
+            if not is_valid_c:
+                rejections.append(c_err)
 
         if analysis.market_bias not in ("BULLISH", "STRONG_BULLISH"):
             rejections.append(f"Market bias ({analysis.market_bias}) is not bullish.")
@@ -145,11 +174,23 @@ class StrategyBuilder:
             rejections.append(f"Missing Put quotes for strikes {short_strike} or {long_strike}.")
             return cls._empty_candidate("BULL_PUT", "Bull Put Credit Spread", engine_type, analysis, rejections)
 
-        sell_price = float(short_q.get("bid", 0.0) or 0.0)
-        buy_price = float(long_q.get("ask", 0.0) or 0.0)
+        raw_bid = short_q.get("bid")
+        raw_ask = long_q.get("ask")
 
-        if sell_price <= 0 or buy_price <= 0:
-            rejections.append("Invalid or non-positive Bid/Ask quote for Put spread legs.")
+        if raw_bid is None or float(raw_bid) <= 0:
+            rejections.append(f"Missing or non-positive executable Bid quote on short strike {short_strike} PE.")
+            sell_price = 0.0
+        else:
+            sell_price = float(raw_bid)
+
+        if raw_ask is None or float(raw_ask) <= 0:
+            rejections.append(f"Missing or non-positive executable Ask quote on long strike {long_strike} PE.")
+            buy_price = 0.0
+        else:
+            buy_price = float(raw_ask)
+
+        if sell_price > 0 and buy_price > 0 and sell_price <= buy_price:
+            rejections.append(f"Crossed/zero credit spread: Short Bid (₹{sell_price:.2f}) <= Long Ask (₹{buy_price:.2f}).")
 
         net_credit = round(sell_price - buy_price, 2)
         strike_width = short_strike - long_strike
@@ -227,15 +268,24 @@ class StrategyBuilder:
         engine_type: str = "INTRADAY",
         lots: int = 1,
     ) -> SpreadCandidate:
+        from app.contracts import ContractRegistry
         rejections = []
         spot = analysis.spot_price
         r1 = analysis.r1_resistance
         step = Config.STRIKE_STEP
-        lot_size = Config.LOT_SIZE * lots
+        lot_size = Config.get_lot_size() * lots
 
         # Select Short Call at or above R1; Long Call 1 step higher
         short_strike = math.ceil(r1 / step) * step
         long_strike = short_strike + step
+
+        # Validate contract specifications
+        for stk in (short_strike, long_strike):
+            is_valid_c, c_err, _ = ContractRegistry.validate_contract(
+                "NIFTY", stk, analysis.expiry, provided_lot_size=Config.get_lot_size()
+            )
+            if not is_valid_c:
+                rejections.append(c_err)
 
         if analysis.market_bias not in ("BEARISH", "STRONG_BEARISH"):
             rejections.append(f"Market bias ({analysis.market_bias}) is not bearish.")
@@ -251,11 +301,23 @@ class StrategyBuilder:
             rejections.append(f"Missing Call quotes for strikes {short_strike} or {long_strike}.")
             return cls._empty_candidate("BEAR_CALL", "Bear Call Credit Spread", engine_type, analysis, rejections)
 
-        sell_price = float(short_q.get("bid", 0.0) or 0.0)
-        buy_price = float(long_q.get("ask", 0.0) or 0.0)
+        raw_bid = short_q.get("bid")
+        raw_ask = long_q.get("ask")
 
-        if sell_price <= 0 or buy_price <= 0:
-            rejections.append("Invalid or non-positive Bid/Ask quote for Call spread legs.")
+        if raw_bid is None or float(raw_bid) <= 0:
+            rejections.append(f"Missing or non-positive executable Bid quote on short strike {short_strike} CE.")
+            sell_price = 0.0
+        else:
+            sell_price = float(raw_bid)
+
+        if raw_ask is None or float(raw_ask) <= 0:
+            rejections.append(f"Missing or non-positive executable Ask quote on long strike {long_strike} CE.")
+            buy_price = 0.0
+        else:
+            buy_price = float(raw_ask)
+
+        if sell_price > 0 and buy_price > 0 and sell_price <= buy_price:
+            rejections.append(f"Crossed/zero credit spread: Short Bid (₹{sell_price:.2f}) <= Long Ask (₹{buy_price:.2f}).")
 
         net_credit = round(sell_price - buy_price, 2)
         strike_width = long_strike - short_strike

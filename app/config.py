@@ -46,21 +46,51 @@ class Config:
     # Underlyings & Index Configuration
     SYMBOL = "NIFTY"
     INDEX_FYERS_SYMBOL = "NSE:NIFTY50-INDEX"
-    LOT_SIZE = 65
     STRIKE_STEP = 50.0
 
-    # Risk Management & Capital Defaults (Paper Trading)
-    TOTAL_ACCOUNT_EQUITY = 1000000.0  # 10 Lakh INR paper capital
+    # Authoritative active contract lot size
+    from app.contracts import ContractRegistry
+    LOT_SIZE: int = ContractRegistry.get_authoritative_lot_size("NIFTY")
+
+    @classmethod
+    def get_lot_size(cls, as_of_date=None) -> int:
+        """Returns the authoritative exchange lot size active for the target date."""
+        from app.contracts import ContractRegistry
+        return ContractRegistry.get_authoritative_lot_size(cls.SYMBOL, as_of_date)
+
+    # Risk Management & Capital Defaults (Paper Trading Simulation)
+    TOTAL_ACCOUNT_EQUITY = 1000000.0  # ₹10,00,000 INR simulated paper capital
     INTRADAY_CAPITAL_ALLOCATION = 500000.0   # 50% Intraday
     POSITIONAL_CAPITAL_ALLOCATION = 500000.0 # 50% Positional
 
-    # Hard Risk Ceilings
+    # Hard Risk Ceilings (Percentages)
     MAX_RISK_PER_TRADE_PCT = 0.5            # 0.5% max risk per trade
     MAX_COMBINED_PORTFOLIO_RISK_PCT = 2.0   # 2.0% max combined open risk
     MAX_DAILY_LOSS_PCT = 1.5                # 1.5% daily drawdown circuit breaker
     MAX_INTRADAY_POSITIONS = 2              # Max concurrent intraday positions
     MAX_POSITIONAL_POSITIONS = 2            # Max concurrent positional positions
     CONSECUTIVE_LOSS_COOLDOWN_MINS = 15     # 15 min cooldown after stop loss
+
+    # Derived Monetary Risk Ceilings (Authoritative INR Amounts)
+    @classmethod
+    def get_max_risk_per_trade_inr(cls) -> float:
+        return (cls.MAX_RISK_PER_TRADE_PCT / 100.0) * cls.TOTAL_ACCOUNT_EQUITY
+
+    @classmethod
+    def get_max_combined_portfolio_risk_inr(cls) -> float:
+        return (cls.MAX_COMBINED_PORTFOLIO_RISK_PCT / 100.0) * cls.TOTAL_ACCOUNT_EQUITY
+
+    @classmethod
+    def get_max_portfolio_risk_inr(cls) -> float:
+        return cls.get_max_combined_portfolio_risk_inr()
+
+    @classmethod
+    def get_max_daily_loss_inr(cls) -> float:
+        return (cls.MAX_DAILY_LOSS_PCT / 100.0) * cls.TOTAL_ACCOUNT_EQUITY
+
+    @classmethod
+    def get_daily_loss_limit_inr(cls) -> float:
+        return cls.get_max_daily_loss_inr()
 
     # Spread Quality Filters
     MIN_NET_CREDIT_PTS = 10.0               # Minimum net credit for 50-wide spread
@@ -74,14 +104,14 @@ class Config:
     INTRADAY_SESSION_CLOSE_TIME = "15:20:00"
     POSITIONAL_PRE_EXPIRY_EXIT_TIME = "14:30:00"  # Expiry day exit
 
-    # Statutory NSE Charges (per lot basis)
+    # Statutory NSE Charges Base Rates
     BROKERAGE_PER_ORDER = 20.0
-    STT_SELL_PCT = 0.00125                  # 0.125% on option sell premium
-    EXCHANGE_TURNOVER_PCT = 0.0005          # 0.05%
-    SEBI_TURNOVER_PCT = 0.000001
-    STAMP_DUTY_BUY_PCT = 0.00003
-    GST_PCT = 0.18                          # 18% on brokerage & transaction charges
+    EXCHANGE_TURNOVER_PCT = 0.0005          # 0.05% of premium turnover
+    SEBI_TURNOVER_PCT = 0.000001           # ₹10 per crore (0.0001%)
+    STAMP_DUTY_BUY_PCT = 0.00003           # 0.003% on buy turnover
+    GST_PCT = 0.18                         # 18% on (Brokerage + Exchange fees)
 
     # Auto-Trading Control
     AUTO_TRADE_ENABLED: bool = False
+
 

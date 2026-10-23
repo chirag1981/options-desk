@@ -254,6 +254,39 @@ class MarketDataProvider:
         return 24500.0, 0.35, "SIMULATED_DEMO"
 
     @classmethod
+    def parse_option_quote(cls, opt: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parses raw FYERS option chain quote without synthetic price fabrication.
+        If bid or ask is missing, non-positive, or empty, it remains 0.0.
+        """
+        raw_bid = opt.get("bid")
+        raw_ask = opt.get("ask")
+        raw_ltp = opt.get("ltp")
+        raw_oi = opt.get("oi")
+        raw_chg_oi = opt.get("oi_change", opt.get("change_oi"))
+        raw_vol = opt.get("volume")
+        raw_iv = opt.get("iv")
+
+        bid = float(raw_bid) if (raw_bid is not None and str(raw_bid).strip() != "") else 0.0
+        ask = float(raw_ask) if (raw_ask is not None and str(raw_ask).strip() != "") else 0.0
+        ltp = float(raw_ltp) if (raw_ltp is not None and str(raw_ltp).strip() != "") else 0.0
+        oi = int(raw_oi) if (raw_oi is not None and str(raw_oi).strip() != "") else 0
+        change_oi = int(raw_chg_oi) if (raw_chg_oi is not None and str(raw_chg_oi).strip() != "") else 0
+        vol = int(raw_vol) if (raw_vol is not None and str(raw_vol).strip() != "") else 0
+        iv = float(raw_iv) if (raw_iv is not None and str(raw_iv).strip() != "") else 0.0
+
+        return {
+            "symbol": opt.get("symbol", ""),
+            "ltp": ltp,
+            "bid": bid,
+            "ask": ask,
+            "oi": oi,
+            "change_oi": change_oi,
+            "volume": vol,
+            "iv": iv,
+        }
+
+    @classmethod
     def get_option_chain(cls, expiry: Optional[str] = None) -> Dict[str, Any]:
         """
         Fetches option chain from FYERS or generates validated mock chain.
@@ -288,23 +321,7 @@ class MarketDataProvider:
                         if stk not in chain_by_strike:
                             chain_by_strike[stk] = {"CE": {}, "PE": {}}
 
-                        bid = float(opt.get("bid", 0.0) or 0.0)
-                        ask = float(opt.get("ask", 0.0) or 0.0)
-                        ltp = float(opt.get("ltp", 0.0) or 0.0)
-                        if bid <= 0 and ltp > 0:
-                            bid = max(0.5, ltp - 1.0)
-                        if ask <= 0 and ltp > 0:
-                            ask = ltp + 1.0
-
-                        chain_by_strike[stk][opt_type] = {
-                            "symbol": opt.get("symbol", ""),
-                            "ltp": ltp,
-                            "bid": bid,
-                            "ask": ask,
-                            "oi": int(opt.get("oi", 0) or 0),
-                            "change_oi": int(opt.get("oi_change", opt.get("change_oi", 0)) or 0),
-                            "iv": float(opt.get("iv", 0.0) or 0.0),
-                        }
+                        chain_by_strike[stk][opt_type] = cls.parse_option_quote(opt)
 
                     if chain_by_strike:
                         return {
