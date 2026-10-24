@@ -318,6 +318,10 @@ def test_scheduler_run_cycle_deduplication_cadence(app_ctx, monkeypatch):
     """
     from app.market_data import MarketDataProvider
 
+    # Freeze trading window boundaries so test runs deterministically regardless of time of day
+    monkeypatch.setattr(Config, "INTRADAY_ENTRY_START", "00:00:00")
+    monkeypatch.setattr(Config, "INTRADAY_ENTRY_CUTOFF", "23:59:59")
+
     # Execute Cycle 1 -> 2 signals persisted (1 Intraday + 1 Positional)
     DeskScheduler.run_cycle()
     count_cycle1 = SignalCandidate.query.count()
