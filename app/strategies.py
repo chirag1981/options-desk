@@ -160,7 +160,8 @@ class StrategyBuilder:
         spot = analysis.spot_price
         s1 = analysis.s1_support
         step = Config.STRIKE_STEP
-        lot_size = Config.get_lot_size() * lots
+        series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
+        lot_size = series_lot_size * lots
 
         # Select Short Put at or below S1; Long Put 1 step lower
         short_strike = math.floor(s1 / step) * step
@@ -169,7 +170,7 @@ class StrategyBuilder:
         # Validate contract specifications
         for stk in (short_strike, long_strike):
             is_valid_c, c_err, _ = ContractRegistry.validate_contract(
-                "NIFTY", stk, analysis.expiry, provided_lot_size=Config.get_lot_size()
+                "NIFTY", stk, analysis.expiry, provided_lot_size=series_lot_size
             )
             if not is_valid_c:
                 rejections.append(c_err)
@@ -287,7 +288,8 @@ class StrategyBuilder:
         spot = analysis.spot_price
         r1 = analysis.r1_resistance
         step = Config.STRIKE_STEP
-        lot_size = Config.get_lot_size() * lots
+        series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
+        lot_size = series_lot_size * lots
 
         # Select Short Call at or above R1; Long Call 1 step higher
         short_strike = math.ceil(r1 / step) * step
@@ -296,7 +298,7 @@ class StrategyBuilder:
         # Validate contract specifications
         for stk in (short_strike, long_strike):
             is_valid_c, c_err, _ = ContractRegistry.validate_contract(
-                "NIFTY", stk, analysis.expiry, provided_lot_size=Config.get_lot_size()
+                "NIFTY", stk, analysis.expiry, provided_lot_size=series_lot_size
             )
             if not is_valid_c:
                 rejections.append(c_err)
@@ -433,7 +435,7 @@ class StrategyBuilder:
         else:
             max_loss_pts = round(wing_width - combined_credit, 2)
 
-        lot_size = Config.LOT_SIZE * lots
+        lot_size = put_cand.quantity
         max_profit_inr = round(combined_credit * lot_size, 2)
         max_loss_inr = round(max_loss_pts * lot_size, 2)
         rr_ratio = round(max_profit_inr / max_loss_inr, 2) if max_loss_inr > 0 else 0.0

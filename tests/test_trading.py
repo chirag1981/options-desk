@@ -223,11 +223,16 @@ def test_full_lifecycle_fee_and_pnl_reconciliation(app_ctx):
     # 24700 CE: buy at Ask (16.0)
     # 24750 CE: sell at Bid (8.0) -> net 8.0 pts
     # Total debit = 16.0 pts
-    PaperTradingManager.update_open_positions_mtm(valid_chain, spot_price=24550.0)
-    updated_pos = db.session.get(TradePosition, pos.id)
-    assert updated_pos.current_net_debit_pts == 16.0
-    expected_gross_unrealized = (28.0 - 16.0) * 65
-    assert updated_pos.current_pnl_inr == round(expected_gross_unrealized - entry_fees, 2)
+    orig_close_time = Config.INTRADAY_SESSION_CLOSE_TIME
+    try:
+        Config.INTRADAY_SESSION_CLOSE_TIME = "23:59:59"
+        PaperTradingManager.update_open_positions_mtm(valid_chain, spot_price=24550.0)
+        updated_pos = db.session.get(TradePosition, pos.id)
+        assert updated_pos.current_net_debit_pts == 16.0
+        expected_gross_unrealized = (28.0 - 16.0) * 65
+        assert updated_pos.current_pnl_inr == round(expected_gross_unrealized - entry_fees, 2)
+    finally:
+        Config.INTRADAY_SESSION_CLOSE_TIME = orig_close_time
 
     # 3. Manual Close
     close_ok, _ = PaperTradingManager.close_position(pos.id, exit_spot=24550.0, reason="MANUAL_CLOSE")

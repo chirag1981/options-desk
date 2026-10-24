@@ -220,6 +220,28 @@ class FnoHistoricalDownloader:
         Fetches official expired options expiry dates within range [range_from, range_to].
         Dates must be in 'YYYY-MM-DD' format.
         """
+        d_from = datetime.strptime(range_from, "%Y-%m-%d").date()
+        d_to = datetime.strptime(range_to, "%Y-%m-%d").date()
+
+        # FYERS limits single-request range to ~60 days. Auto-chunk if range exceeds 60 days.
+        if (d_to - d_from).days > 60:
+            all_expiries = []
+            curr_start = d_from
+            while curr_start < d_to:
+                curr_end = min(d_to, curr_start + timedelta(days=60))
+                params = {
+                    "symbol": symbol,
+                    "date_format": "1",
+                    "range_from": curr_start.strftime("%Y-%m-%d"),
+                    "range_to": curr_end.strftime("%Y-%m-%d"),
+                }
+                code, resp = self._call_api("/history/fno/expired/expiry-dates", params)
+                if code == 200:
+                    exp_chunk = resp.get("data", {}).get("expiry_dates", {}).get("options", [])
+                    all_expiries.extend(exp_chunk)
+                curr_start = curr_end + timedelta(days=1)
+            return sorted(list(set(all_expiries)))
+
         params = {
             "symbol": symbol,
             "date_format": "1",

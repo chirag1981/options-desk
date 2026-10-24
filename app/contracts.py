@@ -81,6 +81,19 @@ class ContractRegistry:
         raise ValueError(f"Unsupported contract symbol for lot size lookup: {symbol}")
 
     @classmethod
+    def get_contract_lot_size(cls, symbol: str = "NIFTY", expiry: Optional[str] = None) -> int:
+        """Determines authoritative lot size from contract expiry series."""
+        effective_date = None
+        if expiry and expiry.strip():
+            for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d%b%Y"):
+                try:
+                    effective_date = datetime.strptime(expiry.strip().upper(), fmt).date()
+                    break
+                except ValueError:
+                    pass
+        return cls.get_authoritative_lot_size(symbol, effective_date)
+
+    @classmethod
     def validate_contract(
         cls,
         symbol: str,
