@@ -8,9 +8,11 @@ from app.backtesting.data_validator import (
     DataQualityReport,
     HISTORICAL_SCHEMA_COLUMNS,
 )
+from app.backtesting.fno_downloader import FnoHistoricalDownloader
 
 __all__ = [
     "HistoricalDataValidator",
     "DataQualityReport",
     "HISTORICAL_SCHEMA_COLUMNS",
+    "FnoHistoricalDownloader",
 ]
