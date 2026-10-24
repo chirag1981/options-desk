@@ -601,6 +601,7 @@ class AutoSelectionResult:
     market_regime: str
     market_bias: str
     timestamp: str
+    no_trade_reasons: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -613,6 +614,7 @@ class AutoSelectionResult:
             "market_regime": self.market_regime,
             "market_bias": self.market_bias,
             "timestamp": self.timestamp,
+            "no_trade_reasons": self.no_trade_reasons,
         }
 
 
@@ -670,16 +672,32 @@ class AutoStrategySelector:
         candidates_with_score.sort(key=lambda x: x[1], reverse=True)
 
         if not candidates_with_score:
+            no_trade_reasons = []
+            if analysis.market_regime == "CHOPPY_OR_INSUFFICIENT":
+                no_trade_reasons.append(f"Market regime is {analysis.market_regime}: {'; '.join(analysis.evidence_factors)}")
+            if analysis.data_quality_warnings:
+                no_trade_reasons.extend(analysis.data_quality_warnings)
+
+            # Collect individual strategy rejection reasons
+            all_eval = [bp_intra, bp_pos, bc_intra, bc_pos, ic_intra, ic_pos]
+            for c in all_eval:
+                if not c.is_eligible and c.rejection_reasons:
+                    no_trade_reasons.append(f"{c.strategy_name} ({c.engine_type}) rejected: {'; '.join(c.rejection_reasons)}")
+
+            if not no_trade_reasons:
+                no_trade_reasons.append("No strategy meets suitability thresholds or positive risk/reward criteria.")
+
             return AutoSelectionResult(
                 selection_type="NONE",
                 selected_strategies=[],
                 primary_strategy=None,
                 engine_types=[],
-                selection_rationale="No strategy currently meets market data criteria or session risk thresholds.",
+                selection_rationale=f"NO TRADE: {no_trade_reasons[0]}",
                 data_evidence=[f"Market bias is {analysis.market_bias}", f"Regime is {analysis.market_regime}", f"PCR: {analysis.pcr_oi:.2f}"],
                 market_regime=analysis.market_regime,
                 market_bias=analysis.market_bias,
                 timestamp=now_str,
+                no_trade_reasons=no_trade_reasons,
             )
 
         # Select primary candidate

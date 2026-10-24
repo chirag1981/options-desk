@@ -8,10 +8,12 @@ Authoritative service for computing:
 """
 
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
+
+from app.config import Config
 
 log = logging.getLogger("analysis")
 IST = ZoneInfo("Asia/Kolkata")
@@ -36,17 +38,18 @@ class MarketAnalysisResult:
     total_pe_change_oi: int
     total_ce_change_oi: int
     net_delta_pe_ce_oi: int
-    writer_momentum: str     # BULLISH_PUT_WRITING, BEARISH_CALL_WRITING, BALANCED
+    writer_momentum: str     # BULLISH_PUT_WRITING, BEARISH_CALL_WRITING, BALANCED, UNKNOWN
     dist_to_s1: float        # spot - s1
     dist_to_r1: float        # r1 - spot
     dist_to_s1_pct: float
     dist_to_r1_pct: float
     atm_iv: float
-    market_regime: str       # TRENDING_BULLISH, TRENDING_BEARISH, BALANCED_RANGE, CHOPPY
+    market_regime: str       # TRENDING_BULLISH, TRENDING_BEARISH, BALANCED_RANGE, MILDLY_BULLISH, MILDLY_BEARISH, CHOPPY_OR_INSUFFICIENT
     market_bias: str         # BULLISH, BEARISH, NEUTRAL
     confidence_score: float  # 0.0 to 100.0
     evidence_factors: List[str]
     data_status: str
+    data_quality_warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -82,6 +85,11 @@ class MarketAnalyzer:
         total_ce_oi = 0
         total_pe_chg = 0
         total_ce_chg = 0
+        has_pe_oi = False
+        has_ce_oi = False
+        has_pe_chg = False
+        has_ce_chg = False
+        warnings: List[str] = []
 
         pe_strikes_oi: List[Tuple[float, int]] = []
         ce_strikes_oi: List[Tuple[float, int]] = []
@@ -101,6 +109,7 @@ class MarketAnalyzer:
                 try:
                     ce_oi = int(raw_ce_oi)
                     total_ce_oi += ce_oi
+                    has_ce_oi = True
                     if ce_oi > 0:
                         ce_strikes_oi.append((stk, ce_oi))
                 except (ValueError, TypeError):
@@ -110,6 +119,7 @@ class MarketAnalyzer:
                 try:
                     pe_oi = int(raw_pe_oi)
                     total_pe_oi += pe_oi
+                    has_pe_oi = True
                     if pe_oi > 0:
                         pe_strikes_oi.append((stk, pe_oi))
                 except (ValueError, TypeError):
@@ -118,12 +128,14 @@ class MarketAnalyzer:
             if raw_ce_chg is not None:
                 try:
                     total_ce_chg += int(raw_ce_chg)
+                    has_ce_chg = True
                 except (ValueError, TypeError):
                     pass
 
             if raw_pe_chg is not None:
                 try:
                     total_pe_chg += int(raw_pe_chg)
+                    has_pe_chg = True
                 except (ValueError, TypeError):
                     pass
 
@@ -158,16 +170,36 @@ class MarketAnalyzer:
         elif ce_strikes_oi:
             r1 = ce_strikes_oi[0][0]
 
-        pcr = round((total_pe_oi / total_ce_oi), 2) if total_ce_oi > 0 else 1.0
-        net_delta = total_pe_chg - total_ce_chg
+        # Data Quality & OI Validation
+        if not has_pe_oi and not has_ce_oi:
+            warnings.append("Missing Open Interest data across entire option chain.")
+        elif total_pe_oi == 0 and total_ce_oi == 0:
+            warnings.append("Zero Open Interest across entire option chain.")
 
-        # Writer Momentum Bias
-        if total_pe_chg > total_ce_chg * 1.25 and total_pe_chg > 0:
-            writer_momentum = "BULLISH_PUT_WRITING"
-        elif total_ce_chg > total_pe_chg * 1.25 and total_ce_chg > 0:
-            writer_momentum = "BEARISH_CALL_WRITING"
+        if total_ce_oi == 0:
+            warnings.append("Zero Call Open Interest; Put-Call Ratio cannot be calculated safely.")
+            pcr = 0.0
+        elif total_pe_oi == 0:
+            warnings.append("Zero Put Open Interest; Put-Call Ratio is 0.0.")
+            pcr = 0.0
         else:
+            pcr = round((total_pe_oi / total_ce_oi), 2)
+
+        if not has_pe_chg and not has_ce_chg:
+            warnings.append("Historical change in Open Interest (ΔOI) is unavailable from feed.")
+            net_delta = 0
             writer_momentum = "BALANCED"
+        else:
+            net_delta = total_pe_chg - total_ce_chg
+            if total_pe_chg > total_ce_chg * 1.25 and total_pe_chg > 0:
+                writer_momentum = "BULLISH_PUT_WRITING"
+            elif total_ce_chg > total_pe_chg * 1.25 and total_ce_chg > 0:
+                writer_momentum = "BEARISH_CALL_WRITING"
+            else:
+                writer_momentum = "BALANCED"
+
+        if s1 <= 0 or r1 <= 0 or s1 >= r1:
+            warnings.append(f"Invalid structural levels: S1 ({s1}) >= R1 ({r1}) or non-positive.")
 
         dist_s1 = spot - s1 if (spot > 0 and s1 > 0) else 0.0
         dist_r1 = r1 - spot if (spot > 0 and r1 > 0) else 0.0
@@ -184,6 +216,9 @@ class MarketAnalyzer:
             dist_s1=dist_s1,
             dist_r1=dist_r1,
             net_delta=net_delta,
+            warnings=warnings,
+            total_pe_chg=total_pe_chg,
+            total_ce_chg=total_ce_chg,
         )
 
         now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
@@ -216,6 +251,7 @@ class MarketAnalyzer:
             confidence_score=confidence,
             evidence_factors=evidence,
             data_status=data_status,
+            data_quality_warnings=warnings,
         )
 
     @classmethod
@@ -229,54 +265,92 @@ class MarketAnalyzer:
         dist_s1: float,
         dist_r1: float,
         net_delta: int,
+        warnings: Optional[List[str]] = None,
+        total_pe_chg: int = 0,
+        total_ce_chg: int = 0,
     ) -> Tuple[str, str, float, List[str]]:
-        factors = []
-        confidence = 60.0
+        warnings = warnings or []
+        factors: List[str] = []
 
-        # Strong Bullish Regime
-        if pcr >= 1.15 and writer_momentum == "BULLISH_PUT_WRITING" and spot >= s1:
-            factors.append(f"Put Writing dominance (Net ΔOI: +{net_delta:,})")
-            factors.append(f"Bullish PCR: {pcr:.2f} (above 1.15)")
+        # 1. Critical Data Defect Guard (Zero/Missing OI or Invalid S1/R1)
+        critical_warnings = [
+            w for w in warnings
+            if "Zero Open Interest" in w or "Missing Open Interest" in w or "Zero Call" in w or "Invalid structural" in w
+        ]
+        if critical_warnings:
+            factors.extend(critical_warnings)
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 25.0, factors
+
+        # 2. Contradictory Input Checks
+        if pcr >= 1.15 and spot < s1:
+            factors.append(f"Contradictory signals: High PCR ({pcr:.2f}) but spot ({spot:.1f}) breached below Put Wall ({s1:.0f}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 45.0, factors
+
+        if pcr <= 0.85 and spot > r1:
+            factors.append(f"Contradictory signals: Low PCR ({pcr:.2f}) but spot ({spot:.1f}) breached above Call Wall ({r1:.0f}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 45.0, factors
+
+        if pcr >= 1.15 and writer_momentum == "BEARISH_CALL_WRITING" and total_ce_chg > total_pe_chg * 1.5:
+            factors.append(f"Contradictory signals: High PCR ({pcr:.2f}) contradicts heavy Call OI expansion (+{total_ce_chg:,}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 45.0, factors
+
+        if pcr <= 0.85 and writer_momentum == "BULLISH_PUT_WRITING" and total_pe_chg > total_ce_chg * 1.5:
+            factors.append(f"Contradictory signals: Low PCR ({pcr:.2f}) contradicts heavy Put OI expansion (+{total_pe_chg:,}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 45.0, factors
+
+        # 3. Structural Boundary Cushion Breaches
+        if spot < s1:
+            factors.append(f"Spot price ({spot:.1f}) breached below S1 Put Wall ({s1:.0f}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 40.0, factors
+        if spot > r1:
+            factors.append(f"Spot price ({spot:.1f}) breached above R1 Call Wall ({r1:.0f}).")
+            return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 40.0, factors
+
+        # 4. Ordered Deterministic Regimes
+        # Rule 1: TRENDING_BULLISH (PCR >= 1.15, positive delta or Put OI expansion, spot >= s1, cushion >= 20)
+        if pcr >= 1.15 and (writer_momentum == "BULLISH_PUT_WRITING" or net_delta > 0) and spot >= s1 and dist_s1 >= Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Put OI expansion (Net ΔOI: +{net_delta:,})")
+            factors.append(f"Bullish PCR: {pcr:.2f} (>= 1.15)")
             if dist_s1 >= 40.0:
                 factors.append(f"Safe cushion ({dist_s1:.0f} pts) above Put Wall ({s1:.0f})")
                 confidence = 88.0
             else:
-                factors.append(f"Tight cushion ({dist_s1:.0f} pts) above Put Wall")
+                factors.append(f"Moderate cushion ({dist_s1:.0f} pts) above Put Wall ({s1:.0f})")
                 confidence = 75.0
             return "TRENDING_BULLISH", "BULLISH", confidence, factors
 
-        # Strong Bearish Regime
-        if pcr <= 0.85 and writer_momentum == "BEARISH_CALL_WRITING" and spot <= r1:
-            factors.append(f"Call Writing dominance (Net ΔOI: {net_delta:,})")
-            factors.append(f"Bearish PCR: {pcr:.2f} (below 0.85)")
+        # Rule 2: TRENDING_BEARISH (PCR <= 0.85, negative delta or Call OI expansion, spot <= r1, cushion >= 20)
+        if pcr <= 0.85 and (writer_momentum == "BEARISH_CALL_WRITING" or net_delta < 0) and spot <= r1 and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Call OI expansion (Net ΔOI: {net_delta:,})")
+            factors.append(f"Bearish PCR: {pcr:.2f} (<= 0.85)")
             if dist_r1 >= 40.0:
                 factors.append(f"Safe cushion ({dist_r1:.0f} pts) below Call Wall ({r1:.0f})")
                 confidence = 88.0
             else:
-                factors.append(f"Tight cushion ({dist_r1:.0f} pts) below Call Wall")
+                factors.append(f"Moderate cushion ({dist_r1:.0f} pts) below Call Wall ({r1:.0f})")
                 confidence = 75.0
             return "TRENDING_BEARISH", "BEARISH", confidence, factors
 
-        # Balanced Range-Bound Regime (Iron Condor candidate)
-        if 0.90 <= pcr <= 1.10 and s1 < spot < r1 and dist_s1 >= 25.0 and dist_r1 >= 25.0:
-            factors.append(f"Balanced PCR: {pcr:.2f}")
+        # Rule 3: BALANCED_RANGE (0.90 <= PCR <= 1.10, spot safely centered between S1 and R1)
+        if 0.90 <= pcr <= 1.10 and s1 < spot < r1 and dist_s1 >= Config.MIN_SPOT_CUSHION_PTS and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Balanced PCR: {pcr:.2f} (0.90 to 1.10)")
             factors.append(f"Spot centered between Put Wall ({s1:.0f}) and Call Wall ({r1:.0f})")
             factors.append("Low directional bias (both wings well-supported)")
             confidence = 82.0
             return "BALANCED_RANGE", "NEUTRAL", confidence, factors
 
-        # Mildly Bullish
-        if pcr > 1.05 and spot >= s1:
-            factors.append(f"Moderate Put Writing bias (PCR: {pcr:.2f})")
+        # Rule 4: MILDLY_BULLISH (PCR > 1.05, spot >= s1, cushion >= 20)
+        if pcr > 1.05 and spot >= s1 and dist_s1 >= Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Moderate Put OI concentration (PCR: {pcr:.2f})")
             return "MILDLY_BULLISH", "BULLISH", 70.0, factors
 
-        # Mildly Bearish
-        if pcr < 0.95 and spot <= r1:
-            factors.append(f"Moderate Call Writing bias (PCR: {pcr:.2f})")
+        # Rule 5: MILDLY_BEARISH (PCR < 0.95, spot <= r1, cushion >= 20)
+        if pcr < 0.95 and spot <= r1 and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Moderate Call OI concentration (PCR: {pcr:.2f})")
             return "MILDLY_BEARISH", "BEARISH", 70.0, factors
 
-        # Choppy / Mixed Signals
-        factors.append(f"Mixed signals: PCR {pcr:.2f}, Writer flow: {writer_momentum}")
-        if dist_s1 < 20.0 or dist_r1 < 20.0:
-            factors.append("Spot dangerously close to major boundary strike.")
-        return "CHOPPY", "NEUTRAL", 50.0, factors
+        # Rule 6: CHOPPY_OR_INSUFFICIENT (Default for mixed signals, narrow cushions, or neutral range)
+        factors.append(f"Mixed or boundary proximity signals (PCR: {pcr:.2f}, Writer flow: {writer_momentum})")
+        if dist_s1 < Config.MIN_SPOT_CUSHION_PTS or dist_r1 < Config.MIN_SPOT_CUSHION_PTS:
+            factors.append(f"Spot cushion ({min(dist_s1, dist_r1):.1f} pts) below required {Config.MIN_SPOT_CUSHION_PTS:.1f} pts minimum.")
+        return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 50.0, factors
