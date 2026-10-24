@@ -189,6 +189,10 @@ class PaperTradingManager:
         if not candidate.is_eligible:
             return False, f"Candidate not eligible: {'; '.join(candidate.rejection_reasons)}", None
 
+        SUPPORTED_STRATEGIES = {"BULL_PUT", "BEAR_CALL", "IRON_CONDOR"}
+        if candidate.strategy_id not in SUPPORTED_STRATEGIES:
+            return False, f"Strategy '{candidate.strategy_id}' is not supported for execution. Supported strategies: {', '.join(sorted(SUPPORTED_STRATEGIES))}.", None
+
         if candidate.has_uncovered_short:
             return False, "CRITICAL: Uncovered short option detected. Execution rejected.", None
 

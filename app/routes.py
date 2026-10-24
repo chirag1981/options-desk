@@ -242,6 +242,14 @@ def api_execute_candidate():
     if engine_type not in ("INTRADAY", "POSITIONAL"):
         return jsonify({"status": "error", "message": f"Invalid engine_type: {engine_type}"}), 400
 
+    SUPPORTED_STRATEGIES = {"BULL_PUT", "BEAR_CALL", "IRON_CONDOR"}
+    if not strategy_id or str(strategy_id).upper() not in SUPPORTED_STRATEGIES:
+        return jsonify({
+            "status": "error",
+            "message": f"Unsupported or disabled strategy '{strategy_id}'. Supported strategies are: {', '.join(sorted(SUPPORTED_STRATEGIES))}."
+        }), 400
+    strategy_id = str(strategy_id).upper()
+
     # Duplicate check: prevent duplicate open position for same strategy and engine
     existing = TradePosition.query.filter_by(strategy_id=strategy_id, engine_type=engine_type, status="OPEN").first()
     if existing:
