@@ -163,11 +163,22 @@ def test_snapshot_reconstruction_and_production_analysis_replay():
     ok, report, records = HistoricalDataValidator.validate_dataframe(df)
     assert ok is True
 
-    snapshots, incomplete_rejs, inconsistent_spots, fillable_count = HistoricalDataValidator.reconstruct_snapshots(records)
+    (
+        snapshots,
+        incomplete_rejs,
+        inconsistent_spots,
+        actual_fillable,
+        estimated_fillable,
+        adequately_covered,
+        oi_truncations,
+    ) = HistoricalDataValidator.reconstruct_snapshots(records)
+
     assert len(snapshots) == 2
     assert incomplete_rejs == 0
     assert inconsistent_spots == 0
-    assert fillable_count == 2
+    assert actual_fillable == 2
+    assert report.actual_quotes_fillable_snapshots == 2
+    assert report.reconstructable_snapshots == 2
 
     # Feed reconstructed point-in-time snapshot directly into frozen production analyzer
     snap1 = snapshots[0]
@@ -195,7 +206,7 @@ def test_missing_values_preserve_none_distinguishable_from_zero():
     assert records[0]["volume"] is None
     assert records[0]["spot_change_pct"] is None
 
-    snapshots, _, _, _ = HistoricalDataValidator.reconstruct_snapshots(records)
+    snapshots, _, _, _, _, _, _ = HistoricalDataValidator.reconstruct_snapshots(records)
     opt_quote = snapshots[0]["chain_by_strike"][24500.0]["CE"]
     assert opt_quote["iv"] is None
     assert opt_quote["volume"] is None
@@ -220,4 +231,51 @@ def test_incomplete_snapshot_rejected():
     assert report.incomplete_snapshots_rejected == 1
     assert report.reconstructable_snapshots == 0
     assert any("lacked complete ATM/wing coverage" in w for w in report.warnings)
+
+
+def test_lot_size_historical_boundaries_before_and_after_each_transition():
+    from app.contracts import ContractRegistry
+    from datetime import date
+
+    # Transition 1: Apr 26, 2024 (50 -> 25)
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 4, 25)) == 50
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 4, 26)) == 25
+
+    # Transition 2: Nov 20, 2024 (25 -> 75)
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 11, 19)) == 25
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2024, 11, 20)) == 75
+
+    # Transition 3: Dec 31, 2025 (75 -> 65 for 2026 contracts)
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 30)) == 75
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2025, 12, 31)) == 65
+
+    # Throughout 2026 contracts
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 1, 6)) == 65
+    assert ContractRegistry.get_authoritative_lot_size("NIFTY", date(2026, 10, 24)) == 65
+
+
+def test_oi_coverage_truncation_warning_on_boundary_concentration():
+    # Create dataset where highest PE OI is at the minimum strike (boundary truncation)
+    df = _generate_sample_dataframe(num_timestamps=1, strikes_count=7)
+    min_strike = df["strike"].min()
+    df.loc[(df["strike"] == min_strike) & (df["option_type"] == "PE"), "oi"] = 500000
+
+    ok, report, records = HistoricalDataValidator.validate_dataframe(df)
+    assert ok is True
+    assert report.oi_truncation_warning_count > 0
+    assert any("indicating potential OI wall truncation" in w for w in report.warnings)
+
+
+def test_actual_vs_estimated_fill_separation():
+    # Dataset where bid and ask are 0.0, but LTP is positive
+    df = _generate_sample_dataframe(num_timestamps=1, strikes_count=9)
+    df["bid"] = 0.0
+    df["ask"] = 0.0
+
+    ok, report, records = HistoricalDataValidator.validate_dataframe(df)
+    assert ok is True
+    assert report.actual_quotes_fillable_snapshots == 0
+    assert report.estimated_spread_fillable_snapshots > 0
+    assert any("ESTIMATED EXECUTION SCENARIOS" in w for w in report.warnings)
+
 

@@ -59,10 +59,14 @@ class DataQualityReport:
     crossed_quotes_count: int = 0               # Rows where bid > ask
     non_chronological_records: int = 0          # Timestamps out of order
     records_normalized_chronologically: bool = False
-    reconstructable_snapshots: int = 0          # Valid (timestamp, expiry) chains with complete strikes
+    reconstructable_snapshots: int = 0          # Tier 1: Structurally reconstructable (ATM + min 5 paired strikes)
+    adequately_covered_snapshots: int = 0       # Tier 2: Span >= 300 pts without peak OI truncated at boundary
+    oi_truncation_warning_count: int = 0        # Snapshots where peak PE or CE OI sits at boundary strike
+    actual_quotes_fillable_snapshots: int = 0   # Tier 3A: Positive actual executable bid/ask on candidate wings
+    estimated_spread_fillable_snapshots: int = 0 # Tier 3B: Positive LTP present, requiring estimated spread assumptions
+    fillable_snapshots_count: int = 0           # Legacy alias for actual_quotes_fillable_snapshots
     incomplete_snapshots_rejected: int = 0      # Snapshots lacking ATM or minimum OTM strike wings
     inconsistent_spot_snapshots: int = 0        # Snapshots with conflicting spot prices at identical timestamp
-    fillable_snapshots_count: int = 0           # Snapshots with positive bid/ask quotes on ATM and candidate wings
     is_acceptable_for_backtest: bool = False
     rejection_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -334,11 +338,24 @@ class HistoricalDataValidator:
             report.change_oi_coverage_pct = round((change_oi_count / len(valid_records)) * 100.0, 2)
 
         # 3. Snapshot Reconstructibility Check
-        snapshots, incomplete_rejs, inconsistent_spots, fillable_count = cls.reconstruct_snapshots(valid_records)
+        (
+            snapshots,
+            incomplete_rejs,
+            inconsistent_spots,
+            actual_fillable,
+            estimated_fillable,
+            adequately_covered,
+            oi_truncations,
+        ) = cls.reconstruct_snapshots(valid_records)
+
         report.reconstructable_snapshots = len(snapshots)
         report.incomplete_snapshots_rejected = incomplete_rejs
         report.inconsistent_spot_snapshots = inconsistent_spots
-        report.fillable_snapshots_count = fillable_count
+        report.adequately_covered_snapshots = adequately_covered
+        report.oi_truncation_warning_count = oi_truncations
+        report.actual_quotes_fillable_snapshots = actual_fillable
+        report.estimated_spread_fillable_snapshots = estimated_fillable
+        report.fillable_snapshots_count = actual_fillable
 
         # 4. Acceptance Decisions
         if report.valid_rows == 0:
@@ -355,11 +372,19 @@ class HistoricalDataValidator:
             report.warnings.append(
                 f"{report.incomplete_snapshots_rejected} snapshots lacked complete ATM/wing coverage and were safely excluded from replay."
             )
+        if report.oi_truncation_warning_count > 0:
+            report.warnings.append(
+                f"{report.oi_truncation_warning_count} snapshots have dominant Put/Call OI at the boundary strike or narrow span (<300 pts), indicating potential OI wall truncation."
+            )
         if report.crossed_quotes_count > 0:
             report.warnings.append(f"{report.crossed_quotes_count} crossed quotes (bid > ask) were rejected.")
         if report.executable_bid_ask_pct < 50.0:
             report.warnings.append(
                 f"Low executable bid/ask coverage ({report.executable_bid_ask_pct}%). Execution fills will be rejected where quotes are 0.0."
+            )
+        if report.estimated_spread_fillable_snapshots > 0 and report.actual_quotes_fillable_snapshots == 0:
+            report.warnings.append(
+                "Dataset provides LTP quotes only without bid/ask depth. Fills must be treated as ESTIMATED EXECUTION SCENARIOS and reported separately from actual-quote fills."
             )
         if report.change_oi_coverage_pct == 0.0:
             report.warnings.append(
@@ -370,11 +395,13 @@ class HistoricalDataValidator:
         return report.is_acceptable_for_backtest, report, valid_records
 
     @classmethod
-    def reconstruct_snapshots(cls, records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int, int, int]:
+    def reconstruct_snapshots(cls, records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int, int, int, int, int, int]:
         """
         Groups flat tabular option records into structured point-in-time Option Chains
         identical to the schema produced by MarketDataProvider.get_option_chain().
-        Returns (valid_snapshots, incomplete_rejected, inconsistent_spot_rejected, fillable_count).
+        Returns:
+            (valid_snapshots, incomplete_rejected, inconsistent_spot_rejected,
+             actual_fillable_count, estimated_fillable_count, adequately_covered_count, oi_truncation_count)
         """
         grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         for r in records:
@@ -386,7 +413,10 @@ class HistoricalDataValidator:
         snapshots = []
         incomplete_rejected = 0
         inconsistent_spot_rejected = 0
-        fillable_count = 0
+        actual_fillable_count = 0
+        estimated_fillable_count = 0
+        adequately_covered_count = 0
+        oi_truncation_count = 0
 
         for (ts_str, expiry), recs in sorted(grouped.items(), key=lambda x: x[0][0]):
             # Verify spot consistency across all rows in the exact same timestamp & expiry
@@ -415,10 +445,10 @@ class HistoricalDataValidator:
                     "iv": r.get("iv"),
                 }
 
-            # Completeness Verification:
-            # 1. At least 5 strikes with both CE and PE
-            # 2. ATM strike must exist with both CE and PE
-            # 3. At least 2 strikes below spot (for Bull Put S1 walls) and 2 strikes above spot (for Bear Call R1 walls)
+            # 1. Completeness Verification (Tier 1: Structurally Reconstructable):
+            # - At least 5 strikes with both CE and PE
+            # - ATM strike must exist with both CE and PE
+            # - At least 2 strikes below spot (for Bull Put S1 walls) and 2 strikes above spot (for Bear Call R1 walls)
             atm_strike = round(spot / 50.0) * 50.0
             has_atm_ce = (atm_strike in chain_by_strike and bool(chain_by_strike[atm_strike].get("CE")))
             has_atm_pe = (atm_strike in chain_by_strike and bool(chain_by_strike[atm_strike].get("PE")))
@@ -430,17 +460,38 @@ class HistoricalDataValidator:
                 incomplete_rejected += 1
                 continue
 
-            # Check execution fillability: ATM and wing strikes must have executable positive bid/ask
-            atm_fillable = (
+            # 2. Adequate OI Coverage Verification (Tier 2: Do not treat 5 strikes as proof full walls are captured):
+            sorted_paired = sorted(paired_strikes)
+            min_stk = sorted_paired[0]
+            max_stk = sorted_paired[-1]
+            span = max_stk - min_stk
+
+            max_pe_stk = max(paired_strikes, key=lambda s: int(chain_by_strike[s]["PE"].get("oi") or 0))
+            max_ce_stk = max(paired_strikes, key=lambda s: int(chain_by_strike[s]["CE"].get("oi") or 0))
+
+            is_oi_truncated = (max_pe_stk == min_stk or max_ce_stk == max_stk or span < 300.0)
+            if is_oi_truncated:
+                oi_truncation_count += 1
+            else:
+                adequately_covered_count += 1
+
+            # 3. Execution Fillability (Tier 3A: Actual Quotes vs Tier 3B: Estimated Fills):
+            has_actual_quotes = (
                 chain_by_strike[atm_strike]["CE"]["bid"] > 0 and chain_by_strike[atm_strike]["CE"]["ask"] > 0 and
-                chain_by_strike[atm_strike]["PE"]["bid"] > 0 and chain_by_strike[atm_strike]["PE"]["ask"] > 0
-            )
-            otm_fillable = (
+                chain_by_strike[atm_strike]["PE"]["bid"] > 0 and chain_by_strike[atm_strike]["PE"]["ask"] > 0 and
                 any(chain_by_strike[s]["PE"]["bid"] > 0 for s in strikes_below if s < spot) and
                 any(chain_by_strike[s]["CE"]["ask"] > 0 for s in strikes_above if s > spot)
             )
-            if atm_fillable and otm_fillable:
-                fillable_count += 1
+            has_estimated_quotes = (
+                chain_by_strike[atm_strike]["CE"]["ltp"] > 0 and chain_by_strike[atm_strike]["PE"]["ltp"] > 0 and
+                any(chain_by_strike[s]["PE"]["ltp"] > 0 for s in strikes_below if s < spot) and
+                any(chain_by_strike[s]["CE"]["ltp"] > 0 for s in strikes_above if s > spot)
+            )
+
+            if has_actual_quotes:
+                actual_fillable_count += 1
+            elif has_estimated_quotes:
+                estimated_fillable_count += 1
 
             snapshots.append({
                 "timestamp": ts_str,
@@ -448,7 +499,17 @@ class HistoricalDataValidator:
                 "spot_change_pct": spot_chg,
                 "expiry": expiry,
                 "data_status": "HISTORICAL_REPLAY",
+                "is_adequately_covered": not is_oi_truncated,
+                "fill_source": "ACTUAL_QUOTES" if has_actual_quotes else ("ESTIMATED_LTP_SPREAD" if has_estimated_quotes else "NONE"),
                 "chain_by_strike": chain_by_strike,
             })
 
-        return snapshots, incomplete_rejected, inconsistent_spot_rejected, fillable_count
+        return (
+            snapshots,
+            incomplete_rejected,
+            inconsistent_spot_rejected,
+            actual_fillable_count,
+            estimated_fillable_count,
+            adequately_covered_count,
+            oi_truncation_count,
+        )

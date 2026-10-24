@@ -27,10 +27,17 @@ IST = ZoneInfo("Asia/Kolkata")
 NIFTY_SPEC_SCHEDULE = [
     {
         "effective_from": date(2020, 1, 1),
+        "effective_to": date(2024, 4, 25),
+        "lot_size": 50,
+        "strike_step": 50.0,
+        "circular": "NSE/FAOP/61328 (Prior standard lot)",
+    },
+    {
+        "effective_from": date(2024, 4, 26),
         "effective_to": date(2024, 11, 19),
         "lot_size": 25,
         "strike_step": 50.0,
-        "circular": "NSE/FAOP/61328",
+        "circular": "NSE/FAOP/61328 (Revision 50 -> 25)",
     },
     {
         "effective_from": date(2024, 11, 20),
