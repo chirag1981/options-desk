@@ -118,4 +118,8 @@ class Config:
     # Auto-Trading Control
     AUTO_TRADE_ENABLED: bool = False
 
+    # Signal Logging Deduplication & Heartbeat
+    SIGNAL_HEARTBEAT_MINS: int = int(os.environ.get("SIGNAL_HEARTBEAT_MINS", 15))
+    SIGNAL_NET_CREDIT_TOLERANCE_PTS: float = float(os.environ.get("SIGNAL_NET_CREDIT_TOLERANCE_PTS", 0.5))
+
 

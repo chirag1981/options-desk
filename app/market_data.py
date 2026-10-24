@@ -135,18 +135,20 @@ class MarketDataProvider:
                 log.warning(f"FYERS Step 1: Missing request_key in response: {res1.text}")
                 return None
 
-            # 2. Verify TOTP
-            totp = pyotp.TOTP(totp_key.replace(" ", "").strip())
-            current_otp = totp.now()
+            # 2. Verify TOTP (with clock-drift retry)
             verify_otp_url = "https://api-t2.fyers.in/vagator/v2/verify_otp"
-            res2 = session.post(verify_otp_url, json={"request_key": request_key, "otp": str(current_otp)}, timeout=10)
-            if res2.status_code != 200:
-                log.warning(f"FYERS Step 2 failed ({res2.status_code}): {res2.text}")
-                return None
+            request_key_2 = None
+            res2 = None
+            for offset in (0, -30, 30):
+                totp_val = pyotp.TOTP(totp_key.replace(" ", "").strip()).at(time.time() + offset)
+                res2 = session.post(verify_otp_url, json={"request_key": request_key, "otp": str(totp_val)}, timeout=10)
+                if res2.status_code == 200 and res2.json().get("request_key"):
+                    request_key_2 = res2.json().get("request_key")
+                    break
 
-            request_key_2 = res2.json().get("request_key")
             if not request_key_2:
-                log.warning("FYERS Step 2: Missing request_key_2.")
+                err_text = res2.text if res2 is not None else "No response"
+                log.warning(f"FYERS Step 2 verify_otp failed: {err_text}")
                 return None
 
             # 3. Verify PIN
@@ -161,7 +163,7 @@ class MarketDataProvider:
                 log.warning("FYERS Step 3: Missing bearer_token.")
                 return None
 
-            # 4. Generate Auth Code
+            # 4. Generate Auth Code via official FYERS v3 token endpoint
             headers = {"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"}
             payload_4 = {
                 "fyers_id": fy_id,
@@ -169,49 +171,52 @@ class MarketDataProvider:
                 "redirect_uri": redirect_uri,
                 "appType": Config.FYERS_APP_TYPE,
                 "code_challenge": "",
-                "state": "None",
+                "state": "options_desk",
                 "scope": "",
                 "nonce": "",
                 "response_type": "code",
                 "create_cookie": True,
             }
             res4 = session.post(
-                "https://api-t1.fyers.in/api/v3/generate-authcode",
+                "https://api-t1.fyers.in/api/v3/token",
                 headers=headers,
                 json=payload_4,
                 timeout=10,
-            ).json()
+            )
+            if res4.status_code not in (200, 308):
+                log.warning(f"FYERS Step 4 failed ({res4.status_code}): {res4.text}")
+                return None
 
-            auth_code = res4.get("auth_code")
-            if not auth_code and "Url" in res4:
-                parsed_url = urllib.parse.urlparse(res4["Url"])
+            res4_json = res4.json()
+            auth_url = res4_json.get("Url", "")
+            auth_code = res4_json.get("auth_code")
+            if not auth_code and auth_url:
+                parsed_url = urllib.parse.urlparse(auth_url)
                 query_params = urllib.parse.parse_qs(parsed_url.query)
                 auth_code = query_params.get("auth_code", [None])[0]
 
             if not auth_code:
-                log.warning(f"FYERS Step 4: No auth_code received: {res4}")
+                log.warning(f"FYERS Step 4: No auth_code received: {res4.text}")
                 return None
 
-            # 5. Validate Auth Code & Exchange for Access Token
+            # 5. Generate API v3 Access Token via SessionModel
             client_id = f"{app_id}-{Config.FYERS_APP_TYPE}"
-            app_id_hash = hashlib.sha256(f"{client_id}:{app_secret}".encode("utf-8")).hexdigest()
-            payload_5 = {
-                "grant_type": "authorization_code",
-                "appIdHash": app_id_hash,
-                "code": auth_code,
-            }
-            res5 = session.post(
-                "https://api-t1.fyers.in/api/v3/validate-authcode",
-                json=payload_5,
-                timeout=10,
-            ).json()
+            fyers_session = fyersModel.SessionModel(
+                client_id=client_id,
+                secret_key=app_secret,
+                redirect_uri=redirect_uri,
+                response_type="code",
+                grant_type="authorization_code",
+            )
+            fyers_session.set_token(auth_code)
+            gen_token_resp = fyers_session.generate_token()
 
-            token = res5.get("access_token")
+            token = gen_token_resp.get("access_token")
             if token:
                 log.info("FYERS Zero-Click Authentication Successful.")
                 return token
             else:
-                log.error(f"FYERS Step 5 failed: {res5}")
+                log.error(f"FYERS Step 5 generate_token failed: {gen_token_resp}")
                 return None
 
         except Exception as e:
@@ -226,6 +231,18 @@ class MarketDataProvider:
             return None
         app_id_full = f"{Config.FYERS_APP_ID}-{Config.FYERS_APP_TYPE}"
         return fyersModel.FyersModel(client_id=app_id_full, is_async=False, token=token, log_path="")
+
+    @classmethod
+    def initialize_connection(cls) -> Tuple[bool, str, float]:
+        """
+        Attempts to connect to FYERS on application startup.
+        Returns (is_connected, status_str, spot_price).
+        """
+        token = cls.get_access_token()
+        if not token:
+            return False, "DISCONNECTED", 0.0
+        spot, chg, status = cls.get_spot_price()
+        return (status == "FYERS_LIVE"), status, spot
 
     @classmethod
     def _is_test_mode(cls) -> bool:

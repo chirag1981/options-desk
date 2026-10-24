@@ -97,3 +97,22 @@ def test_fyers_endpoints(client):
     assert r2.status_code == 400
 
 
+def test_fyers_initialize_connection(monkeypatch):
+    """Verifies MarketDataProvider.initialize_connection behavior on app startup."""
+    from app.market_data import MarketDataProvider
+
+    # Mock get_access_token returning None
+    monkeypatch.setattr(MarketDataProvider, "get_access_token", classmethod(lambda cls: None))
+    conn, status, spot = MarketDataProvider.initialize_connection()
+    assert conn is False
+    assert status == "DISCONNECTED"
+
+    # Mock get_access_token returning active token and get_spot_price returning LIVE
+    monkeypatch.setattr(MarketDataProvider, "get_access_token", classmethod(lambda cls: "mock_tok"))
+    monkeypatch.setattr(MarketDataProvider, "get_spot_price", classmethod(lambda cls: (22500.0, 0.4, "FYERS_LIVE")))
+    conn2, status2, spot2 = MarketDataProvider.initialize_connection()
+    assert conn2 is True
+    assert status2 == "FYERS_LIVE"
+    assert spot2 == 22500.0
+
+
