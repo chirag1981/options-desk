@@ -193,3 +193,98 @@ def test_auto_strategy_selector_no_trade_evidence():
     assert auto_res.primary_strategy is None
     assert auto_res.selection_rationale.startswith("NO TRADE:")
     assert len(auto_res.no_trade_reasons) > 0
+
+
+def test_pcr_boundary_transitions_and_precedence():
+    from app.config import Config
+    assert Config.MIN_SPOT_CUSHION_PTS == 20.0
+
+    # 1. PCR around 0.85 with bearish momentum
+    res_084 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.84, bias_flow="BEARISH"))
+    assert res_084.market_regime == "TRENDING_BEARISH"
+
+    res_085 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.85, bias_flow="BEARISH"))
+    assert res_085.market_regime == "TRENDING_BEARISH"
+
+    res_086 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.86, bias_flow="BEARISH"))
+    # PCR 0.86 is > 0.85, so Rule 2 fails; centered spot with cushion >= 20, but PCR < 0.90 so BALANCED_RANGE fails; falls to MILDLY_BEARISH
+    assert res_086.market_regime == "MILDLY_BEARISH"
+
+    # 2. PCR around 0.90 with balanced flow (centered spot)
+    res_089 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.89, bias_flow="BALANCED"))
+    assert res_089.market_regime == "MILDLY_BEARISH"
+
+    res_090 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.90, bias_flow="BALANCED"))
+    assert res_090.market_regime == "BALANCED_RANGE"
+    assert res_090.confidence_score == 82.0
+
+    # 3. PCR at 0.95: BALANCED_RANGE takes precedence over MILDLY_BEARISH when spot is centered
+    res_095 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=0.95, bias_flow="BALANCED"))
+    assert res_095.market_regime == "BALANCED_RANGE"
+    assert res_095.market_bias == "NEUTRAL"
+
+    # 4. PCR at 1.05: BALANCED_RANGE takes precedence over MILDLY_BULLISH when spot is centered
+    res_105 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.05, bias_flow="BALANCED"))
+    assert res_105.market_regime == "BALANCED_RANGE"
+    assert res_105.market_bias == "NEUTRAL"
+
+    # 5. PCR around 1.10 (boundary)
+    res_110 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.10, bias_flow="BALANCED"))
+    assert res_110.market_regime == "BALANCED_RANGE"
+
+    res_111 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.11, bias_flow="BALANCED"))
+    assert res_111.market_regime == "MILDLY_BULLISH"
+
+    # 6. PCR around 1.15
+    res_114 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.14, bias_flow="BULLISH"))
+    assert res_114.market_regime == "MILDLY_BULLISH"
+
+    res_115 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.15, bias_flow="BULLISH"))
+    assert res_115.market_regime == "TRENDING_BULLISH"
+
+    res_116 = MarketAnalyzer.analyze_chain(build_mock_chain(spot=24500.0, pcr=1.16, bias_flow="BULLISH"))
+    assert res_116.market_regime == "TRENDING_BULLISH"
+
+    # 7. Cushion verification: spot too close to S1 (< 20 pts) drops regime out of BALANCED_RANGE
+    chain_close_s1 = build_mock_chain(spot=24410.0, pcr=1.0, bias_flow="BALANCED")
+    chain_close_s1["chain_by_strike"][24400.0]["PE"]["oi"] = 90000  # S1 at 24400, spot at 24410 -> cushion = 10 pts < 20 pts
+    res_cushion = MarketAnalyzer.analyze_chain(chain_close_s1)
+    assert res_cushion.s1_support == 24400.0
+    assert res_cushion.dist_to_s1 == 10.0
+    assert res_cushion.market_regime == "CHOPPY_OR_INSUFFICIENT"
+    assert any("below required 20.0 pts minimum" in f for f in res_cushion.evidence_factors)
+
+
+def test_missing_delta_oi_caps_confidence_and_blocks_trending():
+    # Chain with missing ΔOI (change_oi is None)
+    chain_no_delta = build_mock_chain(spot=24500.0, pcr=1.0)
+    for stk in chain_no_delta["chain_by_strike"].values():
+        stk["CE"]["change_oi"] = None
+        stk["PE"]["change_oi"] = None
+    res = MarketAnalyzer.analyze_chain(chain_no_delta)
+
+    # Missing ΔOI is noted and confidence capped at 65.0
+    assert res.net_delta_pe_ce_oi == 0
+    assert res.confidence_score <= 65.0
+    assert any("ΔOI change data unavailable" in f for f in res.evidence_factors)
+    # Does not falsely claim trending
+    assert res.market_regime != "TRENDING_BULLISH"
+    assert res.market_regime != "TRENDING_BEARISH"
+
+
+def test_selection_type_none_prevents_execution():
+    from app.trading import AutoTradeEngine
+    from app.strategies import AutoStrategySelector
+
+    # Choppy chain generates selection_type == "NONE"
+    chain_choppy = build_mock_chain(spot=24350.0, pcr=1.30, bias_flow="BULLISH")
+    analysis = MarketAnalyzer.analyze_chain(chain_choppy)
+    auto_res = AutoStrategySelector.evaluate_auto_selection(analysis, chain_choppy["chain_by_strike"])
+    assert auto_res.selection_type == "NONE"
+
+    # execute_all_selected must reject execution immediately
+    executed, msg = AutoTradeEngine.execute_all_selected(analysis, chain_choppy["chain_by_strike"])
+    assert executed == []
+    assert "No strategies currently meet market data criteria" in msg
+    assert "Selection: NONE" in msg
+

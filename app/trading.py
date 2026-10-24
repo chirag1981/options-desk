@@ -423,6 +423,9 @@ class AutoTradeEngine:
 
         from app.strategies import AutoStrategySelector
         result = AutoStrategySelector.evaluate_auto_selection(analysis, chain)
+        if not result.selected_strategies or result.selection_type == "NONE":
+            return []
+
         executed = []
 
         for candidate in result.selected_strategies:
@@ -472,8 +475,8 @@ class AutoTradeEngine:
         already_open = []
         risk_blocked = []
 
-        if not result.selected_strategies:
-            return [], "No strategies currently meet market data criteria for execution."
+        if not result.selected_strategies or result.selection_type == "NONE":
+            return [], f"No strategies currently meet market data criteria for execution (Selection: {result.selection_type})."
 
         for candidate in result.selected_strategies:
             if not candidate.is_eligible:

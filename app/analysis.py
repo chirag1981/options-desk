@@ -46,7 +46,7 @@ class MarketAnalysisResult:
     atm_iv: float
     market_regime: str       # TRENDING_BULLISH, TRENDING_BEARISH, BALANCED_RANGE, MILDLY_BULLISH, MILDLY_BEARISH, CHOPPY_OR_INSUFFICIENT
     market_bias: str         # BULLISH, BEARISH, NEUTRAL
-    confidence_score: float  # 0.0 to 100.0
+    confidence_score: float  # Rule-based heuristic confidence score (0.0 to 100.0), not a statistical probability of profit
     evidence_factors: List[str]
     data_status: str
     data_quality_warnings: List[str] = field(default_factory=list)
@@ -271,6 +271,13 @@ class MarketAnalyzer:
     ) -> Tuple[str, str, float, List[str]]:
         warnings = warnings or []
         factors: List[str] = []
+        has_missing_delta = any("Historical change in Open Interest" in w for w in warnings)
+
+        def _finalize(reg: str, b: str, conf: float) -> Tuple[str, str, float, List[str]]:
+            if has_missing_delta and reg != "CHOPPY_OR_INSUFFICIENT":
+                factors.append("ΔOI change data unavailable from broker feed; directional confidence reduced.")
+                conf = min(conf, 65.0)
+            return reg, b, conf, factors
 
         # 1. Critical Data Defect Guard (Zero/Missing OI or Invalid S1/R1)
         critical_warnings = [
@@ -317,7 +324,7 @@ class MarketAnalyzer:
             else:
                 factors.append(f"Moderate cushion ({dist_s1:.0f} pts) above Put Wall ({s1:.0f})")
                 confidence = 75.0
-            return "TRENDING_BULLISH", "BULLISH", confidence, factors
+            return _finalize("TRENDING_BULLISH", "BULLISH", confidence)
 
         # Rule 2: TRENDING_BEARISH (PCR <= 0.85, negative delta or Call OI expansion, spot <= r1, cushion >= 20)
         if pcr <= 0.85 and (writer_momentum == "BEARISH_CALL_WRITING" or net_delta < 0) and spot <= r1 and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
@@ -329,7 +336,7 @@ class MarketAnalyzer:
             else:
                 factors.append(f"Moderate cushion ({dist_r1:.0f} pts) below Call Wall ({r1:.0f})")
                 confidence = 75.0
-            return "TRENDING_BEARISH", "BEARISH", confidence, factors
+            return _finalize("TRENDING_BEARISH", "BEARISH", confidence)
 
         # Rule 3: BALANCED_RANGE (0.90 <= PCR <= 1.10, spot safely centered between S1 and R1)
         if 0.90 <= pcr <= 1.10 and s1 < spot < r1 and dist_s1 >= Config.MIN_SPOT_CUSHION_PTS and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
@@ -337,20 +344,20 @@ class MarketAnalyzer:
             factors.append(f"Spot centered between Put Wall ({s1:.0f}) and Call Wall ({r1:.0f})")
             factors.append("Low directional bias (both wings well-supported)")
             confidence = 82.0
-            return "BALANCED_RANGE", "NEUTRAL", confidence, factors
+            return _finalize("BALANCED_RANGE", "NEUTRAL", confidence)
 
         # Rule 4: MILDLY_BULLISH (PCR > 1.05, spot >= s1, cushion >= 20)
         if pcr > 1.05 and spot >= s1 and dist_s1 >= Config.MIN_SPOT_CUSHION_PTS:
             factors.append(f"Moderate Put OI concentration (PCR: {pcr:.2f})")
-            return "MILDLY_BULLISH", "BULLISH", 70.0, factors
+            return _finalize("MILDLY_BULLISH", "BULLISH", 70.0)
 
         # Rule 5: MILDLY_BEARISH (PCR < 0.95, spot <= r1, cushion >= 20)
         if pcr < 0.95 and spot <= r1 and dist_r1 >= Config.MIN_SPOT_CUSHION_PTS:
             factors.append(f"Moderate Call OI concentration (PCR: {pcr:.2f})")
-            return "MILDLY_BEARISH", "BEARISH", 70.0, factors
+            return _finalize("MILDLY_BEARISH", "BEARISH", 70.0)
 
         # Rule 6: CHOPPY_OR_INSUFFICIENT (Default for mixed signals, narrow cushions, or neutral range)
         factors.append(f"Mixed or boundary proximity signals (PCR: {pcr:.2f}, Writer flow: {writer_momentum})")
         if dist_s1 < Config.MIN_SPOT_CUSHION_PTS or dist_r1 < Config.MIN_SPOT_CUSHION_PTS:
             factors.append(f"Spot cushion ({min(dist_s1, dist_r1):.1f} pts) below required {Config.MIN_SPOT_CUSHION_PTS:.1f} pts minimum.")
-        return "CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 50.0, factors
+        return _finalize("CHOPPY_OR_INSUFFICIENT", "NEUTRAL", 50.0)

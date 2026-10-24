@@ -751,7 +751,7 @@ class AutoStrategySelector:
             reasons.append(f"Bullish bias ({a.market_bias})")
         if a.total_pe_change_oi > a.total_ce_change_oi:
             score += 25.0
-            reasons.append(f"Put writing surge (+{a.total_pe_change_oi / 1000:.0f}k PE OI)")
+            reasons.append(f"Put OI expansion (+{a.total_pe_change_oi / 1000:.0f}k PE OI)")
         if a.pcr_oi >= 1.0:
             score += 15.0
             reasons.append(f"Supportive PCR ({a.pcr_oi:.2f})")
@@ -772,7 +772,7 @@ class AutoStrategySelector:
             reasons.append(f"Bearish bias ({a.market_bias})")
         if a.total_ce_change_oi > a.total_pe_change_oi:
             score += 25.0
-            reasons.append(f"Call writing overhead (+{a.total_ce_change_oi / 1000:.0f}k CE OI)")
+            reasons.append(f"Call OI expansion (+{a.total_ce_change_oi / 1000:.0f}k CE OI)")
         if a.pcr_oi <= 0.95:
             score += 15.0
             reasons.append(f"Heavy PCR ceiling ({a.pcr_oi:.2f})")
