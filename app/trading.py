@@ -9,6 +9,7 @@ Handles:
 """
 
 import logging
+import threading
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional, Tuple
@@ -180,6 +181,7 @@ class PaperTradingManager:
     """
     Manages paper positions, simulated order fills, mark-to-market updates, and exits.
     """
+    _execution_lock = threading.Lock()
 
     @classmethod
     def execute_candidate(cls, candidate: SpreadCandidate) -> Tuple[bool, str, Optional[TradePosition]]:
@@ -197,62 +199,71 @@ class PaperTradingManager:
             return False, "CRITICAL: Uncovered short option detected. Execution rejected.", None
 
         try:
-            # 1. Calculate entry costs
-            legs_data = [
-                {"action": l.action, "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
-                for l in candidate.legs
-            ]
-            now_dt = datetime.now(IST)
-            entry_costs = TransactionCostEngine.calculate_order_costs(legs_data, lots=candidate.lots, trade_date=now_dt.date())
+            with cls._execution_lock:
+                existing = TradePosition.query.filter_by(
+                    strategy_id=candidate.strategy_id,
+                    engine_type=candidate.engine_type,
+                    status="OPEN"
+                ).first()
+                if existing:
+                    return False, f"An open position for {candidate.strategy_id} ({candidate.engine_type}) already exists (ID: #{existing.id}). Duplicate entry blocked.", None
 
-            # 2. Stop loss & target thresholds
-            # Target = buyback at 30% of credit (capture 70% profit)
-            target_debit = round(candidate.net_credit_pts * 0.30, 2)
-            # Stop loss = buyback at 1.5x credit
-            stop_loss_debit = round(candidate.net_credit_pts * 1.50, 2)
+                # 1. Calculate entry costs
+                legs_data = [
+                    {"action": l.action, "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
+                    for l in candidate.legs
+                ]
+                now_dt = datetime.now(IST)
+                entry_costs = TransactionCostEngine.calculate_order_costs(legs_data, lots=candidate.lots, trade_date=now_dt.date())
 
-            # 3. Create TradePosition record
-            position = TradePosition(
-                engine_type=candidate.engine_type,
-                strategy_id=candidate.strategy_id,
-                strategy_name=candidate.strategy_name,
-                symbol=candidate.symbol,
-                expiry=candidate.expiry,
-                lots=candidate.lots,
-                quantity=candidate.quantity,
-                entry_time=now_dt,
-                entry_spot=float(candidate.spot_price or (candidate.breakevens[0] if candidate.breakevens else 24500.0)),
-                entry_net_credit_pts=candidate.net_credit_pts,
-                max_loss_inr=candidate.max_loss_inr,
-                max_profit_inr=candidate.max_profit_inr,
-                target_credit_pts=target_debit,
-                stop_loss_pts=stop_loss_debit,
-                current_net_debit_pts=candidate.net_credit_pts,
-                current_pnl_inr=0.0,
-                status="OPEN",
-                transaction_costs_inr=entry_costs,
-            )
-            db.session.add(position)
-            db.session.flush()
+                # 2. Stop loss & target thresholds
+                # Target = buyback at 30% of credit (capture 70% profit)
+                target_debit = round(candidate.net_credit_pts * 0.30, 2)
+                # Stop loss = buyback at 1.5x credit
+                stop_loss_debit = round(candidate.net_credit_pts * 1.50, 2)
 
-            # 4. Create individual PositionLeg records
-            for l in candidate.legs:
-                fill_price = l.bid if l.action == "SELL" else l.ask
-                pos_leg = PositionLeg(
-                    position_id=position.id,
-                    symbol=l.symbol,
-                    strike=l.strike,
-                    option_type=l.option_type,
-                    action=l.action,
-                    quantity=l.quantity,
-                    entry_price=fill_price,
-                    current_price=fill_price,
+                # 3. Create TradePosition record
+                position = TradePosition(
+                    engine_type=candidate.engine_type,
+                    strategy_id=candidate.strategy_id,
+                    strategy_name=candidate.strategy_name,
+                    symbol=candidate.symbol,
+                    expiry=candidate.expiry,
+                    lots=candidate.lots,
+                    quantity=candidate.quantity,
+                    entry_time=now_dt,
+                    entry_spot=float(candidate.spot_price or (candidate.breakevens[0] if candidate.breakevens else 24500.0)),
+                    entry_net_credit_pts=candidate.net_credit_pts,
+                    max_loss_inr=candidate.max_loss_inr,
+                    max_profit_inr=candidate.max_profit_inr,
+                    target_credit_pts=target_debit,
+                    stop_loss_pts=stop_loss_debit,
+                    current_net_debit_pts=candidate.net_credit_pts,
+                    current_pnl_inr=0.0,
+                    status="OPEN",
+                    transaction_costs_inr=entry_costs,
                 )
-                db.session.add(pos_leg)
+                db.session.add(position)
+                db.session.flush()
 
-            db.session.commit()
-            log.info(f"Opened paper position #{position.id} ({candidate.strategy_name}) for {candidate.engine_type}.")
-            return True, f"Successfully executed {candidate.strategy_name} (#{position.id}).", position
+                # 4. Create individual PositionLeg records
+                for l in candidate.legs:
+                    fill_price = l.bid if l.action == "SELL" else l.ask
+                    pos_leg = PositionLeg(
+                        position_id=position.id,
+                        symbol=l.symbol,
+                        strike=l.strike,
+                        option_type=l.option_type,
+                        action=l.action,
+                        quantity=l.quantity,
+                        entry_price=fill_price,
+                        current_price=fill_price,
+                    )
+                    db.session.add(pos_leg)
+
+                db.session.commit()
+                log.info(f"Opened paper position #{position.id} ({candidate.strategy_name}) for {candidate.engine_type}.")
+                return True, f"Successfully executed {candidate.strategy_name} (#{position.id}).", position
 
         except Exception as e:
             db.session.rollback()

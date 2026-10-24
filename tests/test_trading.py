@@ -242,3 +242,45 @@ def test_full_lifecycle_fee_and_pnl_reconciliation(app_ctx):
     assert closed.transaction_costs_inr > entry_fees  # entry fees + exit fees recorded
     expected_net = round(closed.gross_pnl_inr - closed.transaction_costs_inr, 2)
     assert closed.net_pnl_inr == expected_net
+
+
+def test_concurrent_duplicate_execution_rejected(app_ctx):
+    """Verifies that duplicate execution for same strategy and engine is safely blocked."""
+    candidate = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=45.0, ask=46.0, ltp=45.5, quantity=65),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=25.0, ask=26.0, ltp=25.5, quantity=65),
+        ],
+        net_credit_pts=19.0,
+        strike_width=50.0,
+        max_profit_inr=19.0 * 65,
+        max_loss_pts=31.0,
+        max_loss_inr=31.0 * 65,
+        risk_reward_ratio=0.61,
+        breakevens=[24381.0],
+        is_eligible=True,
+    )
+
+    # First execution succeeds
+    ok1, msg1, pos1 = PaperTradingManager.execute_candidate(candidate)
+    assert ok1 is True
+    assert pos1 is not None
+    assert pos1.status == "OPEN"
+
+    # Second duplicate execution attempt fails safely
+    ok2, msg2, pos2 = PaperTradingManager.execute_candidate(candidate)
+    assert ok2 is False
+    assert pos2 is None
+    assert "already exists" in msg2
+    assert "Duplicate entry blocked" in msg2
+
+    # Database still contains exactly 1 OPEN position for BULL_PUT INTRADAY
+    positions = TradePosition.query.filter_by(strategy_id="BULL_PUT", engine_type="INTRADAY", status="OPEN").all()
+    assert len(positions) == 1
