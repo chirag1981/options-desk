@@ -12,11 +12,16 @@ Key Safeguards & Architecture:
 - Official ContractRegistry lot sizes honoring all historical circular transition dates.
 - Realistic statutory transaction cost calculations via TransactionCostCalculator.
 - Three independent execution scenarios (OPTIMISTIC, BASE, CONSERVATIVE) with explicit ESTIMATED_SPREAD labels.
-- Strict portfolio risk management:
+- Strict portfolio risk management matching authoritative production rules:
   - Starting Equity: ₹10,00,000
-  - Max risk per trade cap: ₹50,000 (5% equity)
-  - Daily loss circuit breaker: ₹20,000 (2% equity) halts new trades for that session
-  - Consecutive loss cooldown: 2 consecutive losses trigger a cooling-off period
+  - Max risk per trade cap: ₹5,000 (0.5% equity, Config.get_max_risk_per_trade_inr())
+  - Combined portfolio risk cap: ₹20,000 (2.0% equity, Config.get_max_combined_portfolio_risk_inr())
+  - Daily loss circuit breaker: ₹15,000 (1.5% equity, Config.get_max_daily_loss_inr()) halts new trades
+  - Consecutive loss cooldown: 1 loss exit initiates 15-minute cooldown (Config.CONSECUTIVE_LOSS_COOLDOWN_MINS)
+  - Profit target: buyback cost reaches 30% of credit (70% credit profit capture)
+  - Stop loss: buyback cost reaches 150% of credit (loss of 50% of credit)
+  - Maximum concurrent positions: 2 defined-risk spreads (Config.MAX_INTRADAY_POSITIONS)
+  - Dataset coverage: Expiry-Day / 0DTE backtest over available expiry sessions
   - Intraday positions closed at 15:00:00 cutoff; positional held to target/SL or expiry settlement.
 """
 
@@ -76,6 +81,7 @@ class BacktestTrade:
     net_pnl: float = 0.0
     fill_tier: str = "ESTIMATED_SPREAD"
     market_regime_entry: str = "BALANCED_RANGE"
+    max_risk_inr: float = 0.0
 
 
 @dataclass
@@ -115,8 +121,8 @@ class HistoricalBacktestEngine:
         self,
         data_dir: Optional[str] = None,
         starting_equity: float = STARTING_EQUITY,
-        target_profit_pct: float = 0.50,   # Exit at 50% max profit
-        stop_loss_credit_mult: float = 1.0, # Exit if loss equals 100% of credit collected
+        target_profit_pct: float = 0.70,   # Capture 70% of credit (buyback cost reaches 30% of credit)
+        stop_loss_credit_mult: float = 0.50, # Exit if loss equals 50% of credit (buyback cost reaches 150% of credit)
     ):
         self.data_dir = data_dir or os.path.join(Config.INSTANCE_DIR, "historical_data")
         self.starting_equity = starting_equity
@@ -330,12 +336,23 @@ class HistoricalBacktestEngine:
                 else:
                     current_cost = self._evaluate_spread_exit_cost(trade, chain, scenario)
                     if current_cost is not None:
-                        # Profit Target: 50% of net credit captured
-                        if current_cost <= (trade.net_credit_pts * (1.0 - self.target_profit_pct)):
+                        # Profit Target: spread buyback cost reaches 30% of original credit (capturing 70% of credit)
+                        target_cost_threshold = round(trade.net_credit_pts * (1.0 - self.target_profit_pct), 2)
+                        # Stop Loss: spread buyback cost reaches 150% of original credit (loss of 50% of original credit)
+                        stop_cost_threshold = round(trade.net_credit_pts * (1.0 + self.stop_loss_credit_mult), 2)
+
+                        target_hit = (current_cost <= target_cost_threshold)
+                        stop_hit = (current_cost >= stop_cost_threshold)
+
+                        if target_hit and stop_hit:
+                            # Conservative ambiguity policy: If quotes/spread indicate both thresholds breached in the snapshot,
+                            # assume adverse outcome (STOP_LOSS).
+                            exit_reason = "STOP_LOSS"
+                            exit_cost_pts = current_cost
+                        elif target_hit:
                             exit_reason = "TARGET"
                             exit_cost_pts = current_cost
-                        # Stop Loss: loss equals 100% of net credit
-                        elif current_cost >= (trade.net_credit_pts * (1.0 + self.stop_loss_credit_mult)):
+                        elif stop_hit:
                             exit_reason = "STOP_LOSS"
                             exit_cost_pts = current_cost
 
@@ -350,25 +367,47 @@ class HistoricalBacktestEngine:
                     trade.gross_pnl = round(gross_pnl, 2)
 
                     # Exit transaction costs
-                    exit_legs = [
-                        {"action": "BUY", "price": exit_cost_pts, "quantity": trade.quantity}
-                    ]
-                    exit_costs = TransactionCostEngine.calculate_order_costs_breakdown(
-                        exit_legs, lots=trade.lots, trade_date=trade_date
-                    )
-                    exit_brokerage = exit_costs["brokerage"]
-                    exit_taxes = exit_costs["total"] - exit_brokerage
+                    # Reconstruct individual legs for accurate leg-by-leg brokerage and turnover fees
+                    exit_legs = []
+                    if exit_reason in ("TARGET", "STOP_LOSS", "CUTOFF"):
+                        strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
+                        strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+
+                        if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
+                            strikes_needed.append((trade.short_strike_2, "CE", "BUY"))
+                            strikes_needed.append((trade.long_strike_2, "CE", "SELL"))
+
+                        for stk, opt, act in strikes_needed:
+                            if stk in chain and chain[stk].get(opt):
+                                p = self._get_contract_price_for_scenario(chain[stk][opt], act, scenario)
+                            else:
+                                p = exit_cost_pts / len(strikes_needed)
+                            exit_legs.append({"action": act, "price": p, "quantity": trade.quantity})
+                    else:
+                        # Expiry settlement: cash-settled without exchange order brokerage
+                        exit_legs = []
+
+                    if exit_legs:
+                        exit_costs = TransactionCostEngine.calculate_order_costs_breakdown(
+                            exit_legs, lots=trade.lots, trade_date=trade_date
+                        )
+                        exit_brokerage = exit_costs["brokerage"]
+                        exit_taxes = exit_costs["total"] - exit_brokerage
+                    else:
+                        exit_brokerage = 0.0
+                        exit_taxes = 0.0
 
                     trade.total_brokerage += exit_brokerage
                     trade.total_taxes += exit_taxes
                     trade.total_costs = round(trade.total_brokerage + trade.total_taxes, 2)
 
-                    # Slippage cost attribution
+                    # Slippage cost attribution (tracked as informational metadata; scenario fills already reflect slippage)
                     num_legs = 4 if trade.strategy_id == "IRON_CONDOR" else 2
                     slippage_rate = 0.00 if scenario == "OPTIMISTIC" else 0.05 if scenario == "BASE" else 0.10
                     trade.slippage_cost = round(slippage_rate * num_legs * trade.quantity, 2)
 
-                    net_pnl = trade.gross_pnl - trade.total_costs - trade.slippage_cost
+                    # Net P&L = Gross P&L minus transaction costs (avoid duplicate slippage deduction)
+                    net_pnl = trade.gross_pnl - trade.total_costs
                     trade.net_pnl = round(net_pnl, 2)
 
                     # Update equity & tracking
@@ -376,12 +415,12 @@ class HistoricalBacktestEngine:
                     if trade.net_pnl < 0:
                         daily_loss_incurred += abs(trade.net_pnl)
                         consecutive_losses += 1
-                        if consecutive_losses >= 2:
-                            cooldown_active_until = dt_obj + timedelta(hours=2)
+                        # 15-minute cooldown initiated after 1 qualifying loss exit (authoritative production rule)
+                        cooldown_active_until = dt_obj + timedelta(minutes=Config.CONSECUTIVE_LOSS_COOLDOWN_MINS)
                     else:
                         consecutive_losses = 0
 
-                    if daily_loss_incurred >= 20_000.0:  # 2% daily loss limit
+                    if daily_loss_incurred >= Config.get_max_daily_loss_inr():
                         circuit_breaker_active = True
 
                     closed_trades_this_tick.append(trade)
@@ -394,11 +433,11 @@ class HistoricalBacktestEngine:
 
             # 3. Entry Evaluation
             # Safety guards:
-            # - Limit open trades to max 2 concurrent spreads
-            # - Daily loss circuit breaker
-            # - Consecutive loss cooldown
+            # - Limit open trades to max 2 concurrent spreads (Config.MAX_INTRADAY_POSITIONS)
+            # - Daily loss circuit breaker (Config.get_max_daily_loss_inr())
+            # - Consecutive loss cooldown (Config.CONSECUTIVE_LOSS_COOLDOWN_MINS)
             # - Session entry window: 09:20:00 to 14:45:00
-            if len(open_trades) >= 2 or circuit_breaker_active or cooldown_active_until:
+            if len(open_trades) >= Config.MAX_INTRADAY_POSITIONS or circuit_breaker_active or cooldown_active_until:
                 continue
 
             if time_str < "09:20:00" or time_str > "14:45:00":
@@ -430,6 +469,10 @@ class HistoricalBacktestEngine:
                         if any(t.strategy_id == cand.strategy_id for t in open_trades):
                             continue
 
+                        # Check maximum concurrent positions limit
+                        if len(open_trades) >= Config.MAX_INTRADAY_POSITIONS:
+                            break
+
                         # Lot size from official ContractRegistry
                         lot_size = ContractRegistry.get_contract_lot_size("NIFTY", expiry)
                         quantity = lot_size * cand.lots
@@ -450,6 +493,13 @@ class HistoricalBacktestEngine:
                         if not valid_fill or not legs_costs:
                             continue
 
+                        # Scenario-specific entry net credit
+                        sell_credit = sum(l["price"] for l in legs_costs if l["action"] == "SELL")
+                        buy_debit = sum(l["price"] for l in legs_costs if l["action"] == "BUY")
+                        scenario_net_credit = round(sell_credit - buy_debit, 2)
+                        if scenario_net_credit <= 0:
+                            continue
+
                         # Entry transaction costs
                         entry_costs = TransactionCostEngine.calculate_order_costs_breakdown(
                             legs_costs, lots=cand.lots, trade_date=trade_date
@@ -457,6 +507,25 @@ class HistoricalBacktestEngine:
                         entry_brokerage = entry_costs["brokerage"]
                         entry_taxes = entry_costs["total"] - entry_brokerage
                         entry_total = entry_costs["total"]
+
+                        # Calculate trade maximum risk (including round-trip costs) matching production convention
+                        wing_width = cand.strike_width
+                        trade_max_loss_pts = max(0.0, wing_width - scenario_net_credit)
+                        trade_max_loss_inr = round(trade_max_loss_pts * quantity, 2)
+                        trade_risk_inr = getattr(cand, "total_risk_with_costs_inr", trade_max_loss_inr)
+                        estimated_round_trip_costs = entry_total * 2.0
+                        scenario_trade_risk_inr = round(trade_max_loss_inr + estimated_round_trip_costs, 2)
+                        effective_trade_risk = max(trade_risk_inr, scenario_trade_risk_inr)
+
+                        # Enforce per-trade maximum risk limit (₹5,000 / Config.get_max_risk_per_trade_inr())
+                        if effective_trade_risk > Config.get_max_risk_per_trade_inr():
+                            continue
+
+                        # Enforce combined portfolio risk limit (₹20,000 / Config.get_max_combined_portfolio_risk_inr())
+                        current_portfolio_risk = sum(t.max_risk_inr for t in open_trades)
+                        projected_portfolio_risk = current_portfolio_risk + effective_trade_risk
+                        if projected_portfolio_risk > Config.get_max_combined_portfolio_risk_inr():
+                            continue
 
                         trade_counter += 1
                         trade_id = f"BT-{scenario[:3]}-{trade_counter:04d}"
@@ -481,15 +550,16 @@ class HistoricalBacktestEngine:
                             long_strike=long_k,
                             short_strike_2=short_k2,
                             long_strike_2=long_k2,
-                            net_credit_pts=cand.net_credit_pts,
-                            entry_spread_cost=cand.net_credit_pts,
+                            net_credit_pts=scenario_net_credit,
+                            entry_spread_cost=scenario_net_credit,
                             total_brokerage=entry_brokerage,
                             total_taxes=entry_taxes,
                             total_costs=entry_total,
                             market_regime_entry=analysis.market_regime,
+                            max_risk_inr=effective_trade_risk,
                         )
                         open_trades.append(new_trade)
-                        if len(open_trades) >= 2:
+                        if len(open_trades) >= Config.MAX_INTRADAY_POSITIONS:
                             break
 
             except Exception as e:

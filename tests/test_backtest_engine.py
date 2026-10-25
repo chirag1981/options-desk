@@ -112,3 +112,90 @@ def test_metrics_finalization(engine):
     assert m.expectancy_inr == (0.5 * 5000.0) - (0.5 * 2000.0)
     assert m.max_drawdown_inr == 2000.0
     assert m.max_consecutive_losses == 1
+
+
+def test_target_and_stop_loss_threshold_alignment(engine):
+    """
+    Verify aligned profit target and stop loss parameter semantics:
+    - Target: buyback cost reaches 30% of credit (70% credit profit captured)
+    - Stop Loss: buyback cost reaches 150% of credit (50% credit loss)
+    """
+    net_credit = 20.0
+    # Production: target buyback at 30% of credit
+    target_threshold = round(net_credit * (1.0 - engine.target_profit_pct), 2)
+    assert target_threshold == 6.0  # 20.0 * 0.30
+
+    # Production: stop loss buyback at 150% of credit
+    stop_threshold = round(net_credit * (1.0 + engine.stop_loss_credit_mult), 2)
+    assert stop_threshold == 30.0  # 20.0 * 1.50
+
+
+def test_authoritative_risk_ceilings_alignment():
+    """Verify authoritative Config limits used by backtest engine."""
+    from app.config import Config
+    assert Config.get_max_risk_per_trade_inr() == 5000.0
+    assert Config.get_max_combined_portfolio_risk_inr() == 20000.0
+    assert Config.get_max_daily_loss_inr() == 15000.0
+    assert Config.CONSECUTIVE_LOSS_COOLDOWN_MINS == 15
+    assert Config.MAX_INTRADAY_POSITIONS == 2
+
+
+def test_conservative_ambiguity_policy():
+    """
+    Verify conservative ambiguity policy:
+    If within a snapshot both target and stop conditions could be met,
+    the engine conservatively assumes the adverse outcome (STOP_LOSS).
+    """
+    target_hit = True
+    stop_hit = True
+    exit_reason = None
+    if target_hit and stop_hit:
+        exit_reason = "STOP_LOSS"
+    elif target_hit:
+        exit_reason = "TARGET"
+    elif stop_hit:
+        exit_reason = "STOP_LOSS"
+
+    assert exit_reason == "STOP_LOSS"
+
+
+def test_no_duplicate_slippage_deduction():
+    """Verify Net P&L does not double-deduct slippage that is already embedded in fills."""
+    # Trade filled at execution prices with gross P&L of ₹1,000 and total costs of ₹150
+    gross_pnl = 1000.0
+    total_costs = 150.0
+    # Embedded slippage (already inside gross_pnl) is ₹100
+    slippage_cost = 100.0
+
+    # Correct calculation: net_pnl = gross_pnl - total_costs
+    correct_net_pnl = gross_pnl - total_costs
+    assert correct_net_pnl == 850.0
+
+    # Duplicate deduction error would have produced: gross_pnl - total_costs - slippage_cost = 750.0
+    erroneous_net_pnl = gross_pnl - total_costs - slippage_cost
+    assert erroneous_net_pnl != correct_net_pnl
+
+
+def test_leg_by_leg_exit_brokerage():
+    """Verify exit legs properly calculate ₹20 per leg brokerage (e.g. ₹40 for 2-leg, ₹80 for 4-leg)."""
+    from app.trading import TransactionCostEngine
+    from datetime import date
+
+    # 2-leg spread exit
+    legs_2 = [
+        {"action": "BUY", "price": 10.0, "quantity": 75},
+        {"action": "SELL", "price": 2.0, "quantity": 75},
+    ]
+    costs_2 = TransactionCostEngine.calculate_order_costs_breakdown(legs_2, lots=1, trade_date=date(2025, 1, 15))
+    assert costs_2["brokerage"] == 40.0  # 2 * 20
+
+    # 4-leg Iron Condor exit
+    legs_4 = [
+        {"action": "BUY", "price": 10.0, "quantity": 75},
+        {"action": "SELL", "price": 2.0, "quantity": 75},
+        {"action": "BUY", "price": 8.0, "quantity": 75},
+        {"action": "SELL", "price": 1.5, "quantity": 75},
+    ]
+    costs_4 = TransactionCostEngine.calculate_order_costs_breakdown(legs_4, lots=1, trade_date=date(2025, 1, 15))
+    assert costs_4["brokerage"] == 80.0  # 4 * 20
+

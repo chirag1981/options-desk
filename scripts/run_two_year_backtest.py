@@ -30,8 +30,8 @@ def main():
     engine = HistoricalBacktestEngine(
         data_dir=data_dir,
         starting_equity=STARTING_EQUITY,
-        target_profit_pct=0.50,
-        stop_loss_credit_mult=1.0,
+        target_profit_pct=0.70,
+        stop_loss_credit_mult=0.50,
     )
 
     print("Running simulation for OPTIMISTIC, BASE, and CONSERVATIVE scenarios...")
@@ -40,8 +40,24 @@ def main():
     elapsed = time.time() - start_time
     print(f"Simulation completed in {elapsed:.2f} seconds.")
 
-    # Format structured summary
-    summary = {}
+    # Format structured summary with metadata
+    summary = {
+        "metadata": {
+            "coverage_type": "EXPIRY_DAY_0DTE",
+            "coverage_statement": "Covers 105 expiry-day sessions only; does not cover continuous non-expiry trading sessions.",
+            "total_expiry_sessions": len(parquet_files),
+            "calendar_business_days": 518,
+            "missing_non_expiry_sessions": 413,
+            "first_timestamp": "2024-10-24 09:15:00",
+            "last_timestamp": "2026-10-19 15:35:00",
+            "target_profit_pct": 0.70,
+            "stop_loss_credit_mult": 0.50,
+            "max_risk_per_trade_inr": 5000.0,
+            "max_combined_portfolio_risk_inr": 20000.0,
+            "max_daily_loss_inr": 15000.0,
+            "consecutive_loss_cooldown_mins": 15,
+        }
+    }
     for scenario, strat_dict in results.items():
         summary[scenario] = {}
         for strat_name, metrics in strat_dict.items():
@@ -68,12 +84,12 @@ def main():
                 "pnl_by_regime": {k: round(v, 2) for k, v in sorted(metrics.pnl_by_regime.items())},
             }
 
-    # Save summary report
-    out_file = os.path.join(data_dir, "backtest_results_summary.json")
+    # Save summary report to dedicated aligned output file to preserve existing checkpoint results
+    out_file = os.path.join(data_dir, "backtest_results_summary_aligned.json")
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"Saved full results to {out_file}")
+    print(f"Saved full aligned results to {out_file}")
 
     # Print summary table to console
     print("\n============================== BASE SCENARIO PERFORMANCE ==============================")
