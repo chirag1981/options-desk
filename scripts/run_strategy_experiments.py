@@ -63,6 +63,8 @@ class ResearchBacktestEngine(HistoricalBacktestEngine):
 
     def __init__(self, experiment: Optional[ExperimentConfig] = None, **kwargs):
         super().__init__(**kwargs)
+        # Requirement 1: Restrict research workflow strictly to IRON_CONDOR
+        self.approved_strategies = {"IRON_CONDOR"}
         self.exp = experiment or ExperimentConfig(name="Baseline", description="Unaltered Production Baseline")
 
     def _run_single_scenario(
@@ -72,7 +74,7 @@ class ResearchBacktestEngine(HistoricalBacktestEngine):
     ) -> Dict[str, StrategyMetrics]:
         metrics: Dict[str, StrategyMetrics] = {
             s: StrategyMetrics(strategy_id=s, scenario=scenario)
-            for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+            for s in ["IRON_CONDOR", "COMBINED"]
         }
 
         current_equity = self.starting_equity
@@ -607,7 +609,7 @@ def run_experiment_suite():
                         "expectancy": full_res[sc][s].expectancy_inr,
                         "max_dd": full_res[sc][s].max_drawdown_inr,
                     }
-                    for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+                    for s in ["IRON_CONDOR", "COMBINED"]
                 }
                 for sc in ["OPTIMISTIC", "BASE", "CONSERVATIVE"]
             }
