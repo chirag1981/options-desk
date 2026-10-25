@@ -69,7 +69,7 @@ def make_candidate(
     if short_strike_2 is not None:
         legs.append(OptionLegSpec(symbol=f"NIFTY{int(short_strike_2)}CE", strike=short_strike_2, option_type="CE", action="SELL", bid=25.0, ask=26.0, ltp=25.5, quantity=65))
     if long_strike_2 is not None:
-        legs.append(OptionLegSpec(symbol=f"NIFTY{int(long_strike_2)}CE", strike=long_strike_2, option_type="CE", action="BUY", bid=5.0, ask=6.0, ltp=5.5, quantity=65))
+        legs.append(OptionLegSpec(symbol=f"NIFTY{int(long_strike_2)}CE", strike=long_strike_2, option_type="CE", action="BUY", bid=5.6, ask=6.0, ltp=5.8, quantity=65))
 
     return SpreadCandidate(
         strategy_id=strategy_id,

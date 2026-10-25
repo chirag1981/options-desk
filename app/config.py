@@ -21,9 +21,21 @@ if os.path.exists(ROOT_ENV_PATH):
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def _resolve_secret_key() -> str:
+    env_secret = os.environ.get("SECRET_KEY", "").strip()
+    if env_secret:
+        return env_secret
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("FLASK_ENV") == "testing" or os.environ.get("TESTING") == "1":
+        return "test-session-secret-key-non-prod-only"
+    raise RuntimeError(
+        "CRITICAL SECURITY CONFIGURATION ERROR: 'SECRET_KEY' environment variable is required outside test environments. "
+        "A secure, random secret must be configured in config/.env or the process environment."
+    )
+
+
 class Config:
     """Base application and trading configuration."""
-    SECRET_KEY = os.environ.get("SECRET_KEY", "nifty-options-desk-secret-key-2026")
+    SECRET_KEY = _resolve_secret_key()
     INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
     os.makedirs(INSTANCE_DIR, exist_ok=True)
 

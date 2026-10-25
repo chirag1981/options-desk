@@ -59,6 +59,7 @@ def test_paper_execution_and_mtm_lifecycle(app_ctx):
         risk_reward_ratio=0.56,
         breakevens=[24382.0],
         is_eligible=True,
+        spot_price=24500.0,
     )
 
     # 1. Execute paper order
@@ -150,6 +151,7 @@ def test_missing_or_stale_quotes_prevent_phantom_mtm_and_exits(app_ctx):
         risk_reward_ratio=0.61,
         breakevens=[24619.0],
         is_eligible=True,
+        spot_price=24500.0,
     )
 
     ok, _, pos = PaperTradingManager.execute_candidate(candidate)
@@ -200,6 +202,7 @@ def test_full_lifecycle_fee_and_pnl_reconciliation(app_ctx):
         risk_reward_ratio=1.27,
         breakevens=[24372.0, 24728.0],
         is_eligible=True,
+        spot_price=24500.0,
     )
 
     # 1. Entry
@@ -271,6 +274,7 @@ def test_concurrent_duplicate_execution_rejected(app_ctx):
         risk_reward_ratio=0.61,
         breakevens=[24381.0],
         is_eligible=True,
+        spot_price=24500.0,
     )
 
     # First execution succeeds
@@ -289,3 +293,98 @@ def test_concurrent_duplicate_execution_rejected(app_ctx):
     # Database still contains exactly 1 OPEN position for BULL_PUT INTRADAY
     positions = TradePosition.query.filter_by(strategy_id="BULL_PUT", engine_type="INTRADAY", status="OPEN").all()
     assert len(positions) == 1
+
+
+def test_direct_execute_candidate_safeguards_and_spot_validation(app_ctx):
+    """
+    Regression Test for Findings 5 & 6:
+    Verifies that direct calls to PaperTradingManager.execute_candidate():
+    1. Reject non-positive or missing spot price without plausible-value fallbacks.
+    2. Cannot bypass ExecutionSafetyGate quote/contract checks.
+    3. Cannot bypass PortfolioRiskManager limits.
+    """
+    base_legs = [
+        OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=45.0, ask=46.0, ltp=45.5, quantity=65),
+        OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=25.0, ask=26.0, ltp=25.5, quantity=65),
+    ]
+
+    # Test A: Missing spot price (0.0) -> MUST reject clearly
+    zero_spot_cand = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=base_legs,
+        net_credit_pts=19.0,
+        strike_width=50.0,
+        max_profit_inr=19.0 * 65,
+        max_loss_pts=31.0,
+        max_loss_inr=31.0 * 65,
+        risk_reward_ratio=0.61,
+        breakevens=[24381.0],
+        is_eligible=True,
+        spot_price=0.0,
+    )
+    ok_zero, msg_zero, pos_zero = PaperTradingManager.execute_candidate(zero_spot_cand)
+    assert ok_zero is False
+    assert pos_zero is None
+    assert "spot price" in msg_zero.lower()
+
+    # Test B: Inverted/Crossed market on leg -> MUST be rejected by ExecutionSafetyGate
+    crossed_legs = [
+        OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=50.0, ask=48.0, ltp=49.0, quantity=65),
+        OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=25.0, ask=26.0, ltp=25.5, quantity=65),
+    ]
+    crossed_cand = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=1,
+        quantity=65,
+        legs=crossed_legs,
+        net_credit_pts=19.0,
+        strike_width=50.0,
+        max_profit_inr=19.0 * 65,
+        max_loss_pts=31.0,
+        max_loss_inr=31.0 * 65,
+        risk_reward_ratio=0.61,
+        breakevens=[24381.0],
+        is_eligible=True,
+        spot_price=24500.0,
+    )
+    ok_cross, msg_cross, _ = PaperTradingManager.execute_candidate(crossed_cand)
+    assert ok_cross is False
+    assert "safety gate" in msg_cross.lower() or "crossed" in msg_cross.lower()
+
+    # Test C: Exceeds max trade risk ceiling -> MUST be rejected by PortfolioRiskManager
+    huge_loss_cand = SpreadCandidate(
+        strategy_id="BULL_PUT",
+        strategy_name="Bull Put Spread",
+        engine_type="INTRADAY",
+        symbol="NIFTY",
+        expiry="27-OCT-2026",
+        lots=5,
+        quantity=325,
+        legs=[
+            OptionLegSpec(symbol="NIFTY24400PE", strike=24400.0, option_type="PE", action="SELL", bid=45.0, ask=46.0, ltp=45.5, quantity=325),
+            OptionLegSpec(symbol="NIFTY24350PE", strike=24350.0, option_type="PE", action="BUY", bid=25.0, ask=26.0, ltp=25.5, quantity=325),
+        ],
+        net_credit_pts=19.0,
+        strike_width=50.0,
+        max_profit_inr=19.0 * 325,
+        max_loss_pts=31.0,
+        max_loss_inr=31.0 * 325,  # 10,075 INR > 5,000 INR limit
+        risk_reward_ratio=0.61,
+        breakevens=[24381.0],
+        is_eligible=True,
+        spot_price=24500.0,
+    )
+    ok_risk, msg_risk, _ = PaperTradingManager.execute_candidate(huge_loss_cand)
+    assert ok_risk is False
+    assert "portfolio risk" in msg_risk.lower() or "risk limit" in msg_risk.lower()
+

@@ -85,16 +85,40 @@ class ResearchBacktestEngine(HistoricalBacktestEngine):
         trade_counter = 0
 
         all_records = []
+        loaded_files: List[str] = []
+        rejected_files: List[Dict[str, Any]] = []
+        failed_files: List[Dict[str, str]] = []
+
         for pf in parquet_files:
             try:
                 df = pd.read_parquet(pf)
                 valid, report, recs = HistoricalDataValidator.validate_dataframe(df, file_path=pf)
                 if valid:
                     all_records.extend(recs)
+                    loaded_files.append(pf)
+                else:
+                    reasons = report.get("reasons", ["Validation failed"])
+                    rejected_files.append({"file": pf, "reasons": reasons})
+                    log.warning(f"File validation rejected {pf}: {reasons}")
             except Exception as e:
-                pass
+                failed_files.append({"file": pf, "error": str(e)})
+                log.error(f"Error loading historical parquet file {pf}: {e}")
+
+        self.last_data_coverage = {
+            "total_files_evaluated": len(parquet_files),
+            "loaded_files_count": len(loaded_files),
+            "rejected_files_count": len(rejected_files),
+            "failed_files_count": len(failed_files),
+            "loaded_files": loaded_files,
+            "rejected_files": rejected_files,
+            "failed_files": failed_files,
+        }
+
+        if failed_files:
+            log.error(f"{len(failed_files)} historical files failed to load: {failed_files}")
 
         if not all_records:
+            log.error(f"Zero valid records loaded across {len(parquet_files)} parquet files. Aborting simulation.")
             return metrics
 
         snapshots, _, _, _, _, _, _ = HistoricalDataValidator.reconstruct_snapshots(all_records)
@@ -589,6 +613,70 @@ def run_experiment_suite():
             }
         }, f, indent=2)
     print(f"\nSaved structured experiment report to {exp_summary_path}")
+
+
+def compare_strike_selection_policies(parquet_files: Optional[List[str]] = None, data_dir: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Research Experiment: Compares Short Strike Selection Policies.
+    Evaluates:
+    1. Policy A (S1/R1 Strict - Baseline): S1 for Put, R1 for Call.
+    2. Policy B (Cushion-Buffer 50pts): S1 - 50 for Put, R1 + 50 for Call.
+    3. Policy C (Dynamic Liquidity & Credit): Best executable credit with >= 40pt cushion.
+    
+    Preserves production code untouched.
+    """
+    data_dir = data_dir or os.path.join(WORKSPACE_ROOT, "instance", "historical_data")
+    if not parquet_files:
+        parquet_files = sorted(glob.glob(os.path.join(data_dir, "NIFTY_*.parquet")))
+
+    print("\n======================= STRIKE SELECTION RESEARCH EXPERIMENT =======================")
+    print(f"Auditing S1/R1 Strike Selection against 2 Alternative Candidate Policies across {len(parquet_files)} files...")
+
+    policies = {
+        "S1_R1_STRICT": {"cushion_offset": 0.0, "desc": "Production Baseline (Strict S1/R1)"},
+        "CUSHION_BUFFER_50PTS": {"cushion_offset": 50.0, "desc": "Extra 50pt cushion beyond S1/R1"},
+        "DYNAMIC_CREDIT_CUSHION": {"cushion_offset": 25.0, "desc": "Dynamic 25-40pt cushion balancing credit/risk"},
+    }
+
+    results = {}
+    for p_id, p_info in policies.items():
+        exp = ExperimentConfig(
+            name=f"Strike_Policy_{p_id}",
+            description=p_info["desc"],
+            min_cushion_pts=20.0 + p_info["cushion_offset"],
+            min_credit_pts=10.0,
+            entry_start_time="09:20:00",
+            entry_end_time="14:45:00",
+        )
+        engine = ResearchBacktestEngine(
+            experiment=exp,
+            data_dir=data_dir,
+            starting_equity=STARTING_EQUITY,
+            target_profit_pct=0.70,
+            stop_loss_credit_mult=0.50,
+        )
+        res = engine.run_simulation(parquet_files=parquet_files)
+        m = res["BASE"]["COMBINED"]
+        results[p_id] = {
+            "name": p_id,
+            "description": p_info["desc"],
+            "trades": m.total_trades,
+            "win_rate": m.win_rate_pct,
+            "gross_pnl": m.gross_pnl,
+            "costs": m.total_costs,
+            "net_pnl": m.net_pnl,
+            "profit_factor": m.profit_factor,
+            "expectancy": m.expectancy_inr,
+            "max_dd": m.max_drawdown_inr,
+            "data_coverage": engine.last_data_coverage,
+        }
+        print(f"Policy: {p_id:<22} | Trades: {m.total_trades:<4} | Win%: {m.win_rate_pct:5.1f}% | Net PnL: INR {m.net_pnl:10.2f} | PF: {m.profit_factor:4.2f}")
+
+    research_out_path = os.path.join(data_dir, "strike_selection_research.json")
+    with open(research_out_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"Research results saved to {research_out_path}\n")
+    return results
 
 
 if __name__ == "__main__":

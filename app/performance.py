@@ -41,22 +41,42 @@ class PerformanceAnalytics:
         loss_count = len(losses)
         win_rate = round((win_count / len(closed_trades) * 100.0), 1) if closed_trades else 0.0
 
-        total_gross_pnl = sum(p.gross_pnl_inr for p in closed_trades)
-        total_costs = sum(p.transaction_costs_inr for p in positions)
+        realized_gross_pnl = sum(p.gross_pnl_inr for p in closed_trades)
+        realized_costs = sum(p.transaction_costs_inr for p in closed_trades)
         realized_net_pnl = sum(p.net_pnl_inr for p in closed_trades)
-        unrealized_pnl = round(sum(p.current_pnl_inr for p in open_trades), 2)
-        combined_net_pnl = round(realized_net_pnl + unrealized_pnl, 2)
+
+        # Open positions: calculate gross unrealized and separate entry vs estimated exit costs
+        open_entry_costs = sum(p.transaction_costs_inr for p in open_trades)
+        unrealized_gross_pnl = sum(
+            round((p.entry_net_credit_pts - p.current_net_debit_pts) * p.quantity, 2)
+            for p in open_trades
+        )
+        # Estimated exit costs for open positions (under symmetric lot/fee structure)
+        estimated_open_exit_costs = open_entry_costs
+        unrealized_net_pnl = round(unrealized_gross_pnl - (open_entry_costs + estimated_open_exit_costs), 2)
+        total_costs = realized_costs + open_entry_costs
+        combined_net_pnl = round(realized_net_pnl + unrealized_net_pnl, 2)
 
         total_gains = sum(p.net_pnl_inr for p in wins)
         total_losses = abs(sum(p.net_pnl_inr for p in losses))
         profit_factor = round(total_gains / total_losses, 2) if total_losses > 0 else (round(total_gains, 2) if total_gains > 0 else 0.0)
 
-        # Engine breakdown (includes realized + live open MTM)
+        # Engine breakdown (includes realized + live open net MTM)
         intraday_all = [p for p in positions if p.engine_type == "INTRADAY"]
         positional_all = [p for p in positions if p.engine_type == "POSITIONAL"]
 
-        intraday_net_pnl = round(sum((p.net_pnl_inr if p.status != "OPEN" else p.current_pnl_inr) for p in intraday_all), 2)
-        positional_net_pnl = round(sum((p.net_pnl_inr if p.status != "OPEN" else p.current_pnl_inr) for p in positional_all), 2)
+        def _calc_engine_net(pos_list: List[TradePosition]) -> float:
+            net = 0.0
+            for p in pos_list:
+                if p.status != "OPEN":
+                    net += p.net_pnl_inr
+                else:
+                    gross = (p.entry_net_credit_pts - p.current_net_debit_pts) * p.quantity
+                    net += (gross - (p.transaction_costs_inr * 2.0))
+            return round(net, 2)
+
+        intraday_net_pnl = _calc_engine_net(intraday_all)
+        positional_net_pnl = _calc_engine_net(positional_all)
 
         return {
             "total_trades": total_trades,
@@ -66,10 +86,15 @@ class PerformanceAnalytics:
             "loss_count": loss_count,
             "win_rate_pct": win_rate,
             "profit_factor": profit_factor,
-            "total_gross_pnl_inr": round(total_gross_pnl, 2),
-            "total_transaction_costs_inr": round(total_costs, 2),
+            "realized_gross_pnl_inr": round(realized_gross_pnl, 2),
+            "realized_costs_inr": round(realized_costs, 2),
             "realized_net_pnl_inr": round(realized_net_pnl, 2),
-            "unrealized_pnl_inr": unrealized_pnl,
+            "open_entry_costs_inr": round(open_entry_costs, 2),
+            "estimated_open_exit_costs_inr": round(estimated_open_exit_costs, 2),
+            "unrealized_gross_pnl_inr": round(unrealized_gross_pnl, 2),
+            "unrealized_pnl_inr": unrealized_net_pnl,
+            "total_gross_pnl_inr": round(realized_gross_pnl + unrealized_gross_pnl, 2),
+            "total_transaction_costs_inr": round(total_costs, 2),
             "total_net_pnl_inr": combined_net_pnl,
             "combined_net_pnl_inr": combined_net_pnl,
             "intraday_net_pnl_inr": intraday_net_pnl,

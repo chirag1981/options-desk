@@ -979,6 +979,7 @@ def test_spread_lifecycle_complete_fee_and_risk_field_semantics(app_ctx):
         risk_reward_ratio=0.67,
         breakevens=[24380.0],
         is_eligible=True,
+        spot_price=24500.0,
     )
 
     # Pre-entry checks

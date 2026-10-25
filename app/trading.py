@@ -184,9 +184,11 @@ class PaperTradingManager:
     _execution_lock = threading.Lock()
 
     @classmethod
-    def execute_candidate(cls, candidate: SpreadCandidate) -> Tuple[bool, str, Optional[TradePosition]]:
+    def execute_candidate(cls, candidate: SpreadCandidate, analysis: Optional[Any] = None) -> Tuple[bool, str, Optional[TradePosition]]:
         """
         Executes a paper-trade spread candidate atomically.
+        Enforces execution safety gate, portfolio risk limits, positive spot validation,
+        and uncovered-short checks non-bypassably.
         """
         if not candidate.is_eligible:
             return False, f"Candidate not eligible: {'; '.join(candidate.rejection_reasons)}", None
@@ -197,6 +199,21 @@ class PaperTradingManager:
 
         if candidate.has_uncovered_short:
             return False, "CRITICAL: Uncovered short option detected. Execution rejected.", None
+
+        if not candidate.spot_price or candidate.spot_price <= 0:
+            return False, "Invalid or missing spot price for candidate. Execution rejected.", None
+
+        # Authoritative Execution Safety Gate Validation
+        from app.safety import ExecutionSafetyGate
+        is_safe, safety_msg = ExecutionSafetyGate.validate_execution(candidate, analysis)
+        if not is_safe:
+            return False, f"Execution safety gate rejected trade: {safety_msg}", None
+
+        # Authoritative Portfolio Risk Evaluation
+        from app.risk import PortfolioRiskManager
+        risk_eval = PortfolioRiskManager.evaluate_candidate_risk(candidate, engine_type=candidate.engine_type)
+        if not risk_eval.approved:
+            return False, f"Portfolio risk limit exceeded: {risk_eval.summary}", None
 
         try:
             with cls._execution_lock:
@@ -232,7 +249,7 @@ class PaperTradingManager:
                     lots=candidate.lots,
                     quantity=candidate.quantity,
                     entry_time=now_dt,
-                    entry_spot=float(candidate.spot_price or (candidate.breakevens[0] if candidate.breakevens else 24500.0)),
+                    entry_spot=float(candidate.spot_price),
                     entry_net_credit_pts=candidate.net_credit_pts,
                     max_loss_inr=candidate.max_loss_inr,
                     max_profit_inr=candidate.max_profit_inr,

@@ -106,6 +106,23 @@ def test_zero_and_missing_oi_safety():
     assert res_zero_ce.market_regime == "CHOPPY_OR_INSUFFICIENT"
     assert any("Zero Call Open Interest" in w for w in res_zero_ce.data_quality_warnings)
 
+    # Test C: Zero Put OI (must fail closed to CHOPPY_OR_INSUFFICIENT, NEUTRAL, NOT false TRENDING_BEARISH)
+    chain_zero_pe = build_mock_chain(spot=24500.0, pcr=1.0)
+    for stk in chain_zero_pe["chain_by_strike"].values():
+        stk["PE"]["oi"] = 0
+    res_zero_pe = MarketAnalyzer.analyze_chain(chain_zero_pe)
+    assert res_zero_pe.pcr_oi == 0.0
+    assert res_zero_pe.market_regime == "CHOPPY_OR_INSUFFICIENT"
+    assert res_zero_pe.market_bias == "NEUTRAL"
+    assert any("Zero Put Open Interest" in w for w in res_zero_pe.data_quality_warnings)
+
+
+def test_snapshot_timestamp_preservation():
+    chain = build_mock_chain(spot=24500.0, pcr=1.0)
+    chain["timestamp"] = "2025-05-15 11:30:00"
+    res = MarketAnalyzer.analyze_chain(chain)
+    assert res.timestamp == "2025-05-15 11:30:00"
+
 
 def test_missing_delta_oi_handled_safely():
     chain_no_delta = build_mock_chain(spot=24500.0, pcr=1.0)

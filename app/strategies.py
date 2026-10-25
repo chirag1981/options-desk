@@ -412,7 +412,9 @@ class StrategyBuilder:
         lots: int = 1,
     ) -> SpreadCandidate:
         rejections = []
-        if analysis.market_regime not in ("BALANCED_RANGE", "SIDEWAYS") and analysis.market_bias != "NEUTRAL":
+        if analysis.market_regime == "CHOPPY_OR_INSUFFICIENT":
+            rejections.append("Market regime is choppy or data insufficient; cannot confirm balanced range.")
+        elif analysis.market_regime not in ("BALANCED_RANGE", "SIDEWAYS") and analysis.market_bias != "NEUTRAL":
             rejections.append(f"Market regime ({analysis.market_regime}) is not balanced range-bound.")
 
         # Build Put side and Call side
@@ -532,7 +534,18 @@ class IntradayEngine:
     @classmethod
     def evaluate(cls, analysis: MarketAnalysisResult, chain: Dict[float, Dict[str, Any]]) -> List[SpreadCandidate]:
         candidates = []
-        now_time = datetime.now(IST).strftime("%H:%M:%S")
+        if analysis and analysis.timestamp:
+            ts_str = str(analysis.timestamp).strip()
+            if " " in ts_str:
+                now_time = ts_str.split(" ")[1][:8]
+            elif "T" in ts_str:
+                now_time = ts_str.split("T")[1][:8]
+            elif ":" in ts_str and len(ts_str) >= 5:
+                now_time = ts_str[:8]
+            else:
+                now_time = datetime.now(IST).strftime("%H:%M:%S")
+        else:
+            now_time = datetime.now(IST).strftime("%H:%M:%S")
 
         # Session Time Guards
         if now_time < Config.INTRADAY_ENTRY_START or now_time > Config.INTRADAY_ENTRY_CUTOFF:
@@ -637,7 +650,18 @@ class AutoStrategySelector:
         analysis: MarketAnalysisResult,
         chain: Dict[float, Dict[str, Any]],
     ) -> AutoSelectionResult:
-        now_str = datetime.now(IST).strftime("%H:%M:%S")
+        if analysis and analysis.timestamp:
+            ts_str = str(analysis.timestamp).strip()
+            if " " in ts_str:
+                now_str = ts_str.split(" ")[1][:8]
+            elif "T" in ts_str:
+                now_str = ts_str.split("T")[1][:8]
+            elif ":" in ts_str and len(ts_str) >= 5:
+                now_str = ts_str[:8]
+            else:
+                now_str = datetime.now(IST).strftime("%H:%M:%S")
+        else:
+            now_str = datetime.now(IST).strftime("%H:%M:%S")
         evidence = []
 
         # 1. Evaluate all 3 approved strategies on both Intraday and Positional horizons
@@ -790,9 +814,12 @@ class AutoStrategySelector:
     def _score_iron_condor(cls, a: MarketAnalysisResult, c: SpreadCandidate) -> Tuple[float, str]:
         score = 0.0
         reasons = []
-        if a.market_regime == "BALANCED_RANGE" or a.market_bias == "NEUTRAL":
+        if a.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
             score += 40.0
-            reasons.append(f"Range-bound regime ({a.market_regime})")
+            reasons.append(f"Confirmed balanced range regime ({a.market_regime})")
+        elif a.market_bias == "NEUTRAL":
+            score += 15.0
+            reasons.append(f"Neutral bias without confirmed balanced range ({a.market_regime})")
         if 0.85 <= a.pcr_oi <= 1.15:
             score += 25.0
             reasons.append(f"Balanced PCR ({a.pcr_oi:.2f})")

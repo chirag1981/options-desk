@@ -173,14 +173,18 @@ class MarketAnalyzer:
         # Data Quality & OI Validation
         if not has_pe_oi and not has_ce_oi:
             warnings.append("Missing Open Interest data across entire option chain.")
+        elif not has_pe_oi:
+            warnings.append("Missing Put Open Interest data across option chain.")
+        elif not has_ce_oi:
+            warnings.append("Missing Call Open Interest data across option chain.")
         elif total_pe_oi == 0 and total_ce_oi == 0:
             warnings.append("Zero Open Interest across entire option chain.")
 
-        if total_ce_oi == 0:
+        if not has_ce_oi or total_ce_oi == 0:
             warnings.append("Zero Call Open Interest; Put-Call Ratio cannot be calculated safely.")
             pcr = 0.0
-        elif total_pe_oi == 0:
-            warnings.append("Zero Put Open Interest; Put-Call Ratio is 0.0.")
+        elif not has_pe_oi or total_pe_oi == 0:
+            warnings.append("Zero Put Open Interest; Put-Call Ratio cannot be calculated safely.")
             pcr = 0.0
         else:
             pcr = round((total_pe_oi / total_ce_oi), 2)
@@ -221,7 +225,11 @@ class MarketAnalyzer:
             total_ce_chg=total_ce_chg,
         )
 
-        now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+        raw_ts = chain_data.get("timestamp")
+        if raw_ts and str(raw_ts).strip():
+            now_str = str(raw_ts).strip()
+        else:
+            now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
 
         return MarketAnalysisResult(
             symbol=symbol,
@@ -282,7 +290,13 @@ class MarketAnalyzer:
         # 1. Critical Data Defect Guard (Zero/Missing OI or Invalid S1/R1)
         critical_warnings = [
             w for w in warnings
-            if "Zero Open Interest" in w or "Missing Open Interest" in w or "Zero Call" in w or "Invalid structural" in w
+            if "Zero Open Interest" in w
+            or "Missing Open Interest" in w
+            or "Zero Call" in w
+            or "Zero Put" in w
+            or "Missing Put" in w
+            or "Missing Call" in w
+            or "Invalid structural" in w
         ]
         if critical_warnings:
             factors.extend(critical_warnings)

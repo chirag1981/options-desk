@@ -28,7 +28,7 @@ class ExecutionSafetyGate:
     def validate_execution(
         cls,
         candidate: SpreadCandidate,
-        analysis: Any,
+        analysis: Optional[Any] = None,
         chain: Optional[Dict[float, Dict[str, Any]]] = None,
     ) -> Tuple[bool, str]:
         """
@@ -40,7 +40,7 @@ class ExecutionSafetyGate:
             return False, "CRITICAL: Uncovered short option detected. 100% protective wing coverage required."
 
         # 2. Data Provider & Live Stream Validation
-        data_status = getattr(analysis, "data_status", "UNKNOWN")
+        data_status = getattr(analysis, "data_status", None) if analysis is not None else getattr(candidate, "data_status", None)
         is_testing = False
         allow_synthetic = os.environ.get("OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA", "0") == "1"
 
@@ -52,15 +52,22 @@ class ExecutionSafetyGate:
             pass
 
         # In normal runtime, strictly require FYERS_LIVE
-        if data_status != "FYERS_LIVE":
-            if not (is_testing and allow_synthetic):
-                log.warning(
-                    f"Execution rejected: Data status is '{data_status}'. Live FYERS market data stream required."
-                )
-                return (
-                    False,
-                    f"Paper execution blocked: Live FYERS market data stream required. Current stream: '{data_status}'. Diagnostic/simulated quotes cannot be executed.",
-                )
+        if data_status is not None:
+            if data_status != "FYERS_LIVE":
+                if not (is_testing and allow_synthetic):
+                    log.warning(
+                        f"Execution rejected: Data status is '{data_status}'. Live FYERS market data stream required."
+                    )
+                    return (
+                        False,
+                        f"Paper execution blocked: Live FYERS market data stream required. Current stream: '{data_status}'. Diagnostic/simulated quotes cannot be executed.",
+                    )
+        elif not is_testing:
+            log.warning("Execution rejected: Data status is missing/unknown. Live FYERS market data stream required.")
+            return (
+                False,
+                "Paper execution blocked: Live FYERS market data stream required. Current stream: 'UNKNOWN'. Diagnostic/simulated quotes cannot be executed.",
+            )
 
         # 3. Leg-by-Leg Executable Quote Verification (No fabricated or missing prices)
         if not candidate.legs or len(candidate.legs) == 0:
