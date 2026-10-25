@@ -82,6 +82,12 @@ class BacktestTrade:
     fill_tier: str = "ESTIMATED_SPREAD"
     market_regime_entry: str = "BALANCED_RANGE"
     max_risk_inr: float = 0.0
+    market_bias_entry: str = "NEUTRAL"
+    entry_spot: float = 0.0
+    spot_cushion_pts: float = 0.0
+    credit_to_width_pct: float = 0.0
+    pcr_oi_entry: float = 1.0
+    holding_time_mins: float = 0.0
 
 
 @dataclass
@@ -212,6 +218,44 @@ class HistoricalBacktestEngine:
 
         return closing_cost_pts
 
+    def _close_trade_at_settlement(
+        self,
+        trade: BacktestTrade,
+        snap: Dict[str, Any],
+        scenario: str,
+        reason: str = "SESSION_CUTOFF"
+    ) -> None:
+        """
+        Settles an open intraday/0DTE position when the session ends or transitions
+        to a new date/expiry, preventing ghost trades from lingering across sessions.
+        """
+        chain = snap["chain_by_strike"]
+        spot = snap["spot_price"]
+        ts_str = snap["timestamp"]
+        exit_cost_pts = self._evaluate_spread_exit_cost(
+            trade, chain, scenario, final_spot=spot, is_expiry_settlement=True
+        )
+        if exit_cost_pts is None:
+            exit_cost_pts = trade.entry_spread_cost
+
+        trade.exit_time = ts_str
+        trade.exit_reason = reason
+        trade.exit_spread_cost = exit_cost_pts
+        trade.gross_pnl = round((trade.net_credit_pts - exit_cost_pts) * trade.quantity, 2)
+        trade.total_brokerage = 0.0
+        trade.total_taxes = 0.0
+        trade.total_costs = round(trade.total_brokerage + trade.total_taxes, 2)
+        num_legs = 4 if trade.strategy_id == "IRON_CONDOR" else 2
+        slippage_rate = 0.00 if scenario == "OPTIMISTIC" else 0.05 if scenario == "BASE" else 0.10
+        trade.slippage_cost = round(slippage_rate * num_legs * trade.quantity, 2)
+        trade.net_pnl = round(trade.gross_pnl - trade.total_costs, 2)
+        try:
+            t_in = datetime.strptime(trade.entry_time, "%Y-%m-%d %H:%M:%S")
+            t_out = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            trade.holding_time_mins = round((t_out - t_in).total_seconds() / 60.0, 1)
+        except Exception:
+            trade.holding_time_mins = 0.0
+
     def run_simulation(
         self,
         parquet_files: Optional[List[str]] = None,
@@ -288,6 +332,7 @@ class HistoricalBacktestEngine:
         ) = HistoricalDataValidator.reconstruct_snapshots(all_records)
 
         log.info(f"Reconstructed {len(snapshots)} chronological snapshots across {len(parquet_files)} expiries.")
+        last_snap = None
 
         for snap in snapshots:
             ts_str = snap["timestamp"]
@@ -298,11 +343,24 @@ class HistoricalBacktestEngine:
             spot = snap["spot_price"]
             chain = snap["chain_by_strike"]
 
-            # 1. Reset daily circuit breaker on new trading session
-            if current_trade_day != trade_date:
+            # 1. Reset daily circuit breaker and settle unclosed trades on new trading session
+            if current_trade_day is not None and current_trade_day != trade_date:
+                expired_trades = [t for t in open_trades if t.expiry != expiry or t.entry_time.split()[0] != str(trade_date)]
+                for et in expired_trades:
+                    target_snap = last_snap or snap
+                    self._close_trade_at_settlement(et, target_snap, scenario, reason="SESSION_CUTOFF")
+                    current_equity += et.net_pnl
+                    open_trades.remove(et)
+                    self._record_trade(metrics[et.strategy_id], et)
+                    self._record_trade(metrics["COMBINED"], et)
+
                 current_trade_day = trade_date
                 daily_loss_incurred = 0.0
                 circuit_breaker_active = False
+            elif current_trade_day is None:
+                current_trade_day = trade_date
+
+            last_snap = snap
 
             # Check consecutive loss cooldown expiry
             if cooldown_active_until and dt_obj >= cooldown_active_until:
@@ -361,6 +419,12 @@ class HistoricalBacktestEngine:
                     trade.exit_time = ts_str
                     trade.exit_reason = exit_reason
                     trade.exit_spread_cost = exit_cost_pts
+                    try:
+                        t_in = datetime.strptime(trade.entry_time, "%Y-%m-%d %H:%M:%S")
+                        t_out = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                        trade.holding_time_mins = round((t_out - t_in).total_seconds() / 60.0, 1)
+                    except Exception:
+                        trade.holding_time_mins = 0.0
 
                     # P&L Calculation
                     gross_pnl = (trade.net_credit_pts - exit_cost_pts) * trade.quantity
@@ -557,6 +621,11 @@ class HistoricalBacktestEngine:
                             total_costs=entry_total,
                             market_regime_entry=analysis.market_regime,
                             max_risk_inr=effective_trade_risk,
+                            market_bias_entry=analysis.market_bias,
+                            entry_spot=spot,
+                            spot_cushion_pts=round(abs(spot - short_k), 2),
+                            credit_to_width_pct=round((scenario_net_credit / cand.strike_width) * 100.0, 2) if cand.strike_width > 0 else 0.0,
+                            pcr_oi_entry=round(analysis.pcr_oi, 2),
                         )
                         open_trades.append(new_trade)
                         if len(open_trades) >= Config.MAX_INTRADAY_POSITIONS:
@@ -565,6 +634,15 @@ class HistoricalBacktestEngine:
             except Exception as e:
                 log.debug(f"Snapshot analysis skipped: {e}")
                 continue
+
+        # Close any lingering open trades at the very end of simulation
+        if open_trades and last_snap:
+            for et in list(open_trades):
+                self._close_trade_at_settlement(et, last_snap, scenario, reason="SESSION_CUTOFF")
+                current_equity += et.net_pnl
+                open_trades.remove(et)
+                self._record_trade(metrics[et.strategy_id], et)
+                self._record_trade(metrics["COMBINED"], et)
 
         # Finalize metrics
         for strat_key, m in metrics.items():

@@ -280,3 +280,40 @@ def test_snapshot_reconstruction_preserves_scenario_pricing_tiers():
     assert ce_quote["base_ask"] == 50.20
 
 
+def test_session_transition_settles_unclosed_trades():
+    """Verify that trades unclosed from a prior truncated session are settled on date transition."""
+    from app.backtesting.backtest_engine import HistoricalBacktestEngine, BacktestTrade
+
+    engine = HistoricalBacktestEngine()
+    dummy_snap = {
+        "timestamp": "2025-05-15 13:20:00",
+        "spot_price": 24000.0,
+        "chain_by_strike": {
+            24000.0: {"CE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}, "PE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}},
+            24050.0: {"CE": {"ltp": 30.0, "bid": 29.8, "ask": 30.2}, "PE": {"ltp": 70.0, "bid": 69.8, "ask": 70.2}},
+        }
+    }
+    trade = BacktestTrade(
+        trade_id="BT-TEST-0001",
+        strategy_id="BEAR_CALL",
+        strategy_name="Bear Call Credit Spread",
+        engine_type="INTRADAY",
+        scenario="BASE",
+        expiry="2025-05-15",
+        entry_time="2025-05-15 09:20:00",
+        lots=1,
+        quantity=75,
+        short_strike=24000.0,
+        long_strike=24050.0,
+        net_credit_pts=20.0,
+        entry_spread_cost=20.0,
+    )
+
+    engine._close_trade_at_settlement(trade, dummy_snap, scenario="BASE", reason="SESSION_CUTOFF")
+    assert trade.exit_reason == "SESSION_CUTOFF"
+    assert trade.exit_time == "2025-05-15 13:20:00"
+    assert trade.holding_time_mins > 0
+    assert trade.net_pnl is not None
+
+
+
