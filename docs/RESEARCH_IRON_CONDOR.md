@@ -156,8 +156,53 @@ Using the corrected trade ledger, the dataset was strictly separated into Discov
 1. **Edge Decay in Holdout**: Net expectancy drops from **+₹319.70** in Discovery to **+₹101.09** in Holdout (Base scenario).
 2. **Fragility to Execution Friction**: In Holdout, under Conservative assumptions (10 bps adverse fill per leg), the strategy net P&L turns negative (-₹1,726.63, 0.79 PF) due to ₹2,825.13 in transaction costs and slippage consuming 100% of the gross profit (+₹1,098.50).
 3. **Core Vulnerability**: Iron Condors entering with low net credit (< 24 pts) do not generate sufficient profit cushion relative to the fixed ₹160 brokerage + statutory taxes + 4-leg crossing costs.
-4. **Targeted Hypothesis for Stage C**:
-   - Factor 1: Filter out low net-credit entries where round-trip costs exceed 25% of gross max profit.
-   - Factor 2: Entry timing restrictions (avoiding early morning opening volatility, entering 10:30+ or 11:30+).
-   - Factor 3: Sideways regime quality filters (stricter spot cushion and OI delta confirmation).
+
+---
+
+## 9. Phase 2 Stage 2 — Trade-Level Execution Analysis
+
+Across all 31 baseline trades:
+- **Strikes & Wing Width**: All trades deployed 50.0 pt wings on both Put and Call sides.
+- **Entry Regime Evidence**: 100% (31/31) trades entered with confirmed `BALANCED_RANGE` regime evidence. Entry spot cushion ranged between 21.05 and 48.55 pts (median 33.45 pts).
+- **Cost Impact**:
+  - Total Base Costs: ₹6,223.40 (Brokerage: ₹4,800.00, Statutory Taxes: ₹1,423.40).
+  - Total Conservative Costs: ₹6,219.80 (Brokerage: ₹4,800.00, Statutory Taxes: ₹1,419.80).
+  - Brokerage and taxes are virtually invariant between scenarios (governed by trade count and contract quantity).
+- **Flipped Trades (Winner $\to$ Loser)**:
+  - Exactly **1 trade** flipped across scenarios: `BT-BAS-0024` / `BT-CON-0024` (June 30, 2026; 65 qty; entered 11:30:00).
+  - In Base: Exit debit reached 7.40 pts at 14:50:00, successfully triggering the 70% profit target for **+₹1,020.94 Net P&L**.
+  - In Conservative: Due to adverse bid/ask crossing, the spread cost at 14:50:00 remained above the target threshold, leaving the position open until the 15:00:00 intraday cutoff where spread cost widened to 44.25 pts, closing for **-₹1,406.70 Net Loss** (a net delta of -₹2,427.64 on a single trade).
+- **Summary**: The gross P&L delta between Base (+₹13,073.50) and Conservative (+₹9,638.50) is -₹3,435.00, of which 70.6% (-₹2,424.50) is explained by Trade 24 missing its profit target exit before the intraday cutoff.
+
+---
+
+## 10. Phase 2 Stage 3 — One-Factor Credit Quality Experiments
+
+Tested a predeclared set of 5 credit quality configurations, keeping timing, cushion, wing width, and exit rules identical:
+
+| Experiment | Description | In-Sample Base Net (PF) | In-Sample Cons Net (PF) | Holdout Base Net (PF) | Holdout Cons Net (PF) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **CQ-0 (Control)** | Baseline Control (Credit $\ge 10$, Cost/Profit $\le 30\%$) | **+₹5,434.90 (1.92)** | **+₹5,145.33 (1.84)** | **+₹1,415.20 (1.23)** | **-₹1,726.63 (0.79)** |
+| **CQ-1** | Min Credit $\ge 23.0$ pts | +₹2,630.38 (1.44) | +₹2,364.77 (1.38) | +₹1,415.20 (1.23) | -₹1,726.63 (0.79) |
+| **CQ-2** | Min Credit $\ge 25.0$ pts (50% Wing Rule) | +₹732.99 (1.13) | +₹551.01 (1.12) | +₹1,218.36 (1.23) | -₹1,894.55 (0.73) |
+| **CQ-3** | Cost/Max Profit Ratio $\le 12.5\%$ | +₹1,094.05 (1.18) | +₹720.55 (1.12) | +₹1,218.36 (1.23) | -₹1,894.55 (0.73) |
+| **CQ-4** | Min Credit $\ge 27.0$ pts (Upper Median) | +₹2,208.70 (1.74) | +₹2,200.57 (1.75) | -₹1,008.92 (0.81) | -₹3,114.52 (0.44) |
+
+### Analysis of Credit Quality Experiments
+1. **Trade Quality vs. Trade Elimination**: Raising the credit threshold did not improve the quality of remaining trades; it merely eliminated winning trades in 2024/2025.
+2. **Adverse Selection via Cushion Compression**: Requiring higher net credits ($\ge 25$ or $\ge 27$ pts) on a 50 pt wing forces short strikes closer to ATM (compressing spot cushion). In the 30-session holdout period, this cushion compression exacerbated losses when intraday breakouts occurred, resulting in severe negative net P&L (-₹1,008.92 in Base, -₹3,114.52 in Conservative for CQ-4).
+3. **No Solution to Friction Sensitivity**: None of the credit quality thresholds prevented the strategy from turning negative under conservative execution friction in the holdout split.
+
+---
+
+## 11. Final Research Stop Rule & Definitive Decision
+
+**Decision**: **NOT PROVEN** (Fails Acceptance Criteria for Paper-Trading / Live Activation)
+
+### Justification:
+1. **Failure of Out-of-Sample Conservative Robustness**: While the strategy demonstrates positive expectancy under Base assumptions (+₹6,850.10 overall; +₹1,415.20 in holdout), it suffers negative net expectancy (-₹123.33/trade) and negative net P&L (-₹1,726.63, 0.79 PF) under Conservative execution friction in the untouched 30-session holdout.
+2. **Limited Out-of-Sample Sample Size**: The holdout period contains only 14 trades across 30 sessions, which is statistically insufficient to confirm an edge after factoring in bid/ask crossing friction.
+3. **Credit Quality Optimization Ineffective**: One-factor parameter tuning on credit thresholds did not resolve holdout fragility and degraded performance further.
+4. **Safety Mandate**: Per the research stop rule, live order routing remains strictly disabled, production code and allowlists remain unmodified, and no strategy modification is promoted to production. All checkpoints (`4ca238a`, `b42976e`) are preserved.
+
 
