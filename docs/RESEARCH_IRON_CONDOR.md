@@ -97,9 +97,67 @@ Across the complete 105-session dataset, the isolated `IRON_CONDOR` strategy pro
 
 ---
 
-## 7. Next Research Protocol: Controlled OFAT Experiments
+## 7. Stage A — Settlement Accounting Defect Fix & Versioned Corrected Baseline
 
-With the baseline frozen and fully reconciled:
-1. **Single-Variable Discipline**: All future strategy experiments must vary only one factor at a time (e.g., entry timing window, spot cushion distance, minimum credit threshold, or profit target).
-2. **In-Sample First**: Candidates must demonstrate net edge improvement on the 75 in-sample sessions before touching the 30 out-of-sample holdout sessions.
-3. **Production Isolation**: All experiment parameters remain confined to `scripts/run_strategy_experiments.py` and research scripts without modifying live trading thresholds in `app/config.py` or `app/strategies.py`.
+### Investigation of Settlement Defect (Trade 3)
+- **Trade ID**: `BT-BAS-0003` (Executed May 15, 2025; 75 qty; entry 10:50:00).
+- **Exit Event**: Parquet data ended at 13:20:00 (midday session cutoff).
+- **Root Cause**: In `HistoricalBacktestEngine._close_trade_at_settlement`, lines 245–247 assigned `trade.total_brokerage = 0.0` and `trade.total_taxes = 0.0`. This inadvertently wiped out the ₹80.00 entry brokerage and ₹29.80 entry statutory taxes that were incurred at trade inception, and failed to compute exit transaction costs for market square-off at session cutoff.
+- **Resolution**:
+  - `_close_trade_at_settlement` was updated to reconstruct closing spread legs and compute full itemized statutory fees (`TransactionCostEngine.calculate_order_costs_breakdown`).
+  - Added exit costs to `trade.total_brokerage` and `trade.total_taxes` instead of overwriting them.
+  - Frozen baseline benchmark (`4ca238a`) is preserved as the immutable control record.
+
+### Quantitative Comparison: Frozen vs. Corrected Baseline (Full 105 Sessions)
+
+| Execution Scenario | Frozen Gross P&L | Frozen Costs | Frozen Net P&L | Corrected Gross P&L | Corrected Costs | Corrected Net P&L | Delta Costs | Delta Net P&L | Corrected PF |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **OPTIMISTIC** | +₹13,545.25 | ₹6,007.92 | +₹7,537.33 | +₹13,545.25 | ₹6,229.98 | **+₹7,315.27** | +₹222.06 | -₹222.06 | **1.61** |
+| **BASE** | +₹13,073.50 | ₹6,001.39 | +₹7,072.11 | +₹13,073.50 | ₹6,223.40 | **+₹6,850.10** | +₹222.01 | -₹222.01 | **1.56** |
+| **CONSERVATIVE** | +₹9,638.50 | ₹5,997.85 | +₹3,640.65 | +₹9,638.50 | ₹6,219.80 | **+₹3,418.70** | +₹221.95 | -₹221.95 | **1.24** |
+
+*Note: All delta amounts correspond with exact paisa precision to Trade 3 exit square-off and entry fee restoration (₹160.00 brokerage + ₹62.01 statutory taxes).*
+
+---
+
+## 8. Stage B — Independent Holdout Validation (Discovery vs. Holdout)
+
+Using the corrected trade ledger, the dataset was strictly separated into Discovery (first 75 sessions, Oct 24, 2024 to Mar 24, 2026) and Holdout (final 30 sessions, Mar 30, 2026 to Oct 19, 2026) without inferring holdout metrics from aggregate totals.
+
+### Period Performance Metrics
+
+| Metric | Discovery Split (75 Sessions: Oct 2024 – Mar 2026) | Holdout Split (30 Sessions: Mar 2026 – Oct 2026) | Full Period Combined (105 Sessions) |
+| :--- | :---: | :---: | :---: |
+| **Total Trades** | 17 | 14 | 31 |
+| **Distinct Sessions Traded** | 17 | 14 | 31 |
+| **Win / Loss Record (Base)** | 11 Wins / 6 Losses | 8 Wins / 6 Losses | 19 Wins / 12 Losses |
+| **Win Rate (Base)** | **64.7%** | **57.1%** | **61.3%** |
+| **Gross P&L (Base)** | +₹8,835.50 | +₹4,238.00 | +₹13,073.50 |
+| **Modeled Costs (Base)** | ₹3,400.60 | ₹2,822.80 | ₹6,223.40 |
+| **Net P&L (Base)** | **+₹5,434.90** | **+₹1,415.20** | **+₹6,850.10** |
+| **Expectancy / Trade (Base)** | **+₹319.70** | **+₹101.09** | **+₹220.97** |
+| **Profit Factor (Base)** | **1.92** | **1.23** | **1.56** |
+| **Max Drawdown (Base)** | ₹1,677.01 | ₹5,221.39 | ₹6,570.27 |
+| **Max Losing Streak (Base)** | 2 consecutive losses | 4 consecutive losses | 6 consecutive losses |
+
+### Execution Scenario Sensitivity by Period
+
+#### 1. Discovery Split (75 Sessions)
+- **OPTIMISTIC**: 17 Trades | 70.6% Win Rate | Gross: +₹8,969.25 | Costs: ₹3,403.93 | **Net: +₹5,565.32 | PF: 1.94** | Exp: +₹327.37 | Max DD: ₹1,692.28
+- **BASE**: 17 Trades | 64.7% Win Rate | Gross: +₹8,835.50 | Costs: ₹3,400.60 | **Net: +₹5,434.90 | PF: 1.92** | Exp: +₹319.70 | Max DD: ₹1,677.01
+- **CONSERVATIVE**: 17 Trades | 64.7% Win Rate | Gross: +₹8,540.00 | Costs: ₹3,394.67 | **Net: +₹5,145.33 | PF: 1.84** | Exp: +₹302.67 | Max DD: ₹1,729.45
+
+#### 2. Holdout Split (30 Sessions)
+- **OPTIMISTIC**: 14 Trades | 57.1% Win Rate | Gross: +₹4,576.00 | Costs: ₹2,826.05 | **Net: +₹1,749.95 | PF: 1.29** | Exp: +₹125.00 | Max DD: ₹5,165.64
+- **BASE**: 14 Trades | 57.1% Win Rate | Gross: +₹4,238.00 | Costs: ₹2,822.80 | **Net: +₹1,415.20 | PF: 1.23** | Exp: +₹101.09 | Max DD: ₹5,221.39
+- **CONSERVATIVE**: 14 Trades | 50.0% Win Rate | Gross: +₹1,098.50 | Costs: ₹2,825.13 | **Net: -₹1,726.63 | PF: 0.79** | Exp: -₹123.33 | Max DD: ₹5,503.98
+
+### Key Critical Findings for Stage C Optimization
+1. **Edge Decay in Holdout**: Net expectancy drops from **+₹319.70** in Discovery to **+₹101.09** in Holdout (Base scenario).
+2. **Fragility to Execution Friction**: In Holdout, under Conservative assumptions (10 bps adverse fill per leg), the strategy net P&L turns negative (-₹1,726.63, 0.79 PF) due to ₹2,825.13 in transaction costs and slippage consuming 100% of the gross profit (+₹1,098.50).
+3. **Core Vulnerability**: Iron Condors entering with low net credit (< 24 pts) do not generate sufficient profit cushion relative to the fixed ₹160 brokerage + statutory taxes + 4-leg crossing costs.
+4. **Targeted Hypothesis for Stage C**:
+   - Factor 1: Filter out low net-credit entries where round-trip costs exceed 25% of gross max profit.
+   - Factor 2: Entry timing restrictions (avoiding early morning opening volatility, entering 10:30+ or 11:30+).
+   - Factor 3: Sideways regime quality filters (stricter spot cushion and OI delta confirmation).
+

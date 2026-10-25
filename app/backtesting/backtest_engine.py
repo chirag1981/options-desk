@@ -242,9 +242,43 @@ class HistoricalBacktestEngine:
         trade.exit_reason = reason
         trade.exit_spread_cost = exit_cost_pts
         trade.gross_pnl = round((trade.net_credit_pts - exit_cost_pts) * trade.quantity, 2)
-        trade.total_brokerage = 0.0
-        trade.total_taxes = 0.0
+
+        exit_legs = []
+        if reason in ("TARGET", "STOP_LOSS", "CUTOFF", "SESSION_CUTOFF"):
+            strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
+            strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+
+            if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
+                strikes_needed.append((trade.short_strike_2, "CE", "BUY"))
+                strikes_needed.append((trade.long_strike_2, "CE", "SELL"))
+
+            for stk, opt, act in strikes_needed:
+                if stk in chain and chain[stk].get(opt):
+                    p = self._get_contract_price_for_scenario(chain[stk][opt], act, scenario)
+                else:
+                    p = exit_cost_pts / len(strikes_needed)
+                exit_legs.append({"action": act, "price": p, "quantity": trade.quantity})
+        else:
+            exit_legs = []
+
+        if exit_legs:
+            try:
+                trade_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").date()
+            except Exception:
+                trade_dt = None
+            exit_costs = TransactionCostEngine.calculate_order_costs_breakdown(
+                exit_legs, lots=trade.lots, trade_date=trade_dt
+            )
+            exit_brokerage = exit_costs["brokerage"]
+            exit_taxes = exit_costs["total"] - exit_brokerage
+        else:
+            exit_brokerage = 0.0
+            exit_taxes = 0.0
+
+        trade.total_brokerage += exit_brokerage
+        trade.total_taxes += exit_taxes
         trade.total_costs = round(trade.total_brokerage + trade.total_taxes, 2)
+
         num_legs = 4 if trade.strategy_id == "IRON_CONDOR" else 2
         slippage_rate = 0.00 if scenario == "OPTIMISTIC" else 0.05 if scenario == "BASE" else 0.10
         trade.slippage_cost = round(slippage_rate * num_legs * trade.quantity, 2)

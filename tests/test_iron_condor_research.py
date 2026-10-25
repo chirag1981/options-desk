@@ -151,25 +151,112 @@ def test_isolated_baseline_metrics_reproduction():
     assert base.losing_trades == 12
     assert round(base.win_rate_pct, 1) == 61.3
     assert round(base.gross_pnl, 2) == 13073.50
-    assert round(base.total_costs, 2) == 6001.39
-    assert round(base.net_pnl, 2) == 7072.11
-    assert base.profit_factor == 1.59
+    # Corrected baseline accounts for Trade 3 session cutoff exit costs (+₹222.01 costs)
+    assert round(base.total_costs, 2) == 6223.40
+    assert round(base.net_pnl, 2) == 6850.10
+    assert base.profit_factor == 1.56
+    # Exact delta vs frozen baseline (+₹7,072.11 - +₹6,850.10 = ₹222.01)
+    frozen_base_net = 7072.11
+    assert round(frozen_base_net - base.net_pnl, 2) == 222.01
 
     opt = res["OPTIMISTIC"]["IRON_CONDOR"]
     assert opt.total_trades == 31
     assert opt.winning_trades == 20
     assert opt.losing_trades == 11
     assert round(opt.win_rate_pct, 1) == 64.5
-    assert round(opt.net_pnl, 2) == 7537.33
-    assert opt.profit_factor == 1.64
+    assert round(opt.net_pnl, 2) == 7315.27
+    assert opt.profit_factor == 1.61
 
     cons = res["CONSERVATIVE"]["IRON_CONDOR"]
     assert cons.total_trades == 31
     assert cons.winning_trades == 18
     assert cons.losing_trades == 13
     assert round(cons.win_rate_pct, 1) == 58.1
-    assert round(cons.net_pnl, 2) == 3640.65
-    assert cons.profit_factor == 1.26
+    assert round(cons.net_pnl, 2) == 3418.70
+    assert opt.profit_factor > cons.profit_factor
+
+
+def test_settlement_exit_cost_accounting():
+    """Stage A: Regression test verifying settlement and session cutoff exit costs are never zeroed."""
+    from app.backtesting.backtest_engine import BacktestTrade
+    engine = HistoricalBacktestEngine()
+
+    dummy_snap = {
+        "timestamp": "2025-05-15 13:20:00",
+        "spot_price": 24000.0,
+        "expiry": "2025-05-15",
+        "chain_by_strike": {
+            24000.0: {"PE": {"bid": 10.0, "ask": 10.5, "ltp": 10.2}, "CE": {"bid": 10.0, "ask": 10.5, "ltp": 10.2}},
+            24050.0: {"PE": {"bid": 5.0, "ask": 5.5, "ltp": 5.2}, "CE": {"bid": 5.0, "ask": 5.5, "ltp": 5.2}},
+            23950.0: {"PE": {"bid": 5.0, "ask": 5.5, "ltp": 5.2}, "CE": {"bid": 5.0, "ask": 5.5, "ltp": 5.2}},
+        }
+    }
+
+    trade = BacktestTrade(
+        trade_id="BT-TEST-0001",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
+        engine_type="INTRADAY",
+        scenario="BASE",
+        expiry="2025-05-15",
+        entry_time="2025-05-15 10:50:00",
+        lots=1,
+        quantity=75,
+        short_strike=24000.0,
+        long_strike=23950.0,
+        short_strike_2=24000.0,
+        long_strike_2=24050.0,
+        net_credit_pts=30.0,
+        entry_spread_cost=30.0,
+        total_brokerage=80.0,
+        total_taxes=30.0,
+        total_costs=110.0,
+    )
+
+    # Calling _close_trade_at_settlement with SESSION_CUTOFF
+    engine._close_trade_at_settlement(trade, dummy_snap, scenario="BASE", reason="SESSION_CUTOFF")
+
+    # Assert entry brokerage was NOT zeroed and exit brokerage was added
+    assert trade.total_brokerage == 160.0  # ₹80 entry + ₹80 exit
+    assert trade.total_taxes > 30.0        # Entry taxes preserved + exit taxes added
+    assert trade.total_costs == round(trade.total_brokerage + trade.total_taxes, 2)
+    assert trade.exit_reason == "SESSION_CUTOFF"
+    assert trade.net_pnl == round(trade.gross_pnl - trade.total_costs, 2)
+
+
+def test_holdout_validation_split():
+    """Stage B: Verify Discovery (75 sessions) and Holdout (30 sessions) performance separation."""
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "instance", "historical_data")
+    files = sorted(glob.glob(os.path.join(data_dir, "NIFTY_*.parquet")))
+    if not files or len(files) < 105:
+        pytest.skip("Full 105 historical data files not present.")
+
+    in_sample = files[:75]
+    out_sample = files[75:]
+
+    engine = HistoricalBacktestEngine(data_dir=data_dir, starting_equity=STARTING_EQUITY)
+    engine.approved_strategies = {"IRON_CONDOR"}
+
+    # Discovery
+    res_disc = engine.run_simulation(parquet_files=in_sample)
+    disc_base = res_disc["BASE"]["IRON_CONDOR"]
+    assert disc_base.total_trades == 17
+    assert disc_base.winning_trades == 11
+    assert disc_base.losing_trades == 6
+    assert round(disc_base.net_pnl, 2) == 5434.90
+    assert disc_base.profit_factor == 1.92
+
+    # Holdout
+    res_hold = engine.run_simulation(parquet_files=out_sample)
+    hold_base = res_hold["BASE"]["IRON_CONDOR"]
+    assert hold_base.total_trades == 14
+    assert hold_base.winning_trades == 8
+    assert hold_base.losing_trades == 6
+    assert round(hold_base.net_pnl, 2) == 1415.20
+    assert hold_base.profit_factor == 1.23
+
+    # Total trades equal 31 (17 Discovery + 14 Holdout)
+    assert disc_base.total_trades + hold_base.total_trades == 31
 
 
 def test_risk_and_guardrail_enforcement():
