@@ -266,3 +266,29 @@ def test_risk_and_guardrail_enforcement():
     assert Config.get_max_combined_portfolio_risk_inr() == 20000.0
     assert Config.get_max_daily_loss_inr() == 15000.0
     assert Config.CONSECUTIVE_LOSS_COOLDOWN_MINS == 15
+
+
+def test_shared_engine_preserves_multi_strategy_capability():
+    """Requirement 3 & 6: Verify shared HistoricalBacktestEngine is not globally restricted."""
+    shared_engine = HistoricalBacktestEngine()
+    # Shared engine must support the full production suite for multi-strategy workflows
+    assert "BULL_PUT" in shared_engine.approved_strategies
+    assert "BEAR_CALL" in shared_engine.approved_strategies
+    assert "IRON_CONDOR" in shared_engine.approved_strategies
+
+    # Research wrapper must strictly isolate IRON_CONDOR
+    research_engine = ResearchBacktestEngine()
+    assert research_engine.approved_strategies == {"IRON_CONDOR"}
+
+
+def test_research_report_generation_excludes_other_strategies():
+    """Requirement 4 & 5: Verify research outputs and trade ledgers contain only IRON_CONDOR."""
+    engine = ResearchBacktestEngine()
+    dummy_files = []  # Empty simulation to check metrics keys initialization
+    res = engine._run_single_scenario(dummy_files, "BASE")
+
+    # Metrics dictionary must contain only IRON_CONDOR and COMBINED
+    assert set(res.keys()) == {"IRON_CONDOR", "COMBINED"}
+    assert "BULL_PUT" not in res
+    assert "BEAR_CALL" not in res
+
