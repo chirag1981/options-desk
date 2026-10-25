@@ -199,3 +199,84 @@ def test_leg_by_leg_exit_brokerage():
     costs_4 = TransactionCostEngine.calculate_order_costs_breakdown(legs_4, lots=1, trade_date=date(2025, 1, 15))
     assert costs_4["brokerage"] == 80.0  # 4 * 20
 
+
+def test_snapshot_reconstruction_preserves_scenario_pricing_tiers():
+    """Verify that HistoricalDataValidator.reconstruct_snapshots preserves scenario quote tiers."""
+    from app.backtesting.data_validator import HistoricalDataValidator
+
+    records = [
+        {
+            "timestamp": "2025-01-16 09:20:00",
+            "spot_price": 24000.0,
+            "expiry": "2025-01-16",
+            "strike": 24000.0,
+            "option_type": "CE",
+            "ltp": 50.0,
+            "bid": 49.80,
+            "ask": 50.20,
+            "opt_bid": 49.95,
+            "opt_ask": 50.05,
+            "base_bid": 49.80,
+            "base_ask": 50.20,
+            "cons_bid": 49.60,
+            "cons_ask": 50.40,
+            "fill_tier": "ESTIMATED_SPREAD",
+            "oi": 100000,
+            "change_oi": 5000,
+        },
+        {
+            "timestamp": "2025-01-16 09:20:00",
+            "spot_price": 24000.0,
+            "expiry": "2025-01-16",
+            "strike": 24000.0,
+            "option_type": "PE",
+            "ltp": 50.0,
+            "bid": 49.80,
+            "ask": 50.20,
+            "opt_bid": 49.95,
+            "opt_ask": 50.05,
+            "base_bid": 49.80,
+            "base_ask": 50.20,
+            "cons_bid": 49.60,
+            "cons_ask": 50.40,
+            "fill_tier": "ESTIMATED_SPREAD",
+            "oi": 100000,
+            "change_oi": 5000,
+        },
+    ]
+
+    # Add 4 more strikes to satisfy structural reconstructability (min 5 strikes)
+    for stk in (23900.0, 23950.0, 24050.0, 24100.0):
+        for opt in ("CE", "PE"):
+            records.append({
+                "timestamp": "2025-01-16 09:20:00",
+                "spot_price": 24000.0,
+                "expiry": "2025-01-16",
+                "strike": stk,
+                "option_type": opt,
+                "ltp": 30.0,
+                "bid": 29.80,
+                "ask": 30.20,
+                "opt_bid": 29.95,
+                "opt_ask": 30.05,
+                "base_bid": 29.80,
+                "base_ask": 30.20,
+                "cons_bid": 29.60,
+                "cons_ask": 30.40,
+                "fill_tier": "ESTIMATED_SPREAD",
+                "oi": 50000,
+                "change_oi": 1000,
+            })
+
+    snapshots, _, _, _, _, _, _ = HistoricalDataValidator.reconstruct_snapshots(records)
+    assert len(snapshots) == 1
+    snap = snapshots[0]
+    ce_quote = snap["chain_by_strike"][24000.0]["CE"]
+    assert ce_quote["opt_bid"] == 49.95
+    assert ce_quote["opt_ask"] == 50.05
+    assert ce_quote["cons_bid"] == 49.60
+    assert ce_quote["cons_ask"] == 50.40
+    assert ce_quote["base_bid"] == 49.80
+    assert ce_quote["base_ask"] == 50.20
+
+

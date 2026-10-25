@@ -36,6 +36,13 @@ HISTORICAL_SCHEMA_COLUMNS = {
         "iv",              # Implied Volatility (float >= 0)
         "symbol",          # Contract symbol string
         "spot_change_pct", # Spot change % relative to prev close (float)
+        "opt_bid",         # Optimistic scenario bid
+        "opt_ask",         # Optimistic scenario ask
+        "base_bid",        # Base scenario bid
+        "base_ask",        # Base scenario ask
+        "cons_bid",        # Conservative scenario bid
+        "cons_ask",        # Conservative scenario ask
+        "fill_tier",       # Fill tier (e.g. ESTIMATED_SPREAD)
     ]
 }
 
@@ -293,6 +300,14 @@ class HistoricalDataValidator:
                     except (ValueError, TypeError):
                         pass
 
+                opt_bid = float(row[col_mapping["opt_bid"]]) if "opt_bid" in col_mapping and not pd.isna(row[col_mapping["opt_bid"]]) else None
+                opt_ask = float(row[col_mapping["opt_ask"]]) if "opt_ask" in col_mapping and not pd.isna(row[col_mapping["opt_ask"]]) else None
+                base_bid = float(row[col_mapping["base_bid"]]) if "base_bid" in col_mapping and not pd.isna(row[col_mapping["base_bid"]]) else None
+                base_ask = float(row[col_mapping["base_ask"]]) if "base_ask" in col_mapping and not pd.isna(row[col_mapping["base_ask"]]) else None
+                cons_bid = float(row[col_mapping["cons_bid"]]) if "cons_bid" in col_mapping and not pd.isna(row[col_mapping["cons_bid"]]) else None
+                cons_ask = float(row[col_mapping["cons_ask"]]) if "cons_ask" in col_mapping and not pd.isna(row[col_mapping["cons_ask"]]) else None
+                fill_tier = str(row[col_mapping["fill_tier"]]) if "fill_tier" in col_mapping and not pd.isna(row[col_mapping["fill_tier"]]) else "ESTIMATED_SPREAD"
+
                 rec = {
                     "timestamp": ts_str,
                     "spot_price": spot,
@@ -303,6 +318,13 @@ class HistoricalDataValidator:
                     "ltp": ltp,
                     "bid": bid,
                     "ask": ask,
+                    "opt_bid": opt_bid,
+                    "opt_ask": opt_ask,
+                    "base_bid": base_bid,
+                    "base_ask": base_ask,
+                    "cons_bid": cons_bid,
+                    "cons_ask": cons_ask,
+                    "fill_tier": fill_tier,
                     "oi": oi,
                     "change_oi": chg_oi,
                     "volume": vol,
@@ -439,6 +461,13 @@ class HistoricalDataValidator:
                     "ltp": r["ltp"],
                     "bid": r["bid"],
                     "ask": r["ask"],
+                    "opt_bid": r.get("opt_bid"),
+                    "opt_ask": r.get("opt_ask"),
+                    "base_bid": r.get("base_bid"),
+                    "base_ask": r.get("base_ask"),
+                    "cons_bid": r.get("cons_bid"),
+                    "cons_ask": r.get("cons_ask"),
+                    "fill_tier": r.get("fill_tier", "ESTIMATED_SPREAD"),
                     "oi": r["oi"],
                     "change_oi": r["change_oi"],
                     "volume": r.get("volume"),
