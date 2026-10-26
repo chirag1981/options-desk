@@ -193,7 +193,7 @@ class PaperTradingManager:
         if not candidate.is_eligible:
             return False, f"Candidate not eligible: {'; '.join(candidate.rejection_reasons)}", None
 
-        SUPPORTED_STRATEGIES = {"BULL_PUT", "BEAR_CALL", "IRON_CONDOR"}
+        SUPPORTED_STRATEGIES = {"IRON_CONDOR"}
         if candidate.strategy_id not in SUPPORTED_STRATEGIES:
             return False, f"Strategy '{candidate.strategy_id}' is not supported for execution. Supported strategies: {', '.join(sorted(SUPPORTED_STRATEGIES))}.", None
 
@@ -225,13 +225,14 @@ class PaperTradingManager:
                 if existing:
                     return False, f"An open position for {candidate.strategy_id} ({candidate.engine_type}) already exists (ID: #{existing.id}). Duplicate entry blocked.", None
 
-                # 1. Calculate entry costs
+                # 1. Calculate itemized entry costs
                 legs_data = [
                     {"action": l.action, "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
                     for l in candidate.legs
                 ]
                 now_dt = datetime.now(IST)
-                entry_costs = TransactionCostEngine.calculate_order_costs(legs_data, lots=candidate.lots, trade_date=now_dt.date())
+                cost_breakdown = TransactionCostEngine.calculate_order_costs_breakdown(legs_data, lots=candidate.lots, trade_date=now_dt.date())
+                entry_costs = round(cost_breakdown["total"], 2)
 
                 # 2. Stop loss & target thresholds
                 # Target = buyback at 30% of credit (capture 70% profit)
@@ -239,7 +240,7 @@ class PaperTradingManager:
                 # Stop loss = buyback at 1.5x credit
                 stop_loss_debit = round(candidate.net_credit_pts * 1.50, 2)
 
-                # 3. Create TradePosition record
+                # 3. Create TradePosition record with itemized entry costs
                 position = TradePosition(
                     engine_type=candidate.engine_type,
                     strategy_id=candidate.strategy_id,
@@ -259,13 +260,24 @@ class PaperTradingManager:
                     current_pnl_inr=0.0,
                     status="OPEN",
                     transaction_costs_inr=entry_costs,
+                    entry_brokerage_inr=cost_breakdown["brokerage"],
+                    entry_stt_inr=cost_breakdown["stt"],
+                    entry_exchange_fees_inr=cost_breakdown["exchange_fee"],
+                    entry_gst_inr=cost_breakdown["gst"],
+                    entry_stamp_duty_inr=cost_breakdown["stamp_duty"],
+                    entry_sebi_ipft_inr=cost_breakdown["sebi_fee"] + cost_breakdown["ipft"],
                 )
                 db.session.add(position)
                 db.session.flush()
 
-                # 4. Create individual PositionLeg records
+                # 4. Create individual PositionLeg records with full quote evidence
+                data_src = getattr(candidate, "data_status", "FYERS_LIVE")
                 for l in candidate.legs:
                     fill_price = l.bid if l.action == "SELL" else l.ask
+                    bid_val = float(l.bid) if l.bid is not None else None
+                    ask_val = float(l.ask) if l.ask is not None else None
+                    spread_pct = round(((ask_val - bid_val) / ask_val) * 100.0, 2) if (ask_val and bid_val and ask_val > 0) else None
+
                     pos_leg = PositionLeg(
                         position_id=position.id,
                         symbol=l.symbol,
@@ -275,6 +287,11 @@ class PaperTradingManager:
                         quantity=l.quantity,
                         entry_price=fill_price,
                         current_price=fill_price,
+                        entry_bid=bid_val,
+                        entry_ask=ask_val,
+                        entry_spread_pct=spread_pct,
+                        entry_quote_timestamp=now_dt,
+                        entry_data_source=data_src,
                     )
                     db.session.add(pos_leg)
 
@@ -328,6 +345,27 @@ class PaperTradingManager:
                     leg.current_price = current_close_price
 
                 if not all_quotes_valid:
+                    try:
+                        from app.models import PositionMTMSnapshot
+                        import hashlib
+                        minute_tag = now_dt.strftime("%Y%m%d%H%M")
+                        mtm_idem = hashlib.sha256(f"{pos.id}_{minute_tag}_unavail".encode()).hexdigest()[:32]
+                        if not PositionMTMSnapshot.query.filter_by(idempotency_key=mtm_idem).first():
+                            snap_rec = PositionMTMSnapshot(
+                                position_id=pos.id,
+                                timestamp=now_dt,
+                                spot_price=spot_price,
+                                net_debit_pts=None,
+                                unrealized_gross_pnl_inr=None,
+                                known_transaction_costs_inr=pos.transaction_costs_inr,
+                                unrealized_net_pnl_inr=None,
+                                data_quality_status="VALUATION_UNAVAILABLE",
+                                leg_prices_json=None,
+                                idempotency_key=mtm_idem,
+                            )
+                            db.session.add(snap_rec)
+                    except Exception as ex_u:
+                        log.warning(f"Failed to record unavailable MTM snapshot: {ex_u}")
                     continue
 
                 pos.current_net_debit_pts = round(buyback_cost, 2)
@@ -351,6 +389,39 @@ class PaperTradingManager:
                 elif pos.engine_type == "POSITIONAL" and is_expiry_day and now_time >= Config.POSITIONAL_PRE_EXPIRY_EXIT_TIME:
                     cls.close_position(pos.id, exit_spot=spot_price, reason="PRE_EXPIRY_EXIT")
 
+                # 5. Persist append-only MTM snapshot
+                try:
+                    from app.models import PositionMTMSnapshot
+                    import json, hashlib
+                    leg_snaps = {
+                        l.symbol: {
+                            "strike": l.strike,
+                            "option_type": l.option_type,
+                            "action": l.action,
+                            "price": l.current_price,
+                        }
+                        for l in pos.legs
+                    }
+                    minute_tag = now_dt.strftime("%Y%m%d%H%M")
+                    mtm_idem = hashlib.sha256(f"{pos.id}_{minute_tag}".encode()).hexdigest()[:32]
+                    existing_snap = PositionMTMSnapshot.query.filter_by(idempotency_key=mtm_idem).first()
+                    if not existing_snap:
+                        snap_rec = PositionMTMSnapshot(
+                            position_id=pos.id,
+                            timestamp=now_dt,
+                            spot_price=spot_price,
+                            net_debit_pts=pos.current_net_debit_pts,
+                            unrealized_gross_pnl_inr=round(gross_pnl, 2),
+                            known_transaction_costs_inr=pos.transaction_costs_inr,
+                            unrealized_net_pnl_inr=pos.current_pnl_inr,
+                            data_quality_status="OK",
+                            leg_prices_json=json.dumps(leg_snaps),
+                            idempotency_key=mtm_idem,
+                        )
+                        db.session.add(snap_rec)
+                except Exception as ex_mtm:
+                    log.warning(f"Failed to record MTM snapshot for pos #{pos.id}: {ex_mtm}")
+
                 updated_positions.append(pos.to_dict())
 
             db.session.commit()
@@ -362,9 +433,9 @@ class PaperTradingManager:
         return updated_positions
 
     @classmethod
-    def close_position(cls, position_id: int, exit_spot: Optional[float] = None, reason: str = "MANUAL_CLOSE") -> Tuple[bool, str]:
+    def close_position(cls, position_id: int, exit_spot: Optional[float] = None, reason: str = "MANUAL_CLOSE", chain_by_strike: Optional[Dict[float, Dict[str, Any]]] = None) -> Tuple[bool, str]:
         """
-        Closes an open position and records final realized P&L and fees.
+        Closes an open position and records final realized P&L, itemized fees, and leg exit quotes.
         """
         try:
             pos = db.session.get(TradePosition, position_id)
@@ -376,23 +447,45 @@ class PaperTradingManager:
                 {"action": "BUY" if l.action == "SELL" else "SELL", "price": l.current_price, "quantity": l.quantity}
                 for l in pos.legs
             ]
-            exit_costs = TransactionCostEngine.calculate_order_costs(exit_legs_data, lots=pos.lots, trade_date=now_dt.date())
+            exit_costs_breakdown = TransactionCostEngine.calculate_order_costs_breakdown(exit_legs_data, lots=pos.lots, trade_date=now_dt.date())
+            exit_costs = round(exit_costs_breakdown["total"], 2)
 
-            total_costs = pos.transaction_costs_inr + exit_costs
-            gross_pnl = (pos.entry_net_credit_pts - pos.current_net_debit_pts) * pos.quantity
-            net_pnl = gross_pnl - total_costs
+            total_costs = round(pos.transaction_costs_inr + exit_costs, 2)
+            gross_pnl = round((pos.entry_net_credit_pts - pos.current_net_debit_pts) * pos.quantity, 2)
+            net_pnl = round(gross_pnl - total_costs, 2)
 
             pos.status = reason
             pos.exit_time = now_dt
             pos.exit_spot = exit_spot or pos.entry_spot
             pos.exit_net_debit_pts = pos.current_net_debit_pts
             pos.exit_reason = reason
-            pos.gross_pnl_inr = round(gross_pnl, 2)
-            pos.transaction_costs_inr = round(total_costs, 2)
-            pos.net_pnl_inr = round(net_pnl, 2)
+            pos.gross_pnl_inr = gross_pnl
+            pos.transaction_costs_inr = total_costs
+            pos.net_pnl_inr = net_pnl
+
+            # Record itemized exit costs
+            pos.exit_brokerage_inr = exit_costs_breakdown["brokerage"]
+            pos.exit_stt_inr = exit_costs_breakdown["stt"]
+            pos.exit_exchange_fees_inr = exit_costs_breakdown["exchange_fee"]
+            pos.exit_gst_inr = exit_costs_breakdown["gst"]
+            pos.exit_stamp_duty_inr = exit_costs_breakdown["stamp_duty"]
+            pos.exit_sebi_ipft_inr = exit_costs_breakdown["sebi_fee"] + exit_costs_breakdown["ipft"]
 
             for l in pos.legs:
                 l.exit_price = l.current_price
+                if chain_by_strike:
+                    q = chain_by_strike.get(l.strike, {}).get(l.option_type, {})
+                    if q:
+                        b = float(q.get("bid", 0.0) or 0.0)
+                        a = float(q.get("ask", 0.0) or 0.0)
+                        l.exit_bid = b if b > 0 else None
+                        l.exit_ask = a if a > 0 else None
+                        l.exit_spread_pct = round(((a - b) / a) * 100.0, 2) if (a > 0 and b > 0) else None
+                        l.exit_quote_timestamp = now_dt
+                        l.exit_data_source = "FYERS_LIVE"
+                if not l.exit_quote_timestamp:
+                    l.exit_quote_timestamp = now_dt
+                    l.exit_data_source = "FYERS_LIVE"
 
             db.session.commit()
 

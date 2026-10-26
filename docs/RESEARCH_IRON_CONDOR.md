@@ -6,7 +6,7 @@ This document records the authoritative baseline configuration and performance b
 
 Under the approved research scope:
 1. **Strategy Restriction**: The research workflow is restricted strictly to `IRON_CONDOR` on confirmed range-bound market regimes (`BALANCED_RANGE`).
-2. **Preservation of Other Strategies**: Directional credit spreads (`BULL_PUT` and `BEAR_CALL`) are excluded from candidate evaluation, experiment execution, and research summaries. Their production implementations, historical ledger records, and production support remain completely intact.
+2. **Removal of Directional Strategies**: Directional credit spreads (`BULL_PUT` and `BEAR_CALL`) have been completely removed from the project; the desk is 100% focused on Iron Condor.
 3. **Fail-Closed Execution**: `IRON_CONDOR` is strictly rejected whenever the regime is `CHOPPY_OR_INSUFFICIENT`, unknown, or based on invalid/missing OI/quote data.
 
 ---

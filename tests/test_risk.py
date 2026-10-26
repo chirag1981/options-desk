@@ -65,8 +65,8 @@ def test_zero_naked_options_rejection(app_ctx):
 def test_per_trade_risk_budget_cap(app_ctx):
     """Verifies that trades exceeding 0.5% account equity are blocked."""
     excessive_candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",

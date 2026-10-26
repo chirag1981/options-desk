@@ -221,8 +221,8 @@ class ResearchBacktestEngine(HistoricalBacktestEngine):
 
                     exit_legs = []
                     if exit_reason in ("TARGET", "STOP_LOSS", "CUTOFF"):
-                        strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
-                        strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+                        strikes_needed = [(trade.short_strike, "PE", "BUY")]
+                        strikes_needed.append((trade.long_strike, "PE", "SELL"))
 
                         if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
                             strikes_needed.append((trade.short_strike_2, "CE", "BUY"))

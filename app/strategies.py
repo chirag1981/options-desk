@@ -1,11 +1,9 @@
 """
-app/strategies.py — Four Defined-Risk Options-Selling Strategies & Dual Trading Engines
+app/strategies.py — Defined-Risk Iron Condor Options-Selling Strategy & Dual Trading Engines
 Implements:
-1. Bull Put Credit Spread (BULL_PUT)
-2. Bear Call Credit Spread (BEAR_CALL)
-3. Iron Condor (IRON_CONDOR)
-4. Iron Butterfly (IRON_BUTTERFLY)
-5. IntradayEngine & PositionalEngine classes with independent state and lifecycle.
+1. Iron Condor (IRON_CONDOR)
+2. Iron Butterfly (IRON_BUTTERFLY - entry gated)
+3. IntradayEngine & PositionalEngine classes with independent state and lifecycle.
 """
 
 import math
@@ -115,16 +113,13 @@ class SpreadCandidate:
         """
         Estimated NSE SPAN + Exposure Margin required to deploy this defined-risk spread.
         Accounts for SEBI hedged benefit:
-        - 2-leg spread (Bull Put / Bear Call): ~₹38,000 / lot
         - 4-leg Iron Condor: ~₹52,000 / lot (only higher wing margin + exposure)
         """
         lots = max(1, self.lots)
         if self.strategy_id == "IRON_CONDOR":
             return round(52000.0 * lots, 2)
-        elif self.strategy_id in ("BULL_PUT", "BEAR_CALL"):
-            return round(38000.0 * lots, 2)
         else:
-            return round(42000.0 * lots, 2)
+            return round(52000.0 * lots, 2)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -148,262 +143,6 @@ class StrategyBuilder:
     """
 
     @classmethod
-    def build_bull_put_spread(
-        cls,
-        analysis: MarketAnalysisResult,
-        chain: Dict[float, Dict[str, Any]],
-        engine_type: str = "INTRADAY",
-        lots: int = 1,
-    ) -> SpreadCandidate:
-        from app.contracts import ContractRegistry
-        rejections = []
-        spot = analysis.spot_price
-        s1 = analysis.s1_support
-        step = Config.STRIKE_STEP
-        series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
-        lot_size = series_lot_size * lots
-
-        # Select Short Put at or below S1; Long Put 1 step lower
-        short_strike = math.floor(s1 / step) * step
-        long_strike = short_strike - step
-
-        # Validate contract specifications
-        for stk in (short_strike, long_strike):
-            is_valid_c, c_err, _ = ContractRegistry.validate_contract(
-                "NIFTY", stk, analysis.expiry, provided_lot_size=series_lot_size
-            )
-            if not is_valid_c:
-                rejections.append(c_err)
-
-        if analysis.market_bias not in ("BULLISH", "STRONG_BULLISH"):
-            rejections.append(f"Market bias ({analysis.market_bias}) is not bullish.")
-        if spot < short_strike:
-            rejections.append(f"Spot price ({spot}) breached below proposed short strike ({short_strike}).")
-        if (spot - short_strike) < Config.MIN_SPOT_CUSHION_PTS:
-            rejections.append(f"Spot cushion ({spot - short_strike:.1f} pts) is below minimum {Config.MIN_SPOT_CUSHION_PTS} pts.")
-
-        short_q = chain.get(short_strike, {}).get("PE", {})
-        long_q = chain.get(long_strike, {}).get("PE", {})
-
-        if not short_q or not long_q:
-            rejections.append(f"Missing Put quotes for strikes {short_strike} or {long_strike}.")
-            return cls._empty_candidate("BULL_PUT", "Bull Put Credit Spread", engine_type, analysis, rejections)
-
-        raw_bid = short_q.get("bid")
-        raw_ask = long_q.get("ask")
-
-        if raw_bid is None or float(raw_bid) <= 0:
-            rejections.append(f"Missing or non-positive executable Bid quote on short strike {short_strike} PE.")
-            sell_price = 0.0
-        else:
-            sell_price = float(raw_bid)
-
-        if raw_ask is None or float(raw_ask) <= 0:
-            rejections.append(f"Missing or non-positive executable Ask quote on long strike {long_strike} PE.")
-            buy_price = 0.0
-        else:
-            buy_price = float(raw_ask)
-
-        if sell_price > 0 and buy_price > 0 and sell_price <= buy_price:
-            rejections.append(f"Crossed/zero credit spread: Short Bid (₹{sell_price:.2f}) <= Long Ask (₹{buy_price:.2f}).")
-
-        net_credit = round(sell_price - buy_price, 2)
-        strike_width = short_strike - long_strike
-        max_loss_pts = round(strike_width - net_credit, 2)
-
-        if net_credit < Config.MIN_NET_CREDIT_PTS:
-            rejections.append(f"Net credit ({net_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
-
-        credit_ratio = (net_credit / strike_width * 100.0) if strike_width > 0 else 0.0
-        if credit_ratio < Config.MIN_CREDIT_SPREAD_PCT:
-            rejections.append(f"Credit ratio ({credit_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
-
-        max_profit_inr = round(net_credit * lot_size, 2)
-        max_loss_inr = round(max_loss_pts * lot_size, 2)
-        rr_ratio = round(max_profit_inr / max_loss_inr, 2) if max_loss_inr > 0 else 0.0
-        breakeven = round(short_strike - net_credit, 1)
-
-        legs = [
-            OptionLegSpec(
-                symbol=short_q.get("symbol", f"NIFTY{int(short_strike)}PE"),
-                strike=short_strike,
-                option_type="PE",
-                action="SELL",
-                bid=sell_price,
-                ask=float(short_q.get("ask", 0.0) or 0.0),
-                ltp=float(short_q.get("ltp", sell_price)),
-                quantity=lot_size,
-            ),
-            OptionLegSpec(
-                symbol=long_q.get("symbol", f"NIFTY{int(long_strike)}PE"),
-                strike=long_strike,
-                option_type="PE",
-                action="BUY",
-                bid=float(long_q.get("bid", 0.0) or 0.0),
-                ask=buy_price,
-                ltp=float(long_q.get("ltp", buy_price)),
-                quantity=lot_size,
-            ),
-        ]
-
-        is_eligible = (len(rejections) == 0)
-        rationale = (
-            f"Bull Put Spread: Sold {int(short_strike)} PE at ₹{sell_price:.2f}, bought {int(long_strike)} PE at ₹{buy_price:.2f}. "
-            f"Net Credit: {net_credit:.2f} pts (₹{max_profit_inr:,.2f}), Max Loss: ₹{max_loss_inr:,.2f}."
-        ) if is_eligible else f"Rejections: {'; '.join(rejections)}"
-
-        return SpreadCandidate(
-            strategy_id="BULL_PUT",
-            strategy_name="Bull Put Credit Spread",
-            engine_type=engine_type,
-            symbol=analysis.symbol,
-            expiry=analysis.expiry,
-            lots=lots,
-            quantity=lot_size,
-            legs=legs,
-            net_credit_pts=net_credit,
-            strike_width=strike_width,
-            max_profit_inr=max_profit_inr,
-            max_loss_pts=max_loss_pts,
-            max_loss_inr=max_loss_inr,
-            risk_reward_ratio=rr_ratio,
-            breakevens=[breakeven],
-            is_eligible=is_eligible,
-            rejection_reasons=rejections,
-            confidence_score=analysis.confidence_score,
-            rationale=rationale,
-            spot_price=spot,
-        )
-
-    @classmethod
-    def build_bear_call_spread(
-        cls,
-        analysis: MarketAnalysisResult,
-        chain: Dict[float, Dict[str, Any]],
-        engine_type: str = "INTRADAY",
-        lots: int = 1,
-    ) -> SpreadCandidate:
-        from app.contracts import ContractRegistry
-        rejections = []
-        spot = analysis.spot_price
-        r1 = analysis.r1_resistance
-        step = Config.STRIKE_STEP
-        series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
-        lot_size = series_lot_size * lots
-
-        # Select Short Call at or above R1; Long Call 1 step higher
-        short_strike = math.ceil(r1 / step) * step
-        long_strike = short_strike + step
-
-        # Validate contract specifications
-        for stk in (short_strike, long_strike):
-            is_valid_c, c_err, _ = ContractRegistry.validate_contract(
-                "NIFTY", stk, analysis.expiry, provided_lot_size=series_lot_size
-            )
-            if not is_valid_c:
-                rejections.append(c_err)
-
-        if analysis.market_bias not in ("BEARISH", "STRONG_BEARISH"):
-            rejections.append(f"Market bias ({analysis.market_bias}) is not bearish.")
-        if spot > short_strike:
-            rejections.append(f"Spot price ({spot}) breached above proposed short strike ({short_strike}).")
-        if (short_strike - spot) < Config.MIN_SPOT_CUSHION_PTS:
-            rejections.append(f"Spot cushion ({short_strike - spot:.1f} pts) is below minimum {Config.MIN_SPOT_CUSHION_PTS} pts.")
-
-        short_q = chain.get(short_strike, {}).get("CE", {})
-        long_q = chain.get(long_strike, {}).get("CE", {})
-
-        if not short_q or not long_q:
-            rejections.append(f"Missing Call quotes for strikes {short_strike} or {long_strike}.")
-            return cls._empty_candidate("BEAR_CALL", "Bear Call Credit Spread", engine_type, analysis, rejections)
-
-        raw_bid = short_q.get("bid")
-        raw_ask = long_q.get("ask")
-
-        if raw_bid is None or float(raw_bid) <= 0:
-            rejections.append(f"Missing or non-positive executable Bid quote on short strike {short_strike} CE.")
-            sell_price = 0.0
-        else:
-            sell_price = float(raw_bid)
-
-        if raw_ask is None or float(raw_ask) <= 0:
-            rejections.append(f"Missing or non-positive executable Ask quote on long strike {long_strike} CE.")
-            buy_price = 0.0
-        else:
-            buy_price = float(raw_ask)
-
-        if sell_price > 0 and buy_price > 0 and sell_price <= buy_price:
-            rejections.append(f"Crossed/zero credit spread: Short Bid (₹{sell_price:.2f}) <= Long Ask (₹{buy_price:.2f}).")
-
-        net_credit = round(sell_price - buy_price, 2)
-        strike_width = long_strike - short_strike
-        max_loss_pts = round(strike_width - net_credit, 2)
-
-        if net_credit < Config.MIN_NET_CREDIT_PTS:
-            rejections.append(f"Net credit ({net_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
-
-        credit_ratio = (net_credit / strike_width * 100.0) if strike_width > 0 else 0.0
-        if credit_ratio < Config.MIN_CREDIT_SPREAD_PCT:
-            rejections.append(f"Credit ratio ({credit_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
-
-        max_profit_inr = round(net_credit * lot_size, 2)
-        max_loss_inr = round(max_loss_pts * lot_size, 2)
-        rr_ratio = round(max_profit_inr / max_loss_inr, 2) if max_loss_inr > 0 else 0.0
-        breakeven = round(short_strike + net_credit, 1)
-
-        legs = [
-            OptionLegSpec(
-                symbol=short_q.get("symbol", f"NIFTY{int(short_strike)}CE"),
-                strike=short_strike,
-                option_type="CE",
-                action="SELL",
-                bid=sell_price,
-                ask=float(short_q.get("ask", 0.0) or 0.0),
-                ltp=float(short_q.get("ltp", sell_price)),
-                quantity=lot_size,
-            ),
-            OptionLegSpec(
-                symbol=long_q.get("symbol", f"NIFTY{int(long_strike)}CE"),
-                strike=long_strike,
-                option_type="CE",
-                action="BUY",
-                bid=float(long_q.get("bid", 0.0) or 0.0),
-                ask=buy_price,
-                ltp=float(long_q.get("ltp", buy_price)),
-                quantity=lot_size,
-            ),
-        ]
-
-        is_eligible = (len(rejections) == 0)
-        rationale = (
-            f"Bear Call Spread: Sold {int(short_strike)} CE at ₹{sell_price:.2f}, bought {int(long_strike)} CE at ₹{buy_price:.2f}. "
-            f"Net Credit: {net_credit:.2f} pts (₹{max_profit_inr:,.2f}), Max Loss: ₹{max_loss_inr:,.2f}."
-        ) if is_eligible else f"Rejections: {'; '.join(rejections)}"
-
-        return SpreadCandidate(
-            strategy_id="BEAR_CALL",
-            strategy_name="Bear Call Credit Spread",
-            engine_type=engine_type,
-            symbol=analysis.symbol,
-            expiry=analysis.expiry,
-            lots=lots,
-            quantity=lot_size,
-            legs=legs,
-            net_credit_pts=net_credit,
-            strike_width=strike_width,
-            max_profit_inr=max_profit_inr,
-            max_loss_pts=max_loss_pts,
-            max_loss_inr=max_loss_inr,
-            risk_reward_ratio=rr_ratio,
-            breakevens=[breakeven],
-            is_eligible=is_eligible,
-            rejection_reasons=rejections,
-            confidence_score=analysis.confidence_score,
-            rationale=rationale,
-            spot_price=spot,
-        )
-
-    @classmethod
     def build_iron_condor(
         cls,
         analysis: MarketAnalysisResult,
@@ -411,25 +150,99 @@ class StrategyBuilder:
         engine_type: str = "INTRADAY",
         lots: int = 1,
     ) -> SpreadCandidate:
+        """
+        Builds self-contained 4-leg Iron Condor (Put Spread wing + Call Spread wing).
+        Strictly requires BALANCED_RANGE or neutral regime with positive risk/reward.
+        """
+        from app.contracts import ContractRegistry
         rejections = []
         if analysis.market_regime == "CHOPPY_OR_INSUFFICIENT":
             rejections.append("Market regime is choppy or data insufficient; cannot confirm balanced range.")
         elif analysis.market_regime not in ("BALANCED_RANGE", "SIDEWAYS") and analysis.market_bias != "NEUTRAL":
             rejections.append(f"Market regime ({analysis.market_regime}) is not balanced range-bound.")
 
-        # Build Put side and Call side
-        put_cand = cls.build_bull_put_spread(analysis, chain, engine_type=engine_type, lots=lots)
-        call_cand = cls.build_bear_call_spread(analysis, chain, engine_type=engine_type, lots=lots)
+        spot = analysis.spot_price
+        s1 = analysis.s1_support
+        r1 = analysis.r1_resistance
+        step = Config.STRIKE_STEP
+        series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
+        lot_size = series_lot_size * lots
 
-        # For condor, individual bias rejections are relaxed because market is range-bound
-        put_rejs = [r for r in put_cand.rejection_reasons if "bias" not in r.lower()]
-        call_rejs = [r for r in call_cand.rejection_reasons if "bias" not in r.lower()]
+        # 1. Put Wing Strikes: Short Put at/below S1, Long Put 1 step lower
+        short_put_strike = math.floor(s1 / step) * step
+        long_put_strike = short_put_strike - step
 
-        rejections.extend(put_rejs)
-        rejections.extend(call_rejs)
+        # 2. Call Wing Strikes: Short Call at/above R1, Long Call 1 step higher
+        short_call_strike = math.ceil(r1 / step) * step
+        long_call_strike = short_call_strike + step
 
-        combined_credit = round(put_cand.net_credit_pts + call_cand.net_credit_pts, 2)
-        wing_width = max(put_cand.strike_width, call_cand.strike_width)
+        # Validate contract specifications
+        for stk in (short_put_strike, long_put_strike, short_call_strike, long_call_strike):
+            is_valid_c, c_err, _ = ContractRegistry.validate_contract(
+                "NIFTY", stk, analysis.expiry, provided_lot_size=series_lot_size
+            )
+            if not is_valid_c:
+                rejections.append(c_err)
+
+        if spot < short_put_strike:
+            rejections.append(f"Spot price ({spot}) breached below proposed short put strike ({short_put_strike}).")
+        if (spot - short_put_strike) < Config.MIN_SPOT_CUSHION_PTS:
+            rejections.append(f"Put spot cushion ({spot - short_put_strike:.1f} pts) below minimum {Config.MIN_SPOT_CUSHION_PTS} pts.")
+
+        if spot > short_call_strike:
+            rejections.append(f"Spot price ({spot}) breached above proposed short call strike ({short_call_strike}).")
+        if (short_call_strike - spot) < Config.MIN_SPOT_CUSHION_PTS:
+            rejections.append(f"Call spot cushion ({short_call_strike - spot:.1f} pts) below minimum {Config.MIN_SPOT_CUSHION_PTS} pts.")
+
+        # Quotes: Put Wing
+        sp_q = chain.get(short_put_strike, {}).get("PE", {})
+        lp_q = chain.get(long_put_strike, {}).get("PE", {})
+        if not sp_q or not lp_q:
+            rejections.append(f"Missing Put quotes for strikes {short_put_strike} or {long_put_strike}.")
+            return cls._empty_candidate("IRON_CONDOR", "Iron Condor", engine_type, analysis, rejections)
+
+        sp_bid = float(sp_q.get("bid", 0.0) or 0.0)
+        lp_ask = float(lp_q.get("ask", 0.0) or 0.0)
+        if sp_bid <= 0:
+            rejections.append(f"Missing or non-positive Bid on short put {short_put_strike} PE.")
+        if lp_ask <= 0:
+            rejections.append(f"Missing or non-positive Ask on long put {long_put_strike} PE.")
+        if sp_bid > 0 and lp_ask > 0 and sp_bid <= lp_ask:
+            rejections.append(f"Crossed/zero credit on put wing: Short Bid (₹{sp_bid:.2f}) <= Long Ask (₹{lp_ask:.2f}).")
+
+        # Quotes: Call Wing
+        sc_q = chain.get(short_call_strike, {}).get("CE", {})
+        lc_q = chain.get(long_call_strike, {}).get("CE", {})
+        if not sc_q or not lc_q:
+            rejections.append(f"Missing Call quotes for strikes {short_call_strike} or {long_call_strike}.")
+            return cls._empty_candidate("IRON_CONDOR", "Iron Condor", engine_type, analysis, rejections)
+
+        sc_bid = float(sc_q.get("bid", 0.0) or 0.0)
+        lc_ask = float(lc_q.get("ask", 0.0) or 0.0)
+        if sc_bid <= 0:
+            rejections.append(f"Missing or non-positive Bid on short call {short_call_strike} CE.")
+        if lc_ask <= 0:
+            rejections.append(f"Missing or non-positive Ask on long call {long_call_strike} CE.")
+        if sc_bid > 0 and lc_ask > 0 and sc_bid <= lc_ask:
+            rejections.append(f"Crossed/zero credit on call wing: Short Bid (₹{sc_bid:.2f}) <= Long Ask (₹{lc_ask:.2f}).")
+
+        put_credit = round(sp_bid - lp_ask, 2)
+        call_credit = round(sc_bid - lc_ask, 2)
+
+        if put_credit < Config.MIN_NET_CREDIT_PTS:
+            rejections.append(f"Net credit ({put_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
+        put_ratio = (put_credit / step * 100.0) if step > 0 else 0.0
+        if put_ratio < Config.MIN_CREDIT_SPREAD_PCT:
+            rejections.append(f"Credit ratio ({put_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
+
+        if call_credit < Config.MIN_NET_CREDIT_PTS:
+            rejections.append(f"Net credit ({call_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
+        call_ratio = (call_credit / step * 100.0) if step > 0 else 0.0
+        if call_ratio < Config.MIN_CREDIT_SPREAD_PCT:
+            rejections.append(f"Credit ratio ({call_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
+
+        combined_credit = round(put_credit + call_credit, 2)
+        wing_width = step
 
         if combined_credit >= wing_width:
             rejections.append(f"Combined credit ({combined_credit:.2f} pts) cannot equal or exceed wing width ({wing_width:.2f} pts).")
@@ -437,21 +250,59 @@ class StrategyBuilder:
         else:
             max_loss_pts = round(wing_width - combined_credit, 2)
 
-        lot_size = put_cand.quantity
         max_profit_inr = round(combined_credit * lot_size, 2)
         max_loss_inr = round(max_loss_pts * lot_size, 2)
         rr_ratio = round(max_profit_inr / max_loss_inr, 2) if max_loss_inr > 0 else 0.0
 
-        legs = put_cand.legs + call_cand.legs
-        breakevens = (
-            [round(put_cand.legs[0].strike - combined_credit, 1), round(call_cand.legs[0].strike + combined_credit, 1)]
-            if len(legs) == 4 else []
-        )
+        legs = [
+            OptionLegSpec(
+                symbol=sp_q.get("symbol", f"NIFTY{int(short_put_strike)}PE"),
+                strike=short_put_strike,
+                option_type="PE",
+                action="SELL",
+                bid=sp_bid,
+                ask=float(sp_q.get("ask", 0.0) or 0.0),
+                ltp=float(sp_q.get("ltp", sp_bid)),
+                quantity=lot_size,
+            ),
+            OptionLegSpec(
+                symbol=lp_q.get("symbol", f"NIFTY{int(long_put_strike)}PE"),
+                strike=long_put_strike,
+                option_type="PE",
+                action="BUY",
+                bid=float(lp_q.get("bid", 0.0) or 0.0),
+                ask=lp_ask,
+                ltp=float(lp_q.get("ltp", lp_ask)),
+                quantity=lot_size,
+            ),
+            OptionLegSpec(
+                symbol=sc_q.get("symbol", f"NIFTY{int(short_call_strike)}CE"),
+                strike=short_call_strike,
+                option_type="CE",
+                action="SELL",
+                bid=sc_bid,
+                ask=float(sc_q.get("ask", 0.0) or 0.0),
+                ltp=float(sc_q.get("ltp", sc_bid)),
+                quantity=lot_size,
+            ),
+            OptionLegSpec(
+                symbol=lc_q.get("symbol", f"NIFTY{int(long_call_strike)}CE"),
+                strike=long_call_strike,
+                option_type="CE",
+                action="BUY",
+                bid=float(lc_q.get("bid", 0.0) or 0.0),
+                ask=lc_ask,
+                ltp=float(lc_q.get("ltp", lc_ask)),
+                quantity=lot_size,
+            ),
+        ]
+
+        breakevens = [round(short_put_strike - combined_credit, 1), round(short_call_strike + combined_credit, 1)]
 
         is_eligible = (len(rejections) == 0 and len(legs) == 4)
         rationale = (
-            f"Iron Condor 4-Leg: Put wing {int(put_cand.legs[0].strike)}/{int(put_cand.legs[1].strike)} PE, "
-            f"Call wing {int(call_cand.legs[0].strike)}/{int(call_cand.legs[1].strike)} CE. "
+            f"Iron Condor 4-Leg: Put wing {int(short_put_strike)}/{int(long_put_strike)} PE, "
+            f"Call wing {int(short_call_strike)}/{int(long_call_strike)} CE. "
             f"Net Credit: {combined_credit:.2f} pts (₹{max_profit_inr:,.2f}), Max Loss: ₹{max_loss_inr:,.2f}."
         ) if is_eligible else f"Rejections: {'; '.join(rejections)}"
 
@@ -555,16 +406,12 @@ class IntradayEngine:
             )]
 
         # Generate candidates based on market regime
-        if analysis.market_bias in ("BULLISH", "STRONG_BULLISH"):
-            candidates.append(StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type="INTRADAY"))
-        elif analysis.market_bias in ("BEARISH", "STRONG_BEARISH"):
-            candidates.append(StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type="INTRADAY"))
-        elif analysis.market_regime == "BALANCED_RANGE":
+        if analysis.market_regime == "BALANCED_RANGE":
             candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY"))
         else:
             candidates.append(StrategyBuilder._empty_candidate(
                 "NO_REGIME_MATCH", "Intraday Engine", "INTRADAY", analysis,
-                [f"Choppy or indeterminate market regime ({analysis.market_regime})"]
+                [f"Regime {analysis.market_regime} not supported for Iron Condor (requires BALANCED_RANGE)"]
             ))
 
         return candidates
@@ -589,16 +436,12 @@ class PositionalEngine:
                 [f"Confidence score ({analysis.confidence_score:.0f}%) below positional minimum 75%"]
             )]
 
-        if analysis.market_bias in ("BULLISH", "STRONG_BULLISH"):
-            candidates.append(StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type="POSITIONAL"))
-        elif analysis.market_bias in ("BEARISH", "STRONG_BEARISH"):
-            candidates.append(StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type="POSITIONAL"))
-        elif analysis.market_regime == "BALANCED_RANGE":
+        if analysis.market_regime == "BALANCED_RANGE":
             candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL"))
         else:
             candidates.append(StrategyBuilder._empty_candidate(
                 "NO_REGIME_MATCH", "Positional Engine", "POSITIONAL", analysis,
-                [f"Market regime ({analysis.market_regime}) not suitable for overnight positional holding"]
+                [f"Market regime ({analysis.market_regime}) not suitable for positional Iron Condor"]
             ))
 
         return candidates
@@ -636,8 +479,8 @@ class AutoSelectionResult:
 class AutoStrategySelector:
     """
     Data-Driven Strategy Selection Engine:
-    Selects the optimal strategy (or multiple strategies) based on:
-    - Market Bias & Regime
+    Selects the optimal strategy based on:
+    - Market Bias & Regime (Iron Condor on BALANCED_RANGE)
     - Put-Call Ratio (PCR)
     - Net Delta OI Writer Momentum
     - S1 Floor and R1 Ceiling Wall Proximity
@@ -664,34 +507,15 @@ class AutoStrategySelector:
             now_str = datetime.now(IST).strftime("%H:%M:%S")
         evidence = []
 
-        # 1. Evaluate all 3 approved strategies on both Intraday and Positional horizons
+        # 1. Evaluate approved strategy (Iron Condor) on both Intraday and Positional horizons
         candidates_with_score: List[Tuple[SpreadCandidate, float, str]] = []
 
-        # Strategy 1: Bull Put Spread (Intraday & Positional)
-        bp_intra = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type="INTRADAY")
-        bp_pos = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type="POSITIONAL")
-        score_bp, rat_bp = cls._score_bull_put(analysis, bp_intra)
-        if bp_intra.is_eligible:
-            candidates_with_score.append((bp_intra, score_bp, rat_bp))
-        if bp_pos.is_eligible:
-            candidates_with_score.append((bp_pos, score_bp * 0.95, rat_bp))
-
-        # Strategy 2: Bear Call Spread (Intraday & Positional)
-        bc_intra = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type="INTRADAY")
-        bc_pos = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type="POSITIONAL")
-        score_bc, rat_bc = cls._score_bear_call(analysis, bc_intra)
-        if bc_intra.is_eligible:
-            candidates_with_score.append((bc_intra, score_bc, rat_bc))
-        if bc_pos.is_eligible:
-            candidates_with_score.append((bc_pos, score_bc * 0.95, rat_bc))
-
-        # Strategy 3: Iron Condor (Intraday & Positional)
         ic_intra = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY")
         ic_pos = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL")
         score_ic, rat_ic = cls._score_iron_condor(analysis, ic_intra)
-        if ic_intra.is_eligible:
+        if ic_intra.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
             candidates_with_score.append((ic_intra, score_ic, rat_ic))
-        if ic_pos.is_eligible:
+        if ic_pos.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
             candidates_with_score.append((ic_pos, score_ic * 0.95, rat_ic))
 
         # Sort eligible candidates by suitability score
@@ -699,14 +523,13 @@ class AutoStrategySelector:
 
         if not candidates_with_score:
             no_trade_reasons = []
-            if analysis.market_regime == "CHOPPY_OR_INSUFFICIENT":
-                no_trade_reasons.append(f"Market regime is {analysis.market_regime}: {'; '.join(analysis.evidence_factors)}")
+            if analysis.market_regime != "BALANCED_RANGE":
+                no_trade_reasons.append(f"Market regime is {analysis.market_regime} (Iron Condor requires BALANCED_RANGE): {'; '.join(analysis.evidence_factors)}")
             if analysis.data_quality_warnings:
                 no_trade_reasons.extend(analysis.data_quality_warnings)
 
             # Collect individual strategy rejection reasons
-            all_eval = [bp_intra, bp_pos, bc_intra, bc_pos, ic_intra, ic_pos]
-            for c in all_eval:
+            for c in [ic_intra, ic_pos]:
                 if not c.is_eligible and c.rejection_reasons:
                     no_trade_reasons.append(f"{c.strategy_name} ({c.engine_type}) rejected: {'; '.join(c.rejection_reasons)}")
 
@@ -732,17 +555,10 @@ class AutoStrategySelector:
         selected_candidates.append(best_cand)
         evidence.append(best_rat)
 
-        # Check for secondary complementary strategy (e.g. Intraday Bull Put + Positional Bull Put, or Intraday + Positional Iron Condor)
+        # Check for secondary complementary strategy (e.g. Intraday + Positional Iron Condor)
         for cand, score, rat in candidates_with_score[1:]:
-            # Never combine conflicting directional strategies (e.g. Bull Put + Bear Call)
-            is_conflicting = (
-                (best_cand.strategy_id == "BULL_PUT" and cand.strategy_id == "BEAR_CALL") or
-                (best_cand.strategy_id == "BEAR_CALL" and cand.strategy_id == "BULL_PUT")
-            )
-            # Avoid duplicate same strategy and same engine
             is_duplicate = (best_cand.strategy_id == cand.strategy_id and best_cand.engine_type == cand.engine_type)
-
-            if not is_conflicting and not is_duplicate and score >= 60.0:
+            if not is_duplicate and score >= 60.0:
                 selected_candidates.append(cand)
                 evidence.append(rat)
                 break  # Maximum 2 concurrent auto-selected setups
@@ -767,48 +583,6 @@ class AutoStrategySelector:
             market_bias=analysis.market_bias,
             timestamp=now_str,
         )
-
-    @classmethod
-    def _score_bull_put(cls, a: MarketAnalysisResult, c: SpreadCandidate) -> Tuple[float, str]:
-        score = 0.0
-        reasons = []
-        if a.market_bias in ("BULLISH", "STRONG_BULLISH"):
-            score += 40.0
-            reasons.append(f"Bullish bias ({a.market_bias})")
-        if a.total_pe_change_oi > a.total_ce_change_oi:
-            score += 25.0
-            reasons.append(f"Put OI expansion (+{a.total_pe_change_oi / 1000:.0f}k PE OI)")
-        if a.pcr_oi >= 1.0:
-            score += 15.0
-            reasons.append(f"Supportive PCR ({a.pcr_oi:.2f})")
-        if a.spot_price > a.s1_support:
-            score += 10.0
-            reasons.append(f"Spot {a.spot_price - a.s1_support:.0f}pts above S1 floor")
-        if c.net_credit_pts >= 15.0:
-            score += 10.0
-            reasons.append(f"Net credit {c.net_credit_pts:.1f}pts")
-        return score, "; ".join(reasons) or "Neutral market structure"
-
-    @classmethod
-    def _score_bear_call(cls, a: MarketAnalysisResult, c: SpreadCandidate) -> Tuple[float, str]:
-        score = 0.0
-        reasons = []
-        if a.market_bias in ("BEARISH", "STRONG_BEARISH"):
-            score += 40.0
-            reasons.append(f"Bearish bias ({a.market_bias})")
-        if a.total_ce_change_oi > a.total_pe_change_oi:
-            score += 25.0
-            reasons.append(f"Call OI expansion (+{a.total_ce_change_oi / 1000:.0f}k CE OI)")
-        if a.pcr_oi <= 0.95:
-            score += 15.0
-            reasons.append(f"Heavy PCR ceiling ({a.pcr_oi:.2f})")
-        if a.spot_price < a.r1_resistance:
-            score += 10.0
-            reasons.append(f"Spot {a.r1_resistance - a.spot_price:.0f}pts below R1 ceiling")
-        if c.net_credit_pts >= 15.0:
-            score += 10.0
-            reasons.append(f"Net credit {c.net_credit_pts:.1f}pts")
-        return score, "; ".join(reasons) or "Neutral market structure"
 
     @classmethod
     def _score_iron_condor(cls, a: MarketAnalysisResult, c: SpreadCandidate) -> Tuple[float, str]:

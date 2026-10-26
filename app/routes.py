@@ -128,16 +128,14 @@ def api_candidates():
     intraday_cands = [c.to_dict() for c in IntradayEngine.evaluate(analysis, chain)]
     positional_cands = [c.to_dict() for c in PositionalEngine.evaluate(analysis, chain)]
 
-    # Also build standalone 4 strategy previews for UI selector
-    bp_cand = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type="INTRADAY")
-    bc_cand = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type="INTRADAY")
+    # Also build standalone strategy previews for UI selector
     ic_cand = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY")
     ib_cand = StrategyBuilder.build_iron_butterfly(analysis, chain, engine_type="INTRADAY")
 
     from app.strategies import AutoStrategySelector
     auto_sel = AutoStrategySelector.evaluate_auto_selection(analysis, chain)
 
-    all_previews = [bp_cand.to_dict(), bc_cand.to_dict(), ic_cand.to_dict(), ib_cand.to_dict()]
+    all_previews = [ic_cand.to_dict(), ib_cand.to_dict()]
 
     return jsonify({
         "status": "success",
@@ -242,7 +240,7 @@ def api_execute_candidate():
     if engine_type not in ("INTRADAY", "POSITIONAL"):
         return jsonify({"status": "error", "message": f"Invalid engine_type: {engine_type}"}), 400
 
-    SUPPORTED_STRATEGIES = {"BULL_PUT", "BEAR_CALL", "IRON_CONDOR"}
+    SUPPORTED_STRATEGIES = {"IRON_CONDOR"}
     if not strategy_id or str(strategy_id).upper() not in SUPPORTED_STRATEGIES:
         return jsonify({
             "status": "error",
@@ -292,11 +290,7 @@ def api_execute_candidate():
 
     # Re-build candidate with requested lots if lots > 1
     if lots != matched_candidate.lots:
-        if strategy_id == "BULL_PUT":
-            candidate = StrategyBuilder.build_bull_put_spread(analysis, chain, engine_type=engine_type, lots=lots)
-        elif strategy_id == "BEAR_CALL":
-            candidate = StrategyBuilder.build_bear_call_spread(analysis, chain, engine_type=engine_type, lots=lots)
-        elif strategy_id == "IRON_CONDOR":
+        if strategy_id == "IRON_CONDOR":
             candidate = StrategyBuilder.build_iron_condor(analysis, chain, engine_type=engine_type, lots=lots)
         else:
             candidate = matched_candidate

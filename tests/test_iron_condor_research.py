@@ -268,13 +268,10 @@ def test_risk_and_guardrail_enforcement():
     assert Config.CONSECUTIVE_LOSS_COOLDOWN_MINS == 15
 
 
-def test_shared_engine_preserves_multi_strategy_capability():
-    """Requirement 3 & 6: Verify shared HistoricalBacktestEngine is not globally restricted."""
+def test_shared_engine_approved_strategies():
+    """Verify HistoricalBacktestEngine and ResearchBacktestEngine are strictly restricted to IRON_CONDOR."""
     shared_engine = HistoricalBacktestEngine()
-    # Shared engine must support the full production suite for multi-strategy workflows
-    assert "BULL_PUT" in shared_engine.approved_strategies
-    assert "BEAR_CALL" in shared_engine.approved_strategies
-    assert "IRON_CONDOR" in shared_engine.approved_strategies
+    assert shared_engine.approved_strategies == {"IRON_CONDOR"}
 
     # Research wrapper must strictly isolate IRON_CONDOR
     research_engine = ResearchBacktestEngine()

@@ -477,7 +477,7 @@ class HistoricalDataValidator:
             # 1. Completeness Verification (Tier 1: Structurally Reconstructable):
             # - At least 5 strikes with both CE and PE
             # - ATM strike must exist with both CE and PE
-            # - At least 2 strikes below spot (for Bull Put S1 walls) and 2 strikes above spot (for Bear Call R1 walls)
+            # - At least 2 strikes below spot (for put wing S1 walls) and 2 strikes above spot (for call wing R1 walls)
             atm_strike = round(spot / 50.0) * 50.0
             has_atm_ce = (atm_strike in chain_by_strike and bool(chain_by_strike[atm_strike].get("CE")))
             has_atm_pe = (atm_strike in chain_by_strike and bool(chain_by_strike[atm_strike].get("PE")))

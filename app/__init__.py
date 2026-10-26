@@ -22,9 +22,16 @@ def create_app(config_class=Config) -> Flask:
     from app.routes import main_bp
     app.register_blueprint(main_bp)
 
-    # Create tables
+    # Create tables and apply non-destructive additive migrations
     with app.app_context():
         db.create_all()
+        try:
+            from app.migrations import run_database_migrations
+            raw_conn = db.engine.raw_connection()
+            run_database_migrations(raw_conn)
+            raw_conn.close()
+        except Exception as e:
+            app.logger.warning(f"Migration check skipped or non-sqlite engine: {e}")
 
     # Start background scheduler and connect FYERS if not in testing mode
     is_testing = app.config.get("TESTING") or os.environ.get("PYTEST_CURRENT_TEST")

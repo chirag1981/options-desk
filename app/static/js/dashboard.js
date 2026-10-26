@@ -3,7 +3,7 @@
  */
 
 let currentEngine = 'INTRADAY';
-let currentStrategy = 'BULL_PUT';
+let currentStrategy = 'IRON_CONDOR';
 let currentCandidates = {};
 
 document.addEventListener('DOMContentLoaded', () => {

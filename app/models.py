@@ -66,7 +66,7 @@ class SignalCandidate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST), index=True)
     engine_type = db.Column(db.String(20), nullable=False)  # INTRADAY or POSITIONAL
-    strategy_id = db.Column(db.String(30), nullable=False)  # BULL_PUT, BEAR_CALL, IRON_CONDOR, IRON_BUTTERFLY
+    strategy_id = db.Column(db.String(30), nullable=False)  # IRON_CONDOR, IRON_BUTTERFLY
     strategy_name = db.Column(db.String(60), nullable=False)
     status = db.Column(db.String(20), default="WAIT")       # ELIGIBLE, WAIT, REJECTED_BY_RISK, EXECUTED
     symbol = db.Column(db.String(20), default="NIFTY")
@@ -146,8 +146,25 @@ class TradePosition(db.Model):
     gross_pnl_inr = db.Column(db.Float, default=0.0)
     transaction_costs_inr = db.Column(db.Float, default=0.0)
     net_pnl_inr = db.Column(db.Float, default=0.0)
+
+    # Itemized Transaction Costs (Entry)
+    entry_brokerage_inr = db.Column(db.Float, default=0.0)
+    entry_stt_inr = db.Column(db.Float, default=0.0)
+    entry_exchange_fees_inr = db.Column(db.Float, default=0.0)
+    entry_gst_inr = db.Column(db.Float, default=0.0)
+    entry_stamp_duty_inr = db.Column(db.Float, default=0.0)
+    entry_sebi_ipft_inr = db.Column(db.Float, default=0.0)
+
+    # Itemized Transaction Costs (Exit)
+    exit_brokerage_inr = db.Column(db.Float, default=0.0)
+    exit_stt_inr = db.Column(db.Float, default=0.0)
+    exit_exchange_fees_inr = db.Column(db.Float, default=0.0)
+    exit_gst_inr = db.Column(db.Float, default=0.0)
+    exit_stamp_duty_inr = db.Column(db.Float, default=0.0)
+    exit_sebi_ipft_inr = db.Column(db.Float, default=0.0)
     
     legs = db.relationship("PositionLeg", backref="position", cascade="all, delete-orphan", lazy="joined")
+    mtm_snapshots = db.relationship("PositionMTMSnapshot", backref="position", cascade="all, delete-orphan", lazy="select")
 
     @property
     def total_risk_with_costs_inr(self) -> float:
@@ -189,6 +206,24 @@ class TradePosition(db.Model):
             "gross_pnl_inr": self.gross_pnl_inr,
             "transaction_costs_inr": self.transaction_costs_inr,
             "net_pnl_inr": self.net_pnl_inr,
+            "costs_breakdown": {
+                "entry": {
+                    "brokerage": self.entry_brokerage_inr,
+                    "stt": self.entry_stt_inr,
+                    "exchange_fees": self.entry_exchange_fees_inr,
+                    "gst": self.entry_gst_inr,
+                    "stamp_duty": self.entry_stamp_duty_inr,
+                    "sebi_ipft": self.entry_sebi_ipft_inr,
+                },
+                "exit": {
+                    "brokerage": self.exit_brokerage_inr,
+                    "stt": self.exit_stt_inr,
+                    "exchange_fees": self.exit_exchange_fees_inr,
+                    "gst": self.exit_gst_inr,
+                    "stamp_duty": self.exit_stamp_duty_inr,
+                    "sebi_ipft": self.exit_sebi_ipft_inr,
+                }
+            },
             "legs": [l.to_dict() for l in self.legs],
         }
 
@@ -208,6 +243,20 @@ class PositionLeg(db.Model):
     current_price = db.Column(db.Float, default=0.0)
     exit_price = db.Column(db.Float, nullable=True)
 
+    # Entry Quote Evidence & Fill Metadata
+    entry_bid = db.Column(db.Float, nullable=True)
+    entry_ask = db.Column(db.Float, nullable=True)
+    entry_spread_pct = db.Column(db.Float, nullable=True)
+    entry_quote_timestamp = db.Column(db.DateTime, nullable=True)
+    entry_data_source = db.Column(db.String(30), nullable=True, default="FYERS_LIVE")
+
+    # Exit Quote Evidence & Fill Metadata
+    exit_bid = db.Column(db.Float, nullable=True)
+    exit_ask = db.Column(db.Float, nullable=True)
+    exit_spread_pct = db.Column(db.Float, nullable=True)
+    exit_quote_timestamp = db.Column(db.DateTime, nullable=True)
+    exit_data_source = db.Column(db.String(30), nullable=True)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -219,6 +268,20 @@ class PositionLeg(db.Model):
             "entry_price": self.entry_price,
             "current_price": self.current_price,
             "exit_price": self.exit_price,
+            "entry_quote": {
+                "bid": self.entry_bid,
+                "ask": self.entry_ask,
+                "spread_pct": self.entry_spread_pct,
+                "timestamp": self.entry_quote_timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.entry_quote_timestamp else None,
+                "data_source": self.entry_data_source,
+            },
+            "exit_quote": {
+                "bid": self.exit_bid,
+                "ask": self.exit_ask,
+                "spread_pct": self.exit_spread_pct,
+                "timestamp": self.exit_quote_timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.exit_quote_timestamp else None,
+                "data_source": self.exit_data_source,
+            }
         }
 
 
@@ -245,4 +308,64 @@ class RiskAuditLog(db.Model):
             "trade_risk_inr": self.trade_risk_inr,
             "current_portfolio_risk_inr": self.current_portfolio_risk_inr,
             "reason": self.reason,
+        }
+
+
+class DataQualityEvent(db.Model):
+    """Audit Log for Quote Invalidation, Missing/Stale Quotes, and Execution Safety Failures."""
+    __tablename__ = "data_quality_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(IST), index=True)
+    candidate_id = db.Column(db.String(50), nullable=True, index=True)
+    event_type = db.Column(db.String(40), nullable=False)  # MISSING_QUOTE, ZERO_QUOTE, CROSSED_MARKET, EXCESSIVE_SPREAD, STALE_QUOTE, VALUATION_UNAVAILABLE
+    symbol = db.Column(db.String(50), nullable=True)
+    strike = db.Column(db.Float, nullable=True)
+    option_type = db.Column(db.String(10), nullable=True)
+    details = db.Column(db.Text, nullable=False)
+    data_source = db.Column(db.String(30), default="FYERS_LIVE")
+    idempotency_key = db.Column(db.String(128), unique=True, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else "",
+            "candidate_id": self.candidate_id,
+            "event_type": self.event_type,
+            "symbol": self.symbol,
+            "strike": self.strike,
+            "option_type": self.option_type,
+            "details": self.details,
+            "data_source": self.data_source,
+        }
+
+
+class PositionMTMSnapshot(db.Model):
+    """Periodic Append-Only Valuation Snapshot for Active Position MTM Tracking."""
+    __tablename__ = "position_mtm_snapshots"
+
+    id = db.Column(db.Integer, primary_key=True)
+    position_id = db.Column(db.Integer, db.ForeignKey("trade_positions.id"), nullable=False, index=True)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(IST), index=True)
+    spot_price = db.Column(db.Float, nullable=False)
+    net_debit_pts = db.Column(db.Float, nullable=True)
+    unrealized_gross_pnl_inr = db.Column(db.Float, nullable=True)
+    known_transaction_costs_inr = db.Column(db.Float, default=0.0)
+    unrealized_net_pnl_inr = db.Column(db.Float, nullable=True)
+    data_quality_status = db.Column(db.String(30), default="OK")  # OK, VALUATION_UNAVAILABLE
+    leg_prices_json = db.Column(db.Text, nullable=True)            # JSON snapshot of each leg's current quote/price
+    idempotency_key = db.Column(db.String(128), unique=True, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "position_id": self.position_id,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else "",
+            "spot_price": self.spot_price,
+            "net_debit_pts": self.net_debit_pts,
+            "unrealized_gross_pnl_inr": self.unrealized_gross_pnl_inr,
+            "known_transaction_costs_inr": self.known_transaction_costs_inr,
+            "unrealized_net_pnl_inr": self.unrealized_net_pnl_inr,
+            "data_quality_status": self.data_quality_status,
+            "leg_prices": self.leg_prices_json,
         }

@@ -69,13 +69,13 @@ def run_reconciliation():
         m_full = res_full["COMBINED"]
 
         report["discovery_in_sample"][sc] = {
-            s: _format_metrics(res_is[s]) for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+            s: _format_metrics(res_is[s]) for s in ["IRON_CONDOR", "COMBINED"]
         }
         report["holdout_out_of_sample"][sc] = {
-            s: _format_metrics(res_oos[s]) for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+            s: _format_metrics(res_oos[s]) for s in ["IRON_CONDOR", "COMBINED"]
         }
         report["full_period"][sc] = {
-            s: _format_metrics(res_full[s]) for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+            s: _format_metrics(res_full[s]) for s in ["IRON_CONDOR", "COMBINED"]
         }
 
         print(f"  Discovery (75): Trades={m_is.total_trades} (W:{m_is.winning_trades}, L:{m_is.losing_trades}), Net PnL=INR {m_is.net_pnl:,.2f}, PF={m_is.profit_factor}")

@@ -19,8 +19,6 @@ Built with Python, Flask, SQLite, and Vanilla CSS/JavaScript, following high-cra
 
 ### 2. Supported Defined-Risk Strategies
 Only fully hedged credit spreads are permitted (strictly zero naked options allowed):
-- **Bull Put Spread**: Credit put spread sold below validated support floor (S1/S2).
-- **Bear Call Spread**: Credit call spread sold above validated resistance ceiling (R1/R2).
 - **Iron Condor**: 4-legged non-directional delta-neutral credit structure across balanced regimes.
 - **Iron Butterfly**: Strategically gated/disabled by risk guard until minimum credit requirements are met.
 

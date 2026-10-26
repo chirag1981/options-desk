@@ -1,8 +1,6 @@
 """
 scripts/run_two_year_backtest.py — Full 2-Year Historical Simulation Runner
 Executes the high-fidelity backtest over all 105 validated Parquet datasets for:
-- BULL_PUT
-- BEAR_CALL
 - IRON_CONDOR
 Across OPTIMISTIC, BASE, and CONSERVATIVE fill scenarios.
 """

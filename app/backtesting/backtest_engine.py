@@ -1,10 +1,8 @@
 """
 app/backtesting/backtest_engine.py — High-Fidelity Historical Options Backtest Engine.
 
-Simulates the three approved defined-risk credit spread strategies:
-1. BULL_PUT (Bull Put Credit Spread)
-2. BEAR_CALL (Bear Call Credit Spread)
-3. IRON_CONDOR (Iron Condor)
+Simulates the approved defined-risk credit spread strategy:
+1. IRON_CONDOR (Iron Condor)
 
 Key Safeguards & Architecture:
 - Point-in-time chronological replay without look-ahead bias.
@@ -56,9 +54,9 @@ STARTING_EQUITY = 1_000_000.0  # ₹10,00,000 starting equity
 class BacktestTrade:
     """Individual simulated trade record."""
     trade_id: str
-    strategy_id: str          # BULL_PUT, BEAR_CALL, IRON_CONDOR
+    strategy_id: str          # IRON_CONDOR
     strategy_name: str
-    engine_type: str          # INTRADAY, POSITIONAL
+    engine_type: str          # INTRADAY, POSITIONAL, POSITIONAL
     scenario: str             # OPTIMISTIC, BASE, CONSERVATIVE
     expiry: str
     entry_time: str
@@ -134,7 +132,7 @@ class HistoricalBacktestEngine:
         self.starting_equity = starting_equity
         self.target_profit_pct = target_profit_pct
         self.stop_loss_credit_mult = stop_loss_credit_mult
-        self.approved_strategies = {"BULL_PUT", "BEAR_CALL", "IRON_CONDOR"}
+        self.approved_strategies = {"IRON_CONDOR"}
 
     def _get_contract_price_for_scenario(
         self,
@@ -178,16 +176,7 @@ class HistoricalBacktestEngine:
         if is_expiry_settlement and final_spot is not None:
             # Expiry settlement: compute intrinsic values
             closing_cost_pts = 0.0
-            if trade.strategy_id == "BULL_PUT":
-                # Short Put intrinsic: max(0, short_strike - spot)
-                short_val = max(0.0, trade.short_strike - final_spot)
-                long_val = max(0.0, trade.long_strike - final_spot)
-                closing_cost_pts = short_val - long_val
-            elif trade.strategy_id == "BEAR_CALL":
-                short_val = max(0.0, final_spot - trade.short_strike)
-                long_val = max(0.0, final_spot - trade.long_strike)
-                closing_cost_pts = short_val - long_val
-            elif trade.strategy_id == "IRON_CONDOR":
+            if trade.strategy_id == "IRON_CONDOR":
                 # Put wing: short_strike (put), long_strike (put)
                 put_short = max(0.0, trade.short_strike - final_spot)
                 put_long = max(0.0, trade.long_strike - final_spot)
@@ -199,8 +188,8 @@ class HistoricalBacktestEngine:
 
         # Standard market valuation
         closing_cost_pts = 0.0
-        strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
-        strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+        strikes_needed = [(trade.short_strike, "PE", "BUY")]
+        strikes_needed.append((trade.long_strike, "PE", "SELL"))
 
         if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
             strikes_needed.append((trade.short_strike_2, "CE", "BUY"))
@@ -245,8 +234,8 @@ class HistoricalBacktestEngine:
 
         exit_legs = []
         if reason in ("TARGET", "STOP_LOSS", "CUTOFF", "SESSION_CUTOFF"):
-            strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
-            strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+            strikes_needed = [(trade.short_strike, "PE", "BUY")]
+            strikes_needed.append((trade.long_strike, "PE", "SELL"))
 
             if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
                 strikes_needed.append((trade.short_strike_2, "CE", "BUY"))
@@ -327,7 +316,7 @@ class HistoricalBacktestEngine:
         """
         metrics: Dict[str, StrategyMetrics] = {
             s: StrategyMetrics(strategy_id=s, scenario=scenario)
-            for s in ["BULL_PUT", "BEAR_CALL", "IRON_CONDOR", "COMBINED"]
+            for s in ["IRON_CONDOR", "COMBINED"]
         }
 
         # Portfolio State
@@ -468,8 +457,8 @@ class HistoricalBacktestEngine:
                     # Reconstruct individual legs for accurate leg-by-leg brokerage and turnover fees
                     exit_legs = []
                     if exit_reason in ("TARGET", "STOP_LOSS", "CUTOFF"):
-                        strikes_needed = [(trade.short_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "BUY")]
-                        strikes_needed.append((trade.long_strike, "PE" if trade.strategy_id in ("BULL_PUT", "IRON_CONDOR") else "CE", "SELL"))
+                        strikes_needed = [(trade.short_strike, "PE", "BUY")]
+                        strikes_needed.append((trade.long_strike, "PE", "SELL"))
 
                         if trade.strategy_id == "IRON_CONDOR" and trade.short_strike_2 and trade.long_strike_2:
                             strikes_needed.append((trade.short_strike_2, "CE", "BUY"))

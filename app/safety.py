@@ -77,19 +77,51 @@ class ExecutionSafetyGate:
             # Check price validity
             if leg.action == "SELL":
                 if leg.bid is None or leg.bid <= 0:
+                    cls._record_dq_event(
+                        candidate=candidate,
+                        event_type="ZERO_QUOTE" if leg.bid == 0 else "MISSING_QUOTE",
+                        symbol=leg.symbol,
+                        strike=leg.strike,
+                        option_type=leg.option_type,
+                        details=f"Missing or non-positive executable Bid quote on short leg {leg.symbol} (bid={leg.bid})."
+                    )
                     return False, f"Missing or non-positive executable Bid quote on short leg {leg.symbol} (bid={leg.bid})."
             elif leg.action == "BUY":
                 if leg.ask is None or leg.ask <= 0:
+                    cls._record_dq_event(
+                        candidate=candidate,
+                        event_type="ZERO_QUOTE" if leg.ask == 0 else "MISSING_QUOTE",
+                        symbol=leg.symbol,
+                        strike=leg.strike,
+                        option_type=leg.option_type,
+                        details=f"Missing or non-positive executable Ask quote on long leg {leg.symbol} (ask={leg.ask})."
+                    )
                     return False, f"Missing or non-positive executable Ask quote on long leg {leg.symbol} (ask={leg.ask})."
 
             # Check for crossed market
             if leg.bid is not None and leg.ask is not None and leg.bid > 0 and leg.ask > 0:
                 if leg.bid >= leg.ask:
+                    cls._record_dq_event(
+                        candidate=candidate,
+                        event_type="CROSSED_MARKET",
+                        symbol=leg.symbol,
+                        strike=leg.strike,
+                        option_type=leg.option_type,
+                        details=f"Crossed or inverted market detected on {leg.symbol} (bid={leg.bid} >= ask={leg.ask})."
+                    )
                     return False, f"Crossed or inverted market detected on {leg.symbol} (bid={leg.bid} >= ask={leg.ask})."
                 
                 # Check allowable bid/ask spread
                 spread_pct = ((leg.ask - leg.bid) / leg.ask) * 100.0
                 if spread_pct > Config.MAX_BID_ASK_SPREAD_PCT:
+                    cls._record_dq_event(
+                        candidate=candidate,
+                        event_type="EXCESSIVE_SPREAD",
+                        symbol=leg.symbol,
+                        strike=leg.strike,
+                        option_type=leg.option_type,
+                        details=f"Excessive bid/ask spread ({spread_pct:.1f}% > {Config.MAX_BID_ASK_SPREAD_PCT}%) on leg {leg.symbol}."
+                    )
                     return (
                         False,
                         f"Excessive bid/ask spread ({spread_pct:.1f}% > {Config.MAX_BID_ASK_SPREAD_PCT}%) on leg {leg.symbol}.",
@@ -122,3 +154,59 @@ class ExecutionSafetyGate:
                 )
 
         return True, "Execution safety gate passed."
+
+    @classmethod
+    def _record_dq_event(
+        cls,
+        candidate: SpreadCandidate,
+        event_type: str,
+        symbol: Optional[str],
+        strike: Optional[float],
+        option_type: Optional[str],
+        details: str,
+    ) -> None:
+        """
+        Safely persists DataQualityEvent to SQLite database if app context is active.
+        Never throws or disrupts the safety gate's fail-closed rejection.
+        Uses idempotency key to prevent duplicate logs for the same candidate & rejection.
+        """
+        try:
+            from app.models import DataQualityEvent
+            from app.extensions import db
+            import hashlib
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            IST = ZoneInfo("Asia/Kolkata")
+
+            # Stable idempotency key: candidate fingerprint + minute timestamp + event type
+            now_dt = datetime.now(IST)
+            minute_key = now_dt.strftime("%Y%m%d%H%M")
+            cand_key = f"{candidate.strategy_id}_{candidate.engine_type}_{candidate.expiry}_{symbol}_{strike}_{option_type}"
+            idem_key = hashlib.sha256(f"{minute_key}_{cand_key}_{event_type}".encode()).hexdigest()[:32]
+
+            # Check if event was already recorded this minute
+            existing = DataQualityEvent.query.filter_by(idempotency_key=idem_key).first()
+            if existing:
+                return
+
+            event = DataQualityEvent(
+                candidate_id=getattr(candidate, "strategy_id", "") + "_" + getattr(candidate, "engine_type", ""),
+                event_type=event_type,
+                symbol=symbol,
+                strike=strike,
+                option_type=option_type,
+                details=details,
+                data_source=getattr(candidate, "data_status", "FYERS_LIVE"),
+                idempotency_key=idem_key,
+                timestamp=now_dt,
+            )
+            db.session.add(event)
+            db.session.commit()
+        except Exception as e:
+            # Under no circumstances should a logging or DB failure bypass safety or crash
+            log.warning(f"Failed to persist DataQualityEvent: {e}")
+            try:
+                from app.extensions import db
+                db.session.rollback()
+            except Exception:
+                pass

@@ -52,41 +52,42 @@ def test_scenario_pricing_tiers(engine):
 
 
 def test_expiry_settlement_intrinsic_calculation(engine):
-    """Verify expiry settlement intrinsic value calculations for all 3 strategies."""
-    # 1. Bull Put Spread: Short 24000 PE, Long 23900 PE
-    trade_bp = BacktestTrade(
+    """Verify expiry settlement intrinsic value calculations for Iron Condor."""
+    trade_ic = BacktestTrade(
         trade_id="T1",
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="POSITIONAL",
         scenario="BASE",
         expiry="2025-01-23",
         entry_time="2025-01-20 10:00:00",
         short_strike=24000.0,
         long_strike=23900.0,
-        net_credit_pts=25.0,
+        short_strike_2=24500.0,
+        long_strike_2=24600.0,
+        net_credit_pts=40.0,
     )
 
-    # If NIFTY expires at 24100 (OTM -> worthless -> full profit)
-    cost = engine._evaluate_spread_exit_cost(trade_bp, {}, "BASE", final_spot=24100.0, is_expiry_settlement=True)
+    # If NIFTY expires at 24200 (Between short put 24000 and short call 24500 -> all OTM -> cost 0)
+    cost = engine._evaluate_spread_exit_cost(trade_ic, {}, "BASE", final_spot=24200.0, is_expiry_settlement=True)
     assert cost == 0.0
 
-    # If NIFTY expires at 23950 (Between strikes -> Short has 50 intrinsic, Long has 0)
-    cost = engine._evaluate_spread_exit_cost(trade_bp, {}, "BASE", final_spot=23950.0, is_expiry_settlement=True)
+    # If NIFTY expires at 23950 (Short put 24000 in-the-money by 50, long put 23900 OTM -> cost 50)
+    cost = engine._evaluate_spread_exit_cost(trade_ic, {}, "BASE", final_spot=23950.0, is_expiry_settlement=True)
     assert cost == 50.0
 
-    # If NIFTY expires at 23800 (Below long strike -> Max loss = 100 pts)
-    cost = engine._evaluate_spread_exit_cost(trade_bp, {}, "BASE", final_spot=23800.0, is_expiry_settlement=True)
+    # If NIFTY expires at 23800 (Below long put 23900 -> max put wing loss 100 pts)
+    cost = engine._evaluate_spread_exit_cost(trade_ic, {}, "BASE", final_spot=23800.0, is_expiry_settlement=True)
     assert cost == 100.0
 
 
 def test_metrics_finalization(engine):
     """Verify performance metrics calculation (ROI, Profit Factor, Expectancy, Max Drawdown)."""
-    m = StrategyMetrics(strategy_id="BULL_PUT", scenario="BASE")
+    m = StrategyMetrics(strategy_id="IRON_CONDOR", scenario="BASE")
 
     # Trade 1: Win ₹5,000
     t1 = BacktestTrade(
-        trade_id="T1", strategy_id="BULL_PUT", strategy_name="Bull Put", engine_type="INTRADAY",
+        trade_id="T1", strategy_id="IRON_CONDOR", strategy_name="Iron Condor", engine_type="INTRADAY",
         scenario="BASE", expiry="2025-01-23", entry_time="2025-01-20 10:00:00",
         gross_pnl=5500.0, total_costs=500.0, net_pnl=5000.0
     )
@@ -94,7 +95,7 @@ def test_metrics_finalization(engine):
 
     # Trade 2: Loss ₹2,000
     t2 = BacktestTrade(
-        trade_id="T2", strategy_id="BULL_PUT", strategy_name="Bull Put", engine_type="INTRADAY",
+        trade_id="T2", strategy_id="IRON_CONDOR", strategy_name="Iron Condor", engine_type="INTRADAY",
         scenario="BASE", expiry="2025-01-23", entry_time="2025-01-21 10:00:00",
         gross_pnl=-1500.0, total_costs=500.0, net_pnl=-2000.0
     )
@@ -289,24 +290,28 @@ def test_session_transition_settles_unclosed_trades():
         "timestamp": "2025-05-15 13:20:00",
         "spot_price": 24000.0,
         "chain_by_strike": {
-            24000.0: {"CE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}, "PE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}},
-            24050.0: {"CE": {"ltp": 30.0, "bid": 29.8, "ask": 30.2}, "PE": {"ltp": 70.0, "bid": 69.8, "ask": 70.2}},
+            23950.0: {"PE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}},
+            23900.0: {"PE": {"ltp": 30.0, "bid": 29.8, "ask": 30.2}},
+            24050.0: {"CE": {"ltp": 50.0, "bid": 49.8, "ask": 50.2}},
+            24100.0: {"CE": {"ltp": 30.0, "bid": 29.8, "ask": 30.2}},
         }
     }
     trade = BacktestTrade(
         trade_id="BT-TEST-0001",
-        strategy_id="BEAR_CALL",
-        strategy_name="Bear Call Credit Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         scenario="BASE",
         expiry="2025-05-15",
         entry_time="2025-05-15 09:20:00",
         lots=1,
         quantity=75,
-        short_strike=24000.0,
-        long_strike=24050.0,
-        net_credit_pts=20.0,
-        entry_spread_cost=20.0,
+        short_strike=23950.0,
+        long_strike=23900.0,
+        short_strike_2=24050.0,
+        long_strike_2=24100.0,
+        net_credit_pts=40.0,
+        entry_spread_cost=40.0,
     )
 
     engine._close_trade_at_settlement(trade, dummy_snap, scenario="BASE", reason="SESSION_CUTOFF")

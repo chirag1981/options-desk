@@ -113,8 +113,8 @@ def test_safety_gate_rejects_simulated_stream_without_isolation(app_ctx, clean_s
     os.environ.pop("OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA", None)
 
     cand = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -148,8 +148,8 @@ def test_safety_gate_allows_synthetic_only_under_both_flags(app_ctx, clean_synth
     os.environ["OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA"] = "1"
 
     cand = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -190,7 +190,7 @@ def test_manual_execution_route_enforces_safety_gate(app_ctx, clean_synthetic_en
     client = app_ctx.test_client()
 
     payload = {
-        "strategy_id": "BULL_PUT",
+        "strategy_id": "IRON_CONDOR",
         "engine_type": "INTRADAY",
         "lots": 1,
     }
@@ -225,8 +225,8 @@ def test_missing_bid_blocks_candidate(app_ctx, clean_synthetic_env):
     os.environ["OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA"] = "1"
 
     cand = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -257,8 +257,8 @@ def test_crossed_market_rejection(app_ctx, clean_synthetic_env):
     os.environ["OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA"] = "1"
 
     cand = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -406,8 +406,8 @@ def test_risk_evaluation_includes_transaction_costs(app_ctx):
     """
     # Spread loss alone is ₹4,950 (< ₹5,000), but round-trip costs (~₹110) push total risk to ₹5,060 > ₹5,000 -> REJECTED
     marginal_candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -594,8 +594,8 @@ def test_daily_loss_circuit_breaker_halts_trading(app_ctx):
     # 1. Create a closed position with realized net loss > ₹15,000
     pos = TradePosition(
         engine_type="INTRADAY",
-        strategy_id="BEAR_CALL",
-        strategy_name="Bear Call Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         symbol="NIFTY",
         expiry="27-OCT-2026",
         lots=3,
@@ -621,8 +621,8 @@ def test_daily_loss_circuit_breaker_halts_trading(app_ctx):
     db.session.commit()
 
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -657,8 +657,8 @@ def test_daily_loss_resets_on_new_trading_day(app_ctx):
     # Position stopped out yesterday
     pos = TradePosition(
         engine_type="INTRADAY",
-        strategy_id="BEAR_CALL",
-        strategy_name="Bear Call Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         symbol="NIFTY",
         expiry="27-OCT-2026",
         lots=3,
@@ -682,8 +682,8 @@ def test_daily_loss_resets_on_new_trading_day(app_ctx):
     db.session.commit()
 
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -715,8 +715,8 @@ def test_consecutive_loss_cooldown_blocks_immediate_reentry(app_ctx):
     PortfolioRiskManager.register_loss_exit(exit_time=base_time)
 
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -758,8 +758,8 @@ def test_cooldown_restores_from_database_on_restart(app_ctx):
     PortfolioRiskManager._last_loss_exit_time = None
 
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -799,8 +799,8 @@ def test_combined_open_risk_includes_open_positions_with_costs(app_ctx):
     # Total committed risk of open position = 16,000 + 2 * 110 = ₹16,220.
     pos = TradePosition(
         engine_type="POSITIONAL",
-        strategy_id="BEAR_CALL",
-        strategy_name="Bear Call Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         symbol="NIFTY",
         expiry="27-OCT-2026",
         lots=2,
@@ -822,8 +822,8 @@ def test_combined_open_risk_includes_open_positions_with_costs(app_ctx):
     # Candidate total risk with costs = 3,700 + 110.42 = ₹3,810.42.
     # Combined projected risk = 16,220.84 + 3,810.42 = ₹20,031.26 > ₹20,000 ceiling -> REJECTED!
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -859,8 +859,8 @@ def test_missing_quote_prevents_mtm_valuation_and_phantom_exit(app_ctx):
     now_dt = datetime.now(IST)
     pos = TradePosition(
         engine_type="INTRADAY",
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         symbol="NIFTY",
         expiry="27-OCT-2026",
         lots=1,
@@ -960,8 +960,8 @@ def test_spread_lifecycle_complete_fee_and_risk_field_semantics(app_ctx):
     """
     # 1. Setup Candidate
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
@@ -1033,8 +1033,8 @@ def test_estimated_vs_realized_costs_comparison_and_explanation():
     3. Confirms estimated costs are conservative (>= realized costs on profitable trades).
     """
     candidate = SpreadCandidate(
-        strategy_id="BULL_PUT",
-        strategy_name="Bull Put Spread",
+        strategy_id="IRON_CONDOR",
+        strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
         expiry="27-OCT-2026",
