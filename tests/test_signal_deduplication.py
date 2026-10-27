@@ -322,7 +322,11 @@ def test_scheduler_run_cycle_deduplication_cadence(app_ctx, monkeypatch):
     monkeypatch.setattr(Config, "INTRADAY_ENTRY_START", "00:00:00")
     monkeypatch.setattr(Config, "INTRADAY_ENTRY_CUTOFF", "23:59:59")
 
-    # Execute Cycle 1 -> 2 signals persisted (1 Intraday + 1 Positional)
+    # Freeze market chain so test evaluates identical market data across cycles without live market tick jitter
+    base_chain = MarketDataProvider.get_option_chain()
+    monkeypatch.setattr(MarketDataProvider, "get_option_chain", lambda expiry=None: dict(base_chain))
+
+    # Execute Cycle 1 -> signals persisted (1 Intraday + 1 Positional)
     DeskScheduler.run_cycle()
     count_cycle1 = SignalCandidate.query.count()
     assert count_cycle1 == 2

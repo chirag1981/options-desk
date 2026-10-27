@@ -95,7 +95,7 @@
                         </div>
                         <div class="wall-strike" id="an-r1-strike">--</div>
                         <div class="wall-footer">
-                            <span>Major Institutional Resistance</span>
+                            <span>Primary Institutional Resistance</span>
                             <span id="an-r2-sub">R2: --</span>
                         </div>
                     </div>
@@ -111,7 +111,7 @@
                         </div>
                         <div class="wall-strike" id="an-s1-strike">--</div>
                         <div class="wall-footer">
-                            <span>Major Institutional Support</span>
+                            <span>Primary Institutional Support</span>
                             <span id="an-s2-sub">S2: --</span>
                         </div>
                     </div>
@@ -127,52 +127,252 @@
                         <span class="font-mono text-green" id="an-s1-cushion">--</span>
                     </div>
                     <div class="flow-row">
-                        <span>Confidence & Regime Strength</span>
-                        <span class="flow-badge" id="an-confidence-badge">--</span>
+                        <span>Confidence & Structural Zone</span>
+                        <span class="flow-badge" id="an-confidence-badge">Range: S1 - R1</span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- LIVE OPTION CHAIN DATA -->
-    <div class="desk-card table-card" style="margin-top: 1.5rem;">
+    <!-- OI PULSE OPTION CHAIN CONTROLS -->
+    <div class="chain-filter-card" style="margin-top: 1.25rem;">
+        <div class="chain-filter-flex">
+            <div class="chain-filter-controls">
+                <!-- Mode Switch -->
+                <div class="filter-group">
+                    <label>Mode</label>
+                    <div class="mode-switch-group">
+                        <button type="button" class="btn-mode-toggle active" id="btn-mode-live" onclick="setChainMode('live')">
+                            <span class="live-pulse-dot"></span>
+                            <span>Live data</span>
+                        </button>
+                        <button type="button" class="btn-mode-toggle" id="btn-mode-historical" onclick="setChainMode('historical')">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            <span>Historical data</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Select Name / Index -->
+                <div class="filter-group">
+                    <label>Select Name</label>
+                    <select id="chain-symbol-select" disabled>
+                        <option value="NIFTY" selected>NIFTY</option>
+                    </select>
+                </div>
+
+                <!-- Select Date (Historical) -->
+                <div class="filter-group" id="group-date-select" style="display:none;">
+                    <label>Select Date</label>
+                    <select id="chain-date-select" onchange="onHistoricalDateChange()">
+                        <option value="">Loading dates...</option>
+                    </select>
+                </div>
+
+                <!-- Expiry Date -->
+                <div class="filter-group">
+                    <label>Expiry Date (Monthly)</label>
+                    <select id="chain-expiry-select" onchange="fetchAnalysisData()">
+                        <option value="">Auto-detected (Monthly)</option>
+                    </select>
+                </div>
+
+                <!-- Interval / Custom Time -->
+                <div class="filter-group">
+                    <label>Interval / Time</label>
+                    <select id="chain-interval-select" onchange="onIntervalChange()">
+                        <option value="full_day" selected>Full Day</option>
+                        <option value="custom_time">Custom Time</option>
+                        <option value="last_30">Last 30 min</option>
+                        <option value="last_15">Last 15 min</option>
+                        <option value="last_5">Last 5 min</option>
+                    </select>
+                </div>
+
+                <!-- Custom Time Input (shown when Custom Time is selected) -->
+                <div class="filter-group" id="group-custom-time" style="display:none;">
+                    <label>Exact Snapshot Time</label>
+                    <div style="display:flex; align-items:center; gap:0.35rem;">
+                        <select id="chain-custom-time-picker">
+                            <option value="12:00:00">12:00 PM</option>
+                            <option value="13:00:00">01:00 PM</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Action Go Button -->
+                <div class="filter-group" style="align-self: flex-end;">
+                    <button type="button" class="btn-chain-go" id="btn-apply-chain-filter" onclick="applyChainFilter()">
+                        <span>Go</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Column Settings Button -->
+            <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
+                <button type="button" class="btn-chain-settings" id="btn-open-col-settings" onclick="openColumnSettingsModal()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                    <span>Column Setting</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UNDERLYING TICKER STRIP -->
+    <div class="underlying-ticker-strip">
+        <div class="ticker-left">
+            <span class="ticker-title">Underlying:</span>
+            <span class="ticker-title" style="color:var(--text-primary); font-weight:850;" id="ticker-symbol">NIFTY 50</span>
+            <span>at</span>
+            <span class="ticker-spot" id="ticker-spot">--</span>
+            <span class="ticker-chg" id="ticker-chg">--</span>
+        </div>
+        <div class="ticker-right">
+            <span>Snapshot:</span>
+            <span id="ticker-time" style="font-weight:750; color:var(--text-primary);">--</span>
+            <span id="ticker-status-badge" class="status-chip chip-gold">LIVE BROKER STREAM</span>
+        </div>
+    </div>
+
+    <!-- ADVANCED OPTION CHAIN TABLE CARD -->
+    <div class="desk-card table-card" style="margin-top: 0.5rem;">
         <div class="card-header">
             <div class="card-title-group">
                 <span class="card-panel-num">03</span>
-                <h3>Live Option Chain Data (OI & Market Structure)</h3>
+                <h3 id="chain-table-heading">Option Chain & Structural OI Walls</h3>
             </div>
             <div style="display:flex; align-items:center; gap:0.75rem;">
-                <span class="count-pill" id="chain-expiry-label">Active Expiry: --</span>
-                <span class="status-chip chip-gold" id="chain-status-chip">LIVE CHAIN</span>
+                <span class="count-pill" id="chain-active-expiry-pill">Active Expiry: --</span>
+                <span class="status-chip chip-gold" id="chain-mode-pill">LIVE FEED</span>
             </div>
         </div>
         <div class="card-body no-padding">
-            <div class="table-responsive">
-                <table class="data-table chain-table">
-                    <thead>
-                        <tr class="chain-header-top">
-                            <th colspan="4" class="text-center call-bg">CALLS (CE)</th>
-                            <th class="text-center strike-bg">STRIKE</th>
-                            <th colspan="4" class="text-center put-bg">PUTS (PE)</th>
-                        </tr>
-                        <tr>
-                            <th class="call-bg">OI</th>
-                            <th class="call-bg">ΔOI</th>
-                            <th class="call-bg">Bid</th>
-                            <th class="call-bg">Ask</th>
-                            <th class="strike-bg text-center">Strike Price</th>
-                            <th class="put-bg">Bid</th>
-                            <th class="put-bg">Ask</th>
-                            <th class="put-bg">ΔOI</th>
-                            <th class="put-bg">OI</th>
-                        </tr>
+            <div class="chain-table-container">
+                <table class="chain-table-advanced" id="advanced-chain-table">
+                    <thead id="chain-thead">
+                        <!-- Populated dynamically based on visible columns -->
                     </thead>
                     <tbody id="chain-tbody">
-                        <tr><td colspan="9" class="text-center">Loading live option chain...</td></tr>
+                        <tr><td colspan="23" style="text-align:center; padding:2rem; color:var(--text-muted);">Loading option chain data...</td></tr>
+                    </tbody>
+                    <tfoot id="chain-tfoot">
+                        <!-- Summary Totals Row -->
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL 1: STRIKE 7-DAY EXPIRY STRATEGY HISTORY -->
+<div class="modal-overlay" id="modal-strike-history" onclick="onModalOverlayClick(event, 'modal-strike-history')">
+    <div class="modal-box">
+        <div class="modal-header-3d">
+            <h3 id="modal-strike-title">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                <span>Strike Historical Analysis</span>
+            </h3>
+            <button class="modal-close-btn" onclick="closeStrikeHistoryModal()" aria-label="Close Modal">&times;</button>
+        </div>
+        <div class="modal-body-scroll">
+            <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.85rem;">
+                Past 7 trading sessions' OHLC, Volume, and Open Interest build-up flow for this specific strike.
+            </p>
+            <div style="overflow-x:auto;">
+                <table class="chain-table-advanced" style="font-size:0.72rem;">
+                    <thead>
+                        <tr class="header-tier-1">
+                            <th rowspan="2" style="background:#F2F0FA; color:var(--accent-purple-deep); text-align:center;">Date</th>
+                            <th colspan="7" class="th-calls">CALL (CE)</th>
+                            <th colspan="7" class="th-puts">PUT (PE)</th>
+                        </tr>
+                        <tr class="header-tier-2">
+                            <th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Vol</th><th>OI</th><th>Flow</th>
+                            <th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Vol</th><th>OI</th><th>Flow</th>
+                        </tr>
+                    </thead>
+                    <tbody id="strike-history-tbody">
+                        <tr><td colspan="15" style="text-align:center; padding:1.5rem;">Loading strike history...</td></tr>
                     </tbody>
                 </table>
             </div>
+        </div>
+        <div class="modal-footer-3d">
+            <button type="button" class="btn-3d btn-secondary btn-sm" onclick="closeStrikeHistoryModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL 2: COLUMN SETTINGS -->
+<div class="modal-overlay" id="modal-col-settings" onclick="onModalOverlayClick(event, 'modal-col-settings')">
+    <div class="modal-box" style="max-width: 600px;">
+        <div class="modal-header-3d">
+            <h3>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                <span>Option Chain Column Settings</span>
+            </h3>
+            <button class="modal-close-btn" onclick="closeColumnSettingsModal()" aria-label="Close Modal">&times;</button>
+        </div>
+        <div class="modal-body-scroll">
+            <p style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Select columns to display in the Option Chain table. Your preferences are saved automatically for future visits.
+            </p>
+            <div class="col-settings-grid">
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-delta" checked>
+                    <span>Delta (Black-76)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-interp" checked>
+                    <span>OI Int. (LB/SB/SC/LU)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-oip" checked>
+                    <span>OI Change %</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-oi" checked disabled>
+                    <span>Total OI (Required)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-oichg" checked>
+                    <span>OI Change</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-iv" checked>
+                    <span>Implied Volatility (IV)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-ltp" checked disabled>
+                    <span>LTP (Required)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-ltpchg" checked>
+                    <span>LTP Change & %</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-pcr" checked>
+                    <span>Strike PCR</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-ohlc">
+                    <span>O=L / O=H (Momentum)</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-ivchg">
+                    <span>IV Change</span>
+                </label>
+                <label class="col-checkbox-label">
+                    <input type="checkbox" id="chk-col-ltpp">
+                    <span>Separate LTP %</span>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer-3d">
+            <button type="button" class="btn-3d btn-secondary btn-sm" onclick="resetDefaultColumns()">Reset Defaults</button>
+            <button type="button" class="btn-3d btn-gold btn-sm" onclick="saveColumnSettings()">Save Settings</button>
         </div>
     </div>
 </div>

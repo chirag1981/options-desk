@@ -8,6 +8,7 @@ Provides persistent storage for:
 """
 
 from datetime import datetime
+from typing import Dict, Any, List, Optional
 from zoneinfo import ZoneInfo
 from app.extensions import db
 
@@ -165,6 +166,7 @@ class TradePosition(db.Model):
     
     legs = db.relationship("PositionLeg", backref="position", cascade="all, delete-orphan", lazy="joined")
     mtm_snapshots = db.relationship("PositionMTMSnapshot", backref="position", cascade="all, delete-orphan", lazy="select")
+    trade_plan = db.relationship("TradePlan", backref="position", uselist=False, cascade="all, delete-orphan", lazy="joined")
 
     @property
     def total_risk_with_costs_inr(self) -> float:
@@ -368,4 +370,142 @@ class PositionMTMSnapshot(db.Model):
             "unrealized_net_pnl_inr": self.unrealized_net_pnl_inr,
             "data_quality_status": self.data_quality_status,
             "leg_prices": self.leg_prices_json,
+        }
+
+
+class TradePlan(db.Model):
+    """
+    Persisted Discipline Trade Plan created at entry.
+    Enforces strict risk caps, profit-take levels, planned loss exit,
+    thesis-break levels, and execution discipline invariants.
+    """
+    __tablename__ = "trade_plans"
+
+    id = db.Column(db.Integer, primary_key=True)
+    position_id = db.Column(db.Integer, db.ForeignKey("trade_positions.id"), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(IST), index=True)
+    strategy_id = db.Column(db.String(30), default="IRON_CONDOR")
+    symbol = db.Column(db.String(20), default="NIFTY")
+    expiry = db.Column(db.String(20), nullable=False)
+    spot_at_entry = db.Column(db.Float, nullable=False)
+    lot_size = db.Column(db.Integer, nullable=False)
+    lots = db.Column(db.Integer, default=1)
+
+    # Original Strikes
+    short_call = db.Column(db.Float, nullable=True)
+    long_call = db.Column(db.Float, nullable=True)
+    short_put = db.Column(db.Float, nullable=True)
+    long_put = db.Column(db.Float, nullable=True)
+
+    # Financial Metrics
+    net_credit_pts = db.Column(db.Float, nullable=False)
+    net_credit_inr = db.Column(db.Float, nullable=False)
+    max_profit_inr = db.Column(db.Float, nullable=False)
+    max_loss_inr = db.Column(db.Float, nullable=False)
+    max_loss_pct_of_capital = db.Column(db.Float, nullable=False)  # Must be <= 2.0%
+
+    # Discipline Target and Loss Limits
+    profit_take_pct = db.Column(db.Float, default=0.75)             # 70-80%, default 75%
+    profit_take_inr = db.Column(db.Float, nullable=False)
+    planned_loss_exit_pct = db.Column(db.Float, default=0.60)       # default 60% of max loss
+    planned_loss_exit_inr = db.Column(db.Float, nullable=False)
+
+    # Thesis-Break Thresholds (spot has covered 65% of distance to short strike within first 25% of life)
+    thesis_break_level_call = db.Column(db.Float, nullable=False)
+    thesis_break_level_put = db.Column(db.Float, nullable=False)
+    thesis_break_time_window_pct = db.Column(db.Float, default=0.25)
+    initial_dte = db.Column(db.Float, default=30.0)
+
+    # Invariant Hard Flags
+    time_exit_dte = db.Column(db.Float, default=1.0)
+    hold_to_expiry = db.Column(db.Boolean, default=False)
+    hedge_legs_stay_on = db.Column(db.Boolean, default=True)
+    rolls_allowed_only_to_reduce_risk = db.Column(db.Boolean, default=True)
+    hedge_cost_cap_pct = db.Column(db.Float, default=25.0)
+
+    # Adherence & Outcome Audit
+    status = db.Column(db.String(30), default="ACTIVE")             # ACTIVE, COMPLETED, VIOLATED
+    realized_loss_inr = db.Column(db.Float, nullable=True)
+    loss_exceeded_plan = db.Column(db.Boolean, default=False)
+    exceeded_cause = db.Column(db.String(255), nullable=True)
+
+    def to_plan_text(self) -> str:
+        """Formatted representation matching exact user trade plan template."""
+        return (
+            f"Spot / expiry / lot size: {self.spot_at_entry:.2f} / {self.expiry} / {self.lot_size}\n"
+            f"Legs (short call, long call, short put, long put): {int(self.short_call)} CE, {int(self.long_call)} CE, {int(self.short_put)} PE, {int(self.long_put)} PE\n"
+            f"Net credit (pts and ₹): {self.net_credit_pts:.2f} pts (₹{self.net_credit_inr:,.2f})\n"
+            f"Max profit ₹: ₹{self.max_profit_inr:,.2f}   Max loss ₹: ₹{self.max_loss_inr:,.2f}   Max loss as % of capital: {self.max_loss_pct_of_capital:.2f}% (≤ 1-2%)\n"
+            f"Profit-take level (70-80% of max profit): ₹{self.profit_take_inr:,.2f} ({int(self.profit_take_pct * 100)}%)\n"
+            f"Planned loss exit (before max loss): ₹{self.planned_loss_exit_inr:,.2f} ({int(self.planned_loss_exit_pct * 100)}%)\n"
+            f"Thesis-break level (spot): Call {self.thesis_break_level_call:.1f} / Put {self.thesis_break_level_put:.1f}\n"
+            f"Time exit (days before expiry): {self.time_exit_dte:.1f} DTE\n"
+            f"Hedge legs stay on until the shorts are closed: {'YES' if self.hedge_legs_stay_on else 'NO'}\n"
+            f"Rolls allowed only to reduce risk: {'YES' if self.rolls_allowed_only_to_reduce_risk else 'NO'}"
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "position_id": self.position_id,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else "",
+            "strategy_id": self.strategy_id,
+            "symbol": self.symbol,
+            "expiry": self.expiry,
+            "spot_at_entry": self.spot_at_entry,
+            "lot_size": self.lot_size,
+            "lots": self.lots,
+            "legs": {
+                "short_call": self.short_call,
+                "long_call": self.long_call,
+                "short_put": self.short_put,
+                "long_put": self.long_put,
+            },
+            "net_credit_pts": self.net_credit_pts,
+            "net_credit_inr": self.net_credit_inr,
+            "max_profit_inr": self.max_profit_inr,
+            "max_loss_inr": self.max_loss_inr,
+            "max_loss_pct_of_capital": self.max_loss_pct_of_capital,
+            "profit_take_pct": self.profit_take_pct,
+            "profit_take_inr": self.profit_take_inr,
+            "planned_loss_exit_pct": self.planned_loss_exit_pct,
+            "planned_loss_exit_inr": self.planned_loss_exit_inr,
+            "thesis_break_level_call": self.thesis_break_level_call,
+            "thesis_break_level_put": self.thesis_break_level_put,
+            "thesis_break_time_window_pct": self.thesis_break_time_window_pct,
+            "initial_dte": self.initial_dte,
+            "time_exit_dte": self.time_exit_dte,
+            "hold_to_expiry": self.hold_to_expiry,
+            "hedge_legs_stay_on": self.hedge_legs_stay_on,
+            "rolls_allowed_only_to_reduce_risk": self.rolls_allowed_only_to_reduce_risk,
+            "hedge_cost_cap_pct": self.hedge_cost_cap_pct,
+            "status": self.status,
+            "realized_loss_inr": self.realized_loss_inr,
+            "loss_exceeded_plan": self.loss_exceeded_plan,
+            "exceeded_cause": self.exceeded_cause,
+            "plan_text": self.to_plan_text(),
+        }
+
+
+class DisciplineViolationLog(db.Model):
+    """
+    Persistent audit record of every rule violation rejected by the discipline rules engine.
+    """
+    __tablename__ = "discipline_violations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(IST), index=True)
+    position_id = db.Column(db.Integer, nullable=True, index=True)
+    rule_code = db.Column(db.String(50), nullable=False, index=True)
+    description = db.Column(db.Text, nullable=False)
+    attempted_action = db.Column(db.String(100), nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S") if self.timestamp else "",
+            "position_id": self.position_id,
+            "rule_code": self.rule_code,
+            "description": self.description,
+            "attempted_action": self.attempted_action,
         }

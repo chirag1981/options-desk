@@ -24,6 +24,7 @@ import pyotp
 from fyers_apiv3 import fyersModel
 
 from app.config import Config
+from app.contracts import ContractRegistry
 
 log = logging.getLogger("market_data")
 IST = ZoneInfo("Asia/Kolkata")
@@ -322,26 +323,42 @@ class MarketDataProvider:
         raw_bid = opt.get("bid")
         raw_ask = opt.get("ask")
         raw_ltp = opt.get("ltp")
+        raw_ltpch = opt.get("ltpch")
+        raw_ltpchp = opt.get("ltpchp")
         raw_oi = opt.get("oi")
-        raw_chg_oi = opt.get("oi_change", opt.get("change_oi"))
+        raw_prev_oi = opt.get("prev_oi")
+        raw_chg_oi = opt.get("oich", opt.get("oi_change", opt.get("change_oi")))
+        raw_chg_oi_pct = opt.get("oichp")
         raw_vol = opt.get("volume")
         raw_iv = opt.get("iv")
 
         bid = float(raw_bid) if (raw_bid is not None and str(raw_bid).strip() != "") else 0.0
         ask = float(raw_ask) if (raw_ask is not None and str(raw_ask).strip() != "") else 0.0
         ltp = float(raw_ltp) if (raw_ltp is not None and str(raw_ltp).strip() != "") else 0.0
+        ltp_change = float(raw_ltpch) if (raw_ltpch is not None and str(raw_ltpch).strip() != "") else 0.0
+        ltp_change_pct = float(raw_ltpchp) if (raw_ltpchp is not None and str(raw_ltpchp).strip() != "") else 0.0
         oi = int(raw_oi) if (raw_oi is not None and str(raw_oi).strip() != "") else None
-        change_oi = int(raw_chg_oi) if (raw_chg_oi is not None and str(raw_chg_oi).strip() != "") else None
+        prev_oi = int(raw_prev_oi) if (raw_prev_oi is not None and str(raw_prev_oi).strip() != "") else None
+        change_oi = int(raw_chg_oi) if (raw_chg_oi is not None and str(raw_chg_oi).strip() != "") else (
+            (oi - prev_oi) if (oi is not None and prev_oi is not None) else None
+        )
+        change_oi_pct = float(raw_chg_oi_pct) if (raw_chg_oi_pct is not None and str(raw_chg_oi_pct).strip() != "") else (
+            (round((change_oi / prev_oi) * 100.0, 2) if (change_oi is not None and prev_oi and prev_oi > 0) else 0.0)
+        )
         vol = int(raw_vol) if (raw_vol is not None and str(raw_vol).strip() != "") else None
         iv = float(raw_iv) if (raw_iv is not None and str(raw_iv).strip() != "") else 0.0
 
         return {
             "symbol": opt.get("symbol", ""),
             "ltp": ltp,
+            "ltp_change": ltp_change,
+            "ltp_change_pct": ltp_change_pct,
             "bid": bid,
             "ask": ask,
             "oi": oi,
+            "prev_oi": prev_oi,
             "change_oi": change_oi,
+            "change_oi_pct": change_oi_pct,
             "volume": vol,
             "iv": iv,
         }
@@ -361,13 +378,43 @@ class MarketDataProvider:
 
         if client and data_status == "FYERS_LIVE":
             try:
-                # 1. Fetch Option Chain from FYERS
-                chain_req = {"symbol": Config.INDEX_FYERS_SYMBOL, "strikecount": 12}
+                # 1. Fetch Option Chain from FYERS (25 strikes on each side covers all S1/S2 and R1/R2 walls)
+                chain_req = {"symbol": Config.INDEX_FYERS_SYMBOL, "strikecount": 25}
                 resp = client.optionchain(chain_req)
                 if resp.get("s") == "ok" and resp.get("data"):
                     raw_data = resp["data"]
                     exp_dates = raw_data.get("expiryData", [])
-                    active_exp = expiry or (exp_dates[0]["date"] if exp_dates else "")
+
+                    # Filter for monthly expiries if configured
+                    monthly_expiries = [
+                        e for e in exp_dates
+                        if e.get("expiry_flag") == "M" or ContractRegistry.is_monthly_expiry(e.get("date", ""))
+                    ]
+                    available_exp_list = monthly_expiries if Config.MONTHLY_EXPIRIES_ONLY else exp_dates
+
+                    # Determine target expiry and timestamp
+                    matched_exp = None
+                    if expiry and str(expiry).strip():
+                        target_str = str(expiry).strip().upper()
+                        for e in exp_dates:
+                            if str(e.get("date", "")).strip().upper() == target_str:
+                                matched_exp = e
+                                break
+
+                    if matched_exp is None and available_exp_list:
+                        matched_exp = available_exp_list[0]
+
+                    active_exp = matched_exp.get("date", "") if matched_exp else (exp_dates[0]["date"] if exp_dates else "")
+
+                    # If targeted expiry requires a timestamp query different from the initial default call
+                    if matched_exp and matched_exp.get("expiry"):
+                        target_ts = str(matched_exp["expiry"])
+                        default_first_ts = str(exp_dates[0]["expiry"]) if exp_dates and exp_dates[0].get("expiry") else ""
+                        if target_ts != default_first_ts:
+                            sub_req = {"symbol": Config.INDEX_FYERS_SYMBOL, "strikecount": 25, "timestamp": target_ts}
+                            sub_resp = client.optionchain(sub_req)
+                            if sub_resp.get("s") == "ok" and sub_resp.get("data"):
+                                raw_data = sub_resp["data"]
 
                     options_list = raw_data.get("optionsChain", [])
                     chain_by_strike = {}
@@ -384,10 +431,20 @@ class MarketDataProvider:
                         chain_by_strike[stk][opt_type] = cls.parse_option_quote(opt)
 
                     if chain_by_strike:
+                        available_formatted = [
+                            {
+                                "date": e.get("date", ""),
+                                "timestamp": e.get("expiry", ""),
+                                "expiry_flag": e.get("expiry_flag", "M" if ContractRegistry.is_monthly_expiry(e.get("date", "")) else "W"),
+                                "label": f"{e.get('date', '')} (Monthly)" if (e.get("expiry_flag") == "M" or ContractRegistry.is_monthly_expiry(e.get("date", ""))) else e.get("date", ""),
+                            }
+                            for e in available_exp_list
+                        ]
                         return {
                             "spot_price": spot,
                             "spot_change_pct": spot_chg,
                             "expiry": active_exp,
+                            "available_expiries": available_formatted,
                             "chain_by_strike": chain_by_strike,
                             "data_status": "FYERS_LIVE",
                         }
@@ -396,12 +453,18 @@ class MarketDataProvider:
 
         # Unit testing mode fixture only (pytest)
         if cls._is_test_mode():
-            active_exp = expiry or datetime.now(IST).strftime("%d-%b-%Y").upper()
+            active_exp = expiry or "27-OCT-2026"
             chain_by_strike = cls._generate_mock_chain(spot or 24500.0)
+            mock_expiries = [
+                {"date": "27-OCT-2026", "timestamp": "1793095800", "expiry_flag": "M", "label": "27-OCT-2026 (Monthly)"},
+                {"date": "23-NOV-2026", "timestamp": "1795428600", "expiry_flag": "M", "label": "23-NOV-2026 (Monthly)"},
+                {"date": "29-DEC-2026", "timestamp": "1798539000", "expiry_flag": "M", "label": "29-DEC-2026 (Monthly)"},
+            ]
             return {
                 "spot_price": spot or 24500.0,
                 "spot_change_pct": spot_chg or 0.35,
                 "expiry": active_exp,
+                "available_expiries": mock_expiries,
                 "chain_by_strike": chain_by_strike,
                 "data_status": "TEST_MOCK",
             }
@@ -411,6 +474,7 @@ class MarketDataProvider:
             "spot_price": 0.0,
             "spot_change_pct": 0.0,
             "expiry": "",
+            "available_expiries": [],
             "chain_by_strike": {},
             "data_status": "DISCONNECTED",
         }
@@ -424,7 +488,7 @@ class MarketDataProvider:
         # Realistic NIFTY decay table: ATM ~90 pts, 50 OTM ~56 pts, 100 OTM ~34 pts, 150 OTM ~21.5 pts, 200 OTM ~10.5 pts, etc.
         decay_table = {0: 90.0, 1: 56.0, 2: 34.0, 3: 21.5, 4: 10.5, 5: 5.0, 6: 2.5, 7: 1.5, 8: 1.0}
 
-        for i in range(-8, 9):
+        for i in range(-16, 17):
             stk = atm + (i * 50.0)
             step_otm_ce = max(0, int(round((stk - spot) / 50.0))) if stk >= spot else 0
             step_otm_pe = max(0, int(round((spot - stk) / 50.0))) if stk <= spot else 0

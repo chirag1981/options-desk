@@ -184,9 +184,11 @@ def test_safety_gate_allows_synthetic_only_under_both_flags(app_ctx, clean_synth
 
 # ---------------- 3. Execution Paths Rejection of Invalid / Simulated Data ----------------
 
-def test_manual_execution_route_enforces_safety_gate(app_ctx, clean_synthetic_env):
+def test_manual_execution_route_enforces_safety_gate(app_ctx, clean_synthetic_env, monkeypatch):
     """Verifies /api/execute-candidate enforces the ExecutionSafetyGate."""
+    from app.market_data import MarketDataProvider
     os.environ.pop("OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA", None)
+    monkeypatch.setattr(MarketDataProvider, "get_option_chain", lambda: {"spot_price": 0.0, "data_status": "DISCONNECTED"})
     client = app_ctx.test_client()
 
     payload = {
@@ -195,7 +197,6 @@ def test_manual_execution_route_enforces_safety_gate(app_ctx, clean_synthetic_en
         "lots": 1,
     }
     response = client.post("/api/execute-candidate", json=payload)
-    # Since live FYERS stream is not active in this test runner, it must reject with 400
     assert response.status_code == 400
     data = response.get_json()
     assert data["status"] == "error"
@@ -964,7 +965,7 @@ def test_spread_lifecycle_complete_fee_and_risk_field_semantics(app_ctx):
         strategy_name="Iron Condor",
         engine_type="INTRADAY",
         symbol="NIFTY",
-        expiry="27-OCT-2026",
+        expiry="27-NOV-2026",
         lots=1,
         quantity=65,
         legs=[

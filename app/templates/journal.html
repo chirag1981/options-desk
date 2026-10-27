@@ -45,6 +45,57 @@
         </div>
     </div>
 
+    <!-- Plan Adherence & Rules Engine Audit Row -->
+    <div class="desk-card" style="margin-bottom: 1.5rem;">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                <h3 style="margin:0; font-size:1.05rem;">Discipline Layer & Plan Adherence</h3>
+            </div>
+            <span class="status-chip chip-green" id="plan-adherence-rate-chip" style="font-size:0.78rem; font-weight:700;">Adherence: 100.0%</span>
+        </div>
+        <div class="card-body" style="padding: 1.25rem;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 0.9rem;">
+                    <div style="font-size:0.75rem; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Plans Enforced</div>
+                    <div id="adherence-total-plans" style="font-size:1.3rem; font-weight:700; color:#fff; margin-top:0.25rem;">0</div>
+                    <div style="font-size:0.72rem; color:#666;">Persisted contract per trade</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 0.9rem;">
+                    <div style="font-size:0.75rem; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Blocked Rule Violations</div>
+                    <div id="adherence-blocked-violations" style="font-size:1.3rem; font-weight:700; color:#ef4444; margin-top:0.25rem;">0</div>
+                    <div id="adherence-violation-breakdown" style="font-size:0.72rem; color:#888;">Zero naked shorts, no credit rolls</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 0.9rem;">
+                    <div style="font-size:0.75rem; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Trades Exceeded Plan</div>
+                    <div id="adherence-exceeded-count" style="font-size:1.3rem; font-weight:700; color:#10b981; margin-top:0.25rem;">0</div>
+                    <div style="font-size:0.72rem; color:#666;">Realized loss > planned loss</div>
+                </div>
+            </div>
+
+            <!-- Adherence Audit Table -->
+            <div class="table-responsive">
+                <table class="data-table" style="font-size: 0.85rem;">
+                    <thead>
+                        <tr>
+                            <th>Position</th>
+                            <th>Expiry</th>
+                            <th>Net Credit</th>
+                            <th>Planned Loss Exit</th>
+                            <th>Max Loss Cap</th>
+                            <th>Actual P&L</th>
+                            <th>Adherence Status</th>
+                            <th>Exit Cause / Audit</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adherence-records-tbody">
+                        <tr><td colspan="8" class="text-center text-muted">No trade plans recorded yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Trades Table -->
     <div class="desk-card table-card">
         <div class="card-header">

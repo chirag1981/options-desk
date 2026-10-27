@@ -98,6 +98,63 @@ def api_market_data():
     })
 
 
+@main_bp.route("/api/option-chain")
+def api_option_chain():
+    """
+    Advanced Option Chain endpoint supporting both Live stream and Historical point-in-time replay.
+    Query parameters:
+    - mode: 'live' or 'historical' (defaults to 'live')
+    - date: YYYY-MM-DD (e.g. '2026-10-19')
+    - time: HH:MM or HH:MM:SS (e.g. '12:00:00')
+    - expiry: optional expiry string
+    """
+    from app.option_chain_service import OptionChainService
+
+    mode = request.args.get("mode", "live").lower()
+    date_param = request.args.get("date")
+    time_param = request.args.get("time")
+    expiry_param = request.args.get("expiry")
+
+    if mode == "historical":
+        if not date_param:
+            dates_info = OptionChainService.get_available_dates()
+            date_param = dates_info.get("latest_date")
+            if not date_param:
+                return jsonify({"status": "error", "message": "No historical sessions found.", "chain": []}), 404
+        result = OptionChainService.get_historical_chain(date_str=date_param, time_str=time_param, expiry=expiry_param)
+        return jsonify(result)
+
+    # Live Mode
+    result = OptionChainService.get_live_chain(expiry=expiry_param)
+    return jsonify(result)
+
+
+@main_bp.route("/api/option-chain/dates")
+def api_option_chain_dates():
+    """Returns list of all available historical session dates and metadata."""
+    from app.option_chain_service import OptionChainService
+    return jsonify(OptionChainService.get_available_dates())
+
+
+@main_bp.route("/api/strike-history")
+def api_strike_history():
+    """
+    Returns up to 7 previous sessions of daily OHLC and OI build-up for a specific strike.
+    Query parameters:
+    - strike: float (e.g. 23100)
+    - date: optional YYYY-MM-DD end date (defaults to latest)
+    """
+    from app.option_chain_service import OptionChainService
+    strike_val = request.args.get("strike", type=float)
+    end_date = request.args.get("date")
+    if not strike_val:
+        return jsonify({"status": "error", "message": "Query parameter 'strike' is required."}), 400
+
+    result = OptionChainService.get_strike_history(strike=strike_val, end_date=end_date)
+    return jsonify(result)
+
+
+
 @main_bp.route("/api/candidates")
 def api_candidates():
     """Returns generated strategy candidates for Intraday and Positional engines."""
@@ -125,15 +182,17 @@ def api_candidates():
     analysis = MarketAnalyzer.analyze_chain(chain_data)
     chain = chain_data.get("chain_by_strike", {})
 
-    intraday_cands = [c.to_dict() for c in IntradayEngine.evaluate(analysis, chain)]
-    positional_cands = [c.to_dict() for c in PositionalEngine.evaluate(analysis, chain)]
+    wing_width = request.args.get("wing_width", default=100.0, type=float)
+    intraday_cands = [] if Config.MONTHLY_EXPIRIES_ONLY else [c.to_dict() for c in IntradayEngine.evaluate(analysis, chain, wing_width=wing_width)]
+    positional_cands = [c.to_dict() for c in PositionalEngine.evaluate(analysis, chain, wing_width=wing_width)]
 
-    # Also build standalone strategy previews for UI selector
-    ic_cand = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY")
-    ib_cand = StrategyBuilder.build_iron_butterfly(analysis, chain, engine_type="INTRADAY")
+    # Standalone strategy previews for UI selector (Positional for monthly expiry)
+    preview_engine = "POSITIONAL" if Config.MONTHLY_EXPIRIES_ONLY else "INTRADAY"
+    ic_cand = StrategyBuilder.build_iron_condor(analysis, chain, engine_type=preview_engine, wing_width=wing_width)
+    ib_cand = StrategyBuilder.build_iron_butterfly(analysis, chain, engine_type=preview_engine)
 
     from app.strategies import AutoStrategySelector
-    auto_sel = AutoStrategySelector.evaluate_auto_selection(analysis, chain)
+    auto_sel = AutoStrategySelector.evaluate_auto_selection(analysis, chain, wing_width=wing_width)
 
     all_previews = [ic_cand.to_dict(), ib_cand.to_dict()]
 
@@ -316,7 +375,7 @@ def api_execute_candidate():
         }), 400
 
     # Execute Paper Fill
-    ok, msg, position = PaperTradingManager.execute_candidate(candidate)
+    ok, msg, position = PaperTradingManager.execute_candidate(candidate, analysis=analysis)
     if not ok:
         return jsonify({"status": "error", "message": msg}), 400
 
@@ -418,6 +477,30 @@ def api_fyers_status():
         "spot_change_pct": chg,
         "token_date": MarketDataProvider._token_date,
         "has_token": bool(MarketDataProvider._access_token),
+    })
+
+
+@main_bp.route("/api/discipline/report")
+def api_discipline_report():
+    """Returns the Plan Adherence report: actual loss vs planned loss, blocked violations, and trades exceeding plan."""
+    from app.discipline import DisciplineRulesEngine
+    report = DisciplineRulesEngine.generate_plan_adherence_report()
+    return jsonify({
+        "status": "success",
+        "report": report,
+    })
+
+
+@main_bp.route("/api/discipline/plan/<int:position_id>")
+def api_trade_plan(position_id: int):
+    """Returns the trade plan for a specific position."""
+    from app.models import TradePlan
+    plan = TradePlan.query.filter_by(position_id=position_id).first()
+    if not plan:
+        return jsonify({"status": "error", "message": f"No trade plan found for position #{position_id}"}), 404
+    return jsonify({
+        "status": "success",
+        "trade_plan": plan.to_dict(),
     })
 
 

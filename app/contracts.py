@@ -141,3 +141,40 @@ class ContractRegistry:
                 )
 
         return True, "Contract validated against authoritative NSE specification.", expected_lot_size
+
+    @classmethod
+    def parse_expiry_date(cls, expiry: Any) -> Optional[date]:
+        """Parses an expiry string into a Python date."""
+        if not expiry:
+            return None
+        if isinstance(expiry, date):
+            return expiry
+        if isinstance(expiry, datetime):
+            return expiry.date()
+        clean = str(expiry).strip().upper()
+        for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d%b%Y", "%d%m%Y"):
+            try:
+                return datetime.strptime(clean, fmt).date()
+            except ValueError:
+                pass
+        return None
+
+    @classmethod
+    def is_monthly_expiry(cls, expiry: Any) -> bool:
+        """
+        Determines whether an expiry date, string, or Fyers expiry object represents a monthly contract.
+        In Indian equity derivatives (NIFTY), the monthly expiry is the final trading expiry
+        of the calendar month, occurring strictly in the final 8 days of the month (last_day - day <= 7).
+        """
+        if isinstance(expiry, dict):
+            if expiry.get("expiry_flag") == "M":
+                return True
+            expiry = expiry.get("date", "")
+
+        exp_date = cls.parse_expiry_date(expiry)
+        if exp_date is None:
+            return False
+
+        import calendar
+        _, last_day = calendar.monthrange(exp_date.year, exp_date.month)
+        return (last_day - exp_date.day) <= 7

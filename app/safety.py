@@ -41,6 +41,15 @@ class ExecutionSafetyGate:
 
         # 2. Data Provider & Live Stream Validation
         data_status = getattr(analysis, "data_status", None) if analysis is not None else getattr(candidate, "data_status", None)
+        if data_status is None:
+            try:
+                from app.market_data import MarketDataProvider
+                _, _, provider_status = MarketDataProvider.get_spot_price()
+                if provider_status:
+                    data_status = provider_status
+            except Exception:
+                pass
+
         is_testing = False
         allow_synthetic = os.environ.get("OPTIONS_DESK_ALLOW_SYNTHETIC_TEST_DATA", "0") == "1"
 

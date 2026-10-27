@@ -11,6 +11,12 @@
                 <span class="card-panel-num">01</span>
                 <h3>Strategy & Setup</h3>
             </div>
+            {% if config.MONTHLY_EXPIRIES_ONLY %}
+            <div class="monthly-badge" title="Monthly Expiry Mode: Strictly Positional Multi-Day Strategy (monthly_45_15)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span>MONTHLY EXPIRY ONLY</span>
+            </div>
+            {% else %}
             <div class="engine-tabs">
                 <button class="engine-tab active" data-engine="INTRADAY" title="5-Minute Confirmation, 15:20 Cutoff">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -21,6 +27,7 @@
                     <span>POSITIONAL</span>
                 </button>
             </div>
+            {% endif %}
         </div>
         <div class="card-body">
             <div class="setup-horizontal-deck">
@@ -38,8 +45,8 @@
                             <div class="as-action-group">
                                 <button class="btn-3d btn-as-toggle" id="btn-toggle-auto-trade" title="Toggle autonomous paper trade execution on each market update cycle">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
-                                    <span class="as-status-dot paused" id="as-status-dot"></span>
-                                    <span id="as-toggle-label">Auto-Trade: OFF</span>
+                                    <span class="as-status-dot active" id="as-status-dot"></span>
+                                    <span id="as-toggle-label">Auto-Trade: ON</span>
                                 </button>
                                 <button class="btn-3d btn-as-execute" id="btn-auto-execute-now" title="Instantly execute all data-selected strategies in paper mode" disabled>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -75,6 +82,10 @@
                     <div class="setup-detail-box" id="setup-detail-box">
                         <div class="setup-status-row">
                             <span class="setup-strat-title" id="setup-strat-title">Iron Condor</span>
+                            <div class="wing-toggle-group" id="wing-toggle-group" title="Select Wing Width (50 pt tight vs 100 pt standard FYERS match)">
+                                <button type="button" class="btn-wing-toggle" data-wing="50">50 pt wing</button>
+                                <button type="button" class="btn-wing-toggle active" data-wing="100">100 pt wing (FYERS)</button>
+                            </div>
                             <span class="eligibility-chip" id="setup-eligibility-chip">WAIT / NO TRADE</span>
                         </div>
 

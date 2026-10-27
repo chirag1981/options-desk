@@ -7,8 +7,12 @@ let currentFilter = 'ALL';
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     fetchJournalData();
+    fetchPlanAdherenceReport();
     // Auto-sync journal every 10 seconds
-    setInterval(fetchJournalData, 10000);
+    setInterval(() => {
+        fetchJournalData();
+        fetchPlanAdherenceReport();
+    }, 10000);
 });
 
 function initFilters() {
@@ -100,3 +104,85 @@ async function fetchJournalData() {
         console.warn("Journal fetch error:", err);
     }
 }
+
+async function fetchPlanAdherenceReport() {
+    try {
+        const res = await fetch('/api/discipline/report');
+        const json = await res.json();
+        if (json.status !== 'success' || !json.report) return;
+
+        const rep = json.report;
+
+        // Header chip
+        const chip = document.getElementById('plan-adherence-rate-chip');
+        if (chip) {
+            chip.textContent = `Adherence: ${rep.plan_adherence_rate_pct.toFixed(1)}%`;
+            chip.className = `status-chip ${rep.plan_adherence_rate_pct >= 95 ? 'chip-green' : 'chip-red'}`;
+        }
+
+        // Summary counters
+        const plansEl = document.getElementById('adherence-total-plans');
+        if (plansEl) plansEl.textContent = rep.total_plans_created || 0;
+
+        const violEl = document.getElementById('adherence-blocked-violations');
+        if (violEl) violEl.textContent = rep.total_violations_blocked || 0;
+
+        const violBreakEl = document.getElementById('adherence-violation-breakdown');
+        if (violBreakEl && rep.violations_by_rule) {
+            const rules = Object.entries(rep.violations_by_rule);
+            if (rules.length > 0) {
+                violBreakEl.textContent = rules.map(([r, c]) => `${r}: ${c}`).join(', ');
+            } else {
+                violBreakEl.textContent = "Zero blocked violations";
+            }
+        }
+
+        const excEl = document.getElementById('adherence-exceeded-count');
+        if (excEl) {
+            const count = (rep.trades_exceeding_plan || []).length;
+            excEl.textContent = count;
+            excEl.style.color = count > 0 ? '#ef4444' : '#10b981';
+        }
+
+        // Audit table
+        const tbody = document.getElementById('adherence-records-tbody');
+        if (!tbody) return;
+
+        const records = rep.trade_adherence_records || [];
+        if (records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No trade plans recorded yet.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        records.forEach(rec => {
+            const tr = document.createElement('tr');
+            const pnl = rec.actual_pnl_inr;
+            const hasExceeded = rec.exceeded_planned_loss;
+
+            tr.innerHTML = `
+                <td class="font-mono">#${rec.position_id}</td>
+                <td>${rec.expiry}</td>
+                <td class="font-mono">${rec.net_credit_pts.toFixed(2)} pts</td>
+                <td class="font-mono text-muted">₹${rec.planned_loss_exit_inr.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                <td class="font-mono text-muted">₹${rec.max_loss_inr.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                <td class="font-mono font-bold ${pnl !== null ? (pnl >= 0 ? 'text-green' : 'text-red') : 'text-muted'}">
+                    ${pnl !== null ? `${pnl >= 0 ? '+' : ''}₹${pnl.toLocaleString('en-IN', {minimumFractionDigits: 2})}` : 'Active'}
+                </td>
+                <td>
+                    <span class="status-chip ${hasExceeded ? 'chip-red' : 'chip-green'}">
+                        ${hasExceeded ? 'EXCEEDED PLAN' : 'ADHERED'}
+                    </span>
+                </td>
+                <td style="font-size:0.8rem; color:${hasExceeded ? '#ef4444' : '#888'};">
+                    ${rec.exceeded_cause || rec.exit_reason || 'In Progress'}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+    } catch (err) {
+        console.warn("Plan adherence fetch error:", err);
+    }
+}
+

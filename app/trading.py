@@ -175,6 +175,20 @@ class TransactionCostEngine:
         breakdown = cls.calculate_order_costs_breakdown(legs, lots=lots, trade_date=trade_date)
         return round(breakdown["total"], 2)
 
+    @classmethod
+    def calculate_single_order_costs(
+        cls,
+        action: str,
+        price: float,
+        quantity: int,
+        as_of_date: Optional[date] = None,
+    ) -> Dict[str, float]:
+        """Calculates itemized statutory fees for a single order leg."""
+        leg = {"action": action.upper(), "price": price, "quantity": quantity}
+        breakdown = cls.calculate_order_costs_breakdown([leg], lots=1, trade_date=as_of_date)
+        breakdown["total_costs"] = breakdown["total"]
+        return breakdown
+
 
 
 class PaperTradingManager:
@@ -225,6 +239,16 @@ class PaperTradingManager:
                 if existing:
                     return False, f"An open position for {candidate.strategy_id} ({candidate.engine_type}) already exists (ID: #{existing.id}). Duplicate entry blocked.", None
 
+                # Discipline Layer: Validate & construct TradePlan (enforcing <= 2.0% capital risk)
+                from app.discipline import DisciplineRulesEngine
+                plan_ok, plan_err, trade_plan = DisciplineRulesEngine.create_trade_plan(
+                    candidate=candidate,
+                    capital=Config.TOTAL_ACCOUNT_EQUITY,
+                    max_loss_pct_limit=2.0,
+                )
+                if not plan_ok:
+                    return False, f"Discipline trade plan rejected: {plan_err}", None
+
                 # 1. Calculate itemized entry costs
                 legs_data = [
                     {"action": l.action, "price": l.bid if l.action == "SELL" else l.ask, "quantity": l.quantity}
@@ -269,6 +293,8 @@ class PaperTradingManager:
                 )
                 db.session.add(position)
                 db.session.flush()
+                trade_plan.position_id = position.id
+                db.session.add(trade_plan)
 
                 # 4. Create individual PositionLeg records with full quote evidence
                 data_src = getattr(candidate, "data_status", "FYERS_LIVE")
@@ -376,8 +402,30 @@ class PaperTradingManager:
                 today_str = now_dt.strftime("%d-%b-%Y").upper()
                 is_expiry_day = (pos.expiry.upper() in (today_str, now_dt.strftime("%Y-%m-%d")))
 
+                # Discipline Layer Hard Exits (PROFIT_TAKE, PLANNED_LOSS_EXIT, THESIS_BREAK, TIME_EXIT)
+                from app.discipline import DisciplineRulesEngine
+                plan = getattr(pos, "trade_plan", None)
+                disc_exit = None
+                if plan:
+                    try:
+                        exp_dt = datetime.strptime(pos.expiry, "%d-%b-%Y")
+                        curr_dte = max(0.0, (exp_dt.date() - now_dt.date()).days)
+                    except Exception:
+                        curr_dte = 30.0
+
+                    disc_exit = DisciplineRulesEngine.evaluate_discipline_exits(
+                        position=pos,
+                        plan=plan,
+                        current_spot=spot_price,
+                        current_pnl_inr=pos.current_pnl_inr,
+                        current_dte=curr_dte,
+                        is_expiry_day=is_expiry_day,
+                    )
+
+                if disc_exit:
+                    cls.close_position(pos.id, exit_spot=spot_price, reason=disc_exit[0])
                 # 1. Target Check
-                if pos.current_net_debit_pts <= pos.target_credit_pts:
+                elif pos.current_net_debit_pts <= pos.target_credit_pts:
                     cls.close_position(pos.id, exit_spot=spot_price, reason="TARGET_HIT")
                 # 2. Stop Loss Check
                 elif pos.current_net_debit_pts >= pos.stop_loss_pts:
@@ -489,6 +537,10 @@ class PaperTradingManager:
 
             db.session.commit()
 
+            # Finalize Discipline Trade Plan outcome audit
+            from app.discipline import DisciplineRulesEngine
+            DisciplineRulesEngine.finalize_trade_outcome(pos.id, net_pnl, reason)
+
             # If stopped out with a loss, trigger cooldown
             if net_pnl < 0:
                 PortfolioRiskManager.register_loss_exit(now_dt)
@@ -507,11 +559,13 @@ class AutoTradeEngine:
     Manages automatic execution of data-selected defined-risk spreads in paper trading.
     Enforces risk guards, duplicate prevention, and dynamic UI toggle.
     """
-    _auto_trade_enabled: bool = False
+    _auto_trade_enabled: Optional[bool] = None
 
     @classmethod
     def is_enabled(cls) -> bool:
-        return cls._auto_trade_enabled or getattr(Config, "AUTO_TRADE_ENABLED", False)
+        if cls._auto_trade_enabled is not None:
+            return cls._auto_trade_enabled
+        return getattr(Config, "AUTO_TRADE_ENABLED", True)
 
     @classmethod
     def set_enabled(cls, enabled: bool) -> bool:
@@ -566,7 +620,7 @@ class AutoTradeEngine:
                 continue
 
             # Execute Paper Trade
-            success, msg, pos = PaperTradingManager.execute_candidate(candidate)
+            success, msg, pos = PaperTradingManager.execute_candidate(candidate, analysis=analysis)
             if success and pos:
                 log.info(f"⚡ AUTO-TRADE EXECUTED: Position #{pos.id} {pos.strategy_name} ({pos.engine_type})")
                 executed.append(pos.to_dict())
@@ -613,7 +667,7 @@ class AutoTradeEngine:
                 risk_blocked.append(f"{candidate.strategy_name} ({candidate.engine_type}): {'; '.join(risk_eval.rejection_reasons)}")
                 continue
 
-            success, msg, pos = PaperTradingManager.execute_candidate(candidate)
+            success, msg, pos = PaperTradingManager.execute_candidate(candidate, analysis=analysis)
             if success and pos:
                 log.info(f"MANUAL 1-CLICK AUTO-EXECUTE: Position #{pos.id} {pos.strategy_name} ({pos.engine_type})")
                 executed.append(pos.to_dict())

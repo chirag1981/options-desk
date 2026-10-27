@@ -61,6 +61,7 @@ class SpreadCandidate:
     confidence_score: float = 0.0
     rationale: str = ""
     spot_price: float = 0.0
+    data_status: Optional[str] = None
 
     @property
     def has_uncovered_short(self) -> bool:
@@ -149,9 +150,12 @@ class StrategyBuilder:
         chain: Dict[float, Dict[str, Any]],
         engine_type: str = "INTRADAY",
         lots: int = 1,
+        wing_width: Optional[float] = None,
     ) -> SpreadCandidate:
         """
         Builds self-contained 4-leg Iron Condor (Put Spread wing + Call Spread wing).
+        Selects short strikes dynamically based on strike-wise Open Interest change (ΔOI),
+        institutional writing defense zones, and cumulative support/resistance walls.
         Strictly requires BALANCED_RANGE or neutral regime with positive risk/reward.
         """
         from app.contracts import ContractRegistry
@@ -168,13 +172,115 @@ class StrategyBuilder:
         series_lot_size = ContractRegistry.get_contract_lot_size("NIFTY", analysis.expiry)
         lot_size = series_lot_size * lots
 
-        # 1. Put Wing Strikes: Short Put at/below S1, Long Put 1 step lower
-        short_put_strike = math.floor(s1 / step) * step
-        long_put_strike = short_put_strike - step
+        # Determine effective wing width
+        if wing_width is None or wing_width <= 0:
+            actual_wing = float(getattr(Config, "DEFAULT_WING_WIDTH", 50.0))
+        else:
+            actual_wing = float(wing_width)
+        actual_wing = max(actual_wing, step)
+        actual_wing = round(actual_wing / step) * step
 
-        # 2. Call Wing Strikes: Short Call at/above R1, Long Call 1 step higher
-        short_call_strike = math.ceil(r1 / step) * step
-        long_call_strike = short_call_strike + step
+        # --- Dynamic Strike Selection based on strike-wise Open Interest Change (ΔOI) ---
+        put_oi_insights = []
+        call_oi_insights = []
+
+        # 1. Put Wing: Seek active institutional Put writing defense zone below spot
+        base_short_put = math.floor(s1 / step) * step if s1 > 0 else (math.floor(spot / step) * step - step)
+        s1_quote = chain.get(s1, {}).get("PE", {})
+        s1_pe_chg = int(s1_quote.get("change_oi") or 0)
+        s1_unwinding = (s1 > 0 and s1_pe_chg < 0)
+
+        eligible_puts = []
+        for s_raw, quotes in chain.items():
+            stk = float(s_raw)
+            if stk <= spot and (spot - stk) >= Config.MIN_SPOT_CUSHION_PTS:
+                pe_quote = quotes.get("PE") or {}
+                if (stk - actual_wing) in chain or chain.get(stk - actual_wing):
+                    pe_oi = int(pe_quote.get("oi") or 0)
+                    pe_chg = int(pe_quote.get("change_oi") or 0)
+                    eligible_puts.append((stk, pe_chg, pe_oi))
+
+        if eligible_puts:
+            if s1_unwinding:
+                # If S1 has unwinding, step short put OTM below S1 to avoid breakout risk
+                safer_puts = [p for p in eligible_puts if p[0] < s1]
+                target_puts = safer_puts if safer_puts else eligible_puts
+                put_oi_insights.append(f"Put unwinding at S1 ({int(s1)} PE, ΔOI: {s1_pe_chg:,}) -> shifted short put OTM")
+            else:
+                target_puts = eligible_puts
+
+            positive_puts = [p for p in target_puts if p[1] > 0]
+            if positive_puts:
+                # Select the strike with strongest active Put writing defense, breaking ties by cumulative OI
+                positive_puts.sort(key=lambda x: (x[1], x[2]), reverse=True)
+                selected_put_strike = positive_puts[0][0]
+                put_oi_insights.append(f"Active Put writing support at {int(selected_put_strike)} PE (ΔOI: +{positive_puts[0][1]:,})")
+            else:
+                target_puts.sort(key=lambda x: x[2], reverse=True)
+                selected_put_strike = target_puts[0][0]
+        else:
+            selected_put_strike = base_short_put
+
+        short_put_strike = selected_put_strike
+
+        # 2. Call Wing: Seek active institutional Call writing defense zone above spot
+        base_short_call = math.ceil(r1 / step) * step if r1 > 0 else (math.ceil(spot / step) * step + step)
+        r1_quote = chain.get(r1, {}).get("CE", {})
+        r1_ce_chg = int(r1_quote.get("change_oi") or 0)
+        r1_unwinding = (r1 > 0 and r1_ce_chg < 0)
+
+        eligible_calls = []
+        for s_raw, quotes in chain.items():
+            stk = float(s_raw)
+            if stk >= spot and (stk - spot) >= Config.MIN_SPOT_CUSHION_PTS:
+                ce_quote = quotes.get("CE") or {}
+                if (stk + actual_wing) in chain or chain.get(stk + actual_wing):
+                    ce_oi = int(ce_quote.get("oi") or 0)
+                    ce_chg = int(ce_quote.get("change_oi") or 0)
+                    eligible_calls.append((stk, ce_chg, ce_oi))
+
+        if eligible_calls:
+            if r1_unwinding:
+                # If R1 has unwinding, step short call OTM above R1 to avoid breakout risk
+                safer_calls = [c for c in eligible_calls if c[0] > r1]
+                target_calls = safer_calls if safer_calls else eligible_calls
+                call_oi_insights.append(f"Call unwinding at R1 ({int(r1)} CE, ΔOI: {r1_ce_chg:,}) -> shifted short call OTM")
+            else:
+                target_calls = eligible_calls
+
+            positive_calls = [c for c in target_calls if c[1] > 0]
+            if positive_calls:
+                # Select the strike with strongest active Call writing resistance, breaking ties by cumulative OI
+                positive_calls.sort(key=lambda x: (x[1], x[2]), reverse=True)
+                selected_call_strike = positive_calls[0][0]
+                call_oi_insights.append(f"Active Call writing resistance at {int(selected_call_strike)} CE (ΔOI: +{positive_calls[0][1]:,})")
+            else:
+                target_calls.sort(key=lambda x: x[2], reverse=True)
+                selected_call_strike = target_calls[0][0]
+        else:
+            selected_call_strike = base_short_call
+
+        # In historical replay mode, preserve exact baseline strike calculation for deterministic backtest reproduction
+        if getattr(analysis, "data_status", "") == "HISTORICAL_REPLAY":
+            short_put_strike = base_short_put
+            short_call_strike = base_short_call
+        else:
+            short_put_strike = selected_put_strike
+            short_call_strike = selected_call_strike
+
+            # 3. Writer Momentum Directional Cushion:
+            if analysis.writer_momentum == "BEARISH_CALL_WRITING":
+                if (spot - short_put_strike) < 1.5 * Config.MIN_SPOT_CUSHION_PTS:
+                    short_put_strike -= step
+                    put_oi_insights.append("Bearish call writer pressure -> cushioned Put wing 1 strike further OTM")
+            elif analysis.writer_momentum == "BULLISH_PUT_WRITING":
+                if (short_call_strike - spot) < 1.5 * Config.MIN_SPOT_CUSHION_PTS:
+                    short_call_strike += step
+                    call_oi_insights.append("Bullish put writer pressure -> cushioned Call wing 1 strike further OTM")
+
+        # 4. Long Wing Strikes based on actual wing width
+        long_put_strike = short_put_strike - actual_wing
+        long_call_strike = short_call_strike + actual_wing
 
         # Validate contract specifications
         for stk in (short_put_strike, long_put_strike, short_call_strike, long_call_strike):
@@ -231,18 +337,18 @@ class StrategyBuilder:
 
         if put_credit < Config.MIN_NET_CREDIT_PTS:
             rejections.append(f"Net credit ({put_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
-        put_ratio = (put_credit / step * 100.0) if step > 0 else 0.0
+        put_ratio = (put_credit / actual_wing * 100.0) if actual_wing > 0 else 0.0
         if put_ratio < Config.MIN_CREDIT_SPREAD_PCT:
             rejections.append(f"Credit ratio ({put_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
 
         if call_credit < Config.MIN_NET_CREDIT_PTS:
             rejections.append(f"Net credit ({call_credit:.2f} pts) below minimum {Config.MIN_NET_CREDIT_PTS:.2f} pts.")
-        call_ratio = (call_credit / step * 100.0) if step > 0 else 0.0
+        call_ratio = (call_credit / actual_wing * 100.0) if actual_wing > 0 else 0.0
         if call_ratio < Config.MIN_CREDIT_SPREAD_PCT:
             rejections.append(f"Credit ratio ({call_ratio:.1f}%) below minimum {Config.MIN_CREDIT_SPREAD_PCT:.1f}% of spread width.")
 
         combined_credit = round(put_credit + call_credit, 2)
-        wing_width = step
+        wing_width = actual_wing
 
         if combined_credit >= wing_width:
             rejections.append(f"Combined credit ({combined_credit:.2f} pts) cannot equal or exceed wing width ({wing_width:.2f} pts).")
@@ -300,9 +406,16 @@ class StrategyBuilder:
         breakevens = [round(short_put_strike - combined_credit, 1), round(short_call_strike + combined_credit, 1)]
 
         is_eligible = (len(rejections) == 0 and len(legs) == 4)
+        oi_context = []
+        if put_oi_insights:
+            oi_context.append(put_oi_insights[-1])
+        if call_oi_insights:
+            oi_context.append(call_oi_insights[-1])
+        oi_suffix = f" [{'; '.join(oi_context)}]" if oi_context else ""
+
         rationale = (
             f"Iron Condor 4-Leg: Put wing {int(short_put_strike)}/{int(long_put_strike)} PE, "
-            f"Call wing {int(short_call_strike)}/{int(long_call_strike)} CE. "
+            f"Call wing {int(short_call_strike)}/{int(long_call_strike)} CE.{oi_suffix} "
             f"Net Credit: {combined_credit:.2f} pts (₹{max_profit_inr:,.2f}), Max Loss: ₹{max_loss_inr:,.2f}."
         ) if is_eligible else f"Rejections: {'; '.join(rejections)}"
 
@@ -327,6 +440,7 @@ class StrategyBuilder:
             confidence_score=analysis.confidence_score,
             rationale=rationale,
             spot_price=analysis.spot_price,
+            data_status=getattr(analysis, "data_status", None),
         )
 
     @classmethod
@@ -371,6 +485,7 @@ class StrategyBuilder:
             confidence_score=0.0,
             rationale=f"Rejection: {'; '.join(rejections)}",
             spot_price=analysis.spot_price,
+            data_status=getattr(analysis, "data_status", None),
         )
 
 
@@ -383,7 +498,7 @@ class IntradayEngine:
     engine_type = "INTRADAY"
 
     @classmethod
-    def evaluate(cls, analysis: MarketAnalysisResult, chain: Dict[float, Dict[str, Any]]) -> List[SpreadCandidate]:
+    def evaluate(cls, analysis: MarketAnalysisResult, chain: Dict[float, Dict[str, Any]], wing_width: float = 100.0) -> List[SpreadCandidate]:
         candidates = []
         if analysis and analysis.timestamp:
             ts_str = str(analysis.timestamp).strip()
@@ -407,7 +522,7 @@ class IntradayEngine:
 
         # Generate candidates based on market regime
         if analysis.market_regime == "BALANCED_RANGE":
-            candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY"))
+            candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY", wing_width=wing_width))
         else:
             candidates.append(StrategyBuilder._empty_candidate(
                 "NO_REGIME_MATCH", "Intraday Engine", "INTRADAY", analysis,
@@ -426,7 +541,7 @@ class PositionalEngine:
     engine_type = "POSITIONAL"
 
     @classmethod
-    def evaluate(cls, analysis: MarketAnalysisResult, chain: Dict[float, Dict[str, Any]]) -> List[SpreadCandidate]:
+    def evaluate(cls, analysis: MarketAnalysisResult, chain: Dict[float, Dict[str, Any]], wing_width: float = 100.0) -> List[SpreadCandidate]:
         candidates = []
 
         # Positional requires higher confidence threshold (>= 75%)
@@ -437,7 +552,7 @@ class PositionalEngine:
             )]
 
         if analysis.market_regime == "BALANCED_RANGE":
-            candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL"))
+            candidates.append(StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL", wing_width=wing_width))
         else:
             candidates.append(StrategyBuilder._empty_candidate(
                 "NO_REGIME_MATCH", "Positional Engine", "POSITIONAL", analysis,
@@ -492,6 +607,7 @@ class AutoStrategySelector:
         cls,
         analysis: MarketAnalysisResult,
         chain: Dict[float, Dict[str, Any]],
+        wing_width: float = 100.0,
     ) -> AutoSelectionResult:
         if analysis and analysis.timestamp:
             ts_str = str(analysis.timestamp).strip()
@@ -510,13 +626,14 @@ class AutoStrategySelector:
         # 1. Evaluate approved strategy (Iron Condor) on both Intraday and Positional horizons
         candidates_with_score: List[Tuple[SpreadCandidate, float, str]] = []
 
-        ic_intra = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY")
-        ic_pos = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL")
+        ic_intra = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="INTRADAY", wing_width=wing_width)
+        ic_pos = StrategyBuilder.build_iron_condor(analysis, chain, engine_type="POSITIONAL", wing_width=wing_width)
         score_ic, rat_ic = cls._score_iron_condor(analysis, ic_intra)
-        if ic_intra.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
+        is_replay = getattr(analysis, "data_status", "") == "HISTORICAL_REPLAY"
+        if (not Config.MONTHLY_EXPIRIES_ONLY or is_replay) and ic_intra.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
             candidates_with_score.append((ic_intra, score_ic, rat_ic))
-        if ic_pos.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
-            candidates_with_score.append((ic_pos, score_ic * 0.95, rat_ic))
+        if (not is_replay) and ic_pos.is_eligible and analysis.market_regime in ("BALANCED_RANGE", "SIDEWAYS"):
+            candidates_with_score.append((ic_pos, score_ic, rat_ic))
 
         # Sort eligible candidates by suitability score
         candidates_with_score.sort(key=lambda x: x[1], reverse=True)

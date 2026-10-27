@@ -37,7 +37,9 @@ class Config:
     """Base application and trading configuration."""
     SECRET_KEY = _resolve_secret_key()
     INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
+    HISTORICAL_DATA_DIR = os.path.join(INSTANCE_DIR, "historical_data")
     os.makedirs(INSTANCE_DIR, exist_ok=True)
+    os.makedirs(HISTORICAL_DATA_DIR, exist_ok=True)
 
     # Database
     SQLALCHEMY_DATABASE_URI = os.environ.get(
@@ -105,6 +107,7 @@ class Config:
         return cls.get_max_daily_loss_inr()
 
     # Spread Quality Filters
+    DEFAULT_WING_WIDTH: float = float(os.environ.get("WING_WIDTH", "50.0"))
     MIN_NET_CREDIT_PTS = 10.0               # Minimum net credit for 50-wide spread
     MIN_CREDIT_SPREAD_PCT = 18.0            # Net credit must be >= 18% of spread width
     MIN_SPOT_CUSHION_PTS = 20.0             # Short strike must be >= 20 pts from spot
@@ -127,11 +130,15 @@ class Config:
     CLEARING_CHARGES_PCT = 0.0             # Nil (self-clearing via NSE Clearing Limited)
     GST_PCT = 0.18                         # 18% on (Brokerage + Exchange + SEBI + IPFT)
 
-    # Auto-Trading Control
-    AUTO_TRADE_ENABLED: bool = False
+    # Auto-Trading Control (Defaults to ON for Paper Trading)
+    AUTO_TRADE_ENABLED: bool = os.environ.get("AUTO_TRADE_ENABLED", "1").lower() in ("1", "true", "yes")
 
     # Signal Logging Deduplication & Heartbeat
     SIGNAL_HEARTBEAT_MINS: int = int(os.environ.get("SIGNAL_HEARTBEAT_MINS", 15))
     SIGNAL_NET_CREDIT_TOLERANCE_PTS: float = float(os.environ.get("SIGNAL_NET_CREDIT_TOLERANCE_PTS", 0.5))
+
+    # Strategy & Expiry Policy (Monthly Expiry Enforcement)
+    MONTHLY_EXPIRIES_ONLY: bool = os.environ.get("MONTHLY_EXPIRIES_ONLY", "1").lower() in ("1", "true", "yes")
+    ACTIVE_STRATEGY_PROFILE: str = os.environ.get("STRATEGY_PROFILE", "monthly_45_15")
 
 

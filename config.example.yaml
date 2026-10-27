@@ -1,0 +1,80 @@
+# config.example.yaml — Parameter Configuration for NIFTY Iron Condor Paper-Trading System
+# Zero magic numbers: All trading parameters, risk ceilings, and adjustments live here.
+
+system:
+  symbol: "NIFTY"
+  index_fyers_symbol: "NSE:NIFTY50-INDEX"
+  vix_fyers_symbol: "NSE:INDIAVIX-INDEX"
+  broker_mode: "PAPER" # Strict default: 'PAPER' (Live order routing prohibited)
+  monthly_expiries_only: true # Enforce Monthly Expiry Only
+  active_profile: "monthly_45_15"
+  interest_rate: 0.07  # 7.0% risk-free rate
+  dividend_yield: 0.013 # 1.3% dividend yield
+  capital: 1000000.0   # Account equity ₹10,00,000
+
+profiles:
+  monthly_45_15:
+    enabled: true
+    target_dte: 45
+    min_dte: 40
+    max_dte: 50
+    entry_time_ist: "15:05"
+    target_short_delta: 0.30
+    target_long_delta: 0.17
+    max_wing_width_pts: 300.0
+    max_loss_credit_multiplier: 2.0 # 1:2 Rule: Max loss <= 2x net credit
+    take_profit_pct: 50.0           # Exit at +50% of entry credit
+    stop_loss_pct: 100.0            # Exit at -100% of entry credit
+    time_exit_dte: 15.0             # Exit when DTE <= 15 days
+
+  weekly_filtered:
+    enabled: false                  # Disabled when monthly_expiries_only is true
+    min_dte: 2.0
+    max_dte: 5.0
+    short_delta_target: 0.18        # 15-20 delta
+    expected_move_multiplier: 1.0   # 1.0x Expected Move = Spot * IV * sqrt(DTE/365)
+    wing_width_pts: 100.0           # 100-200 pts
+    min_credit_pct_wing: 25.0       # Minimum net credit >= 25% of wing width
+    max_loss_pct_capital: 2.0       # Max loss <= 2.0% of account capital
+    take_profit_pct: 50.0           # Exit at +50% of entry credit
+    stop_loss_pct: 150.0            # Exit at -150% of entry credit
+    time_exit_dte: 1.0              # Exit at 1 DTE (no expiration day gamma risk)
+
+filters:
+  range_filter:
+    enabled: true
+    adx_max: 25.0
+    range_pct_max: 3.0
+    spot_middle_band_pct: 60.0
+  volatility_filter:
+    enabled: true
+    vix_spike_3d_max_pct: 15.0
+    vix_percentile_low: 15.0
+    vix_percentile_high: 85.0
+  events_filter:
+    enabled: true
+    events_file: "events.csv"
+    min_severity: 3
+  direction_guard:
+    enabled: true
+    direction_pct_5d_max: 2.5
+
+adjustments:
+  enabled: true
+  monitoring_interval_sec: 60
+  market_hours_start: "09:20"
+  market_hours_end: "15:20"
+  adj_delta: 0.28                   # Trigger when short delta >= 0.28
+  distance_covered_trigger_pct: 70.0 # Trigger when 70% distance covered to short
+  pnl_loss_trigger_pct: 50.0        # Trigger when open loss >= 50% max loss
+  vix_spike_adj_pct: 15.0           # Trigger when VIX up >= 15% with losing trade
+  max_adjustments_per_trade: 2
+  min_dte_to_adjust: 3.0            # Never adjust when DTE <= 3
+  cost_cap_pct_remaining_credit: 20.0 # Reject adjustment if fee > 20% credit
+
+broker_realism:
+  fill_mode: "bid_ask_plus_slip"    # Options: 'bid_ask_plus_slip', 'mid_plus_slip'
+  slippage_pts_per_leg: 0.5
+  max_spread_pct: 15.0
+  brokerage_per_order: 20.0
+  stt_sell_rate: 0.0010             # Statutory STT on option sell turnover

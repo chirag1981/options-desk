@@ -2,8 +2,9 @@
  * app/static/js/dashboard.js — Interactive Client Controller for 6 Dashboard Panels
  */
 
-let currentEngine = 'INTRADAY';
+let currentEngine = 'POSITIONAL';
 let currentStrategy = 'IRON_CONDOR';
+let currentWingWidth = 100;
 let currentCandidates = {};
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -13,8 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. Active Open Positions auto-refreshed every 1 Minute (60,000 ms)
     setInterval(fetchPositionsData, 60000);
 
-    // 2. Entire project data (Market Regime, OI Structure, Strategy Candidates, Setup) auto-refreshed every 3 Minutes (180,000 ms)
-    setInterval(fetchProjectData, 180000);
+    // 2. Entire project data (Market Regime, OI Structure, Strategy Candidates, Setup) auto-refreshed every 30 Seconds
+    setInterval(fetchProjectData, 30000);
 });
 
 function initControls() {
@@ -25,6 +26,9 @@ function initControls() {
             tab.classList.add('active');
             currentEngine = tab.dataset.engine;
             renderStrategySetup();
+            if (currentCandidates && currentCandidates.auto_selection) {
+                renderAutoSelection(currentCandidates.auto_selection, currentCandidates.auto_trade_enabled);
+            }
         });
     });
 
@@ -36,6 +40,20 @@ function initControls() {
             pill.classList.add('active');
             currentStrategy = pill.dataset.strat;
             renderStrategySetup();
+        });
+    });
+
+    // Wing Width Selector Controls (50 pt tight vs 100 pt standard FYERS match)
+    document.querySelectorAll('.btn-wing-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const w = parseInt(e.currentTarget.dataset.wing);
+            if (w) {
+                currentWingWidth = w;
+                document.querySelectorAll('.btn-wing-toggle').forEach(b => {
+                    b.classList.toggle('active', parseInt(b.dataset.wing) === currentWingWidth);
+                });
+                fetchProjectData();
+            }
         });
     });
 
@@ -72,7 +90,7 @@ function initControls() {
  */
 async function fetchProjectData() {
     try {
-        const candRes = await fetch('/api/candidates', { cache: 'no-store' }).then(r => r.json());
+        const candRes = await fetch(`/api/candidates?wing_width=${currentWingWidth}`, { cache: 'no-store' }).then(r => r.json());
         if (candRes.status === 'success' && candRes.analysis) {
             currentCandidates = candRes;
             renderMarketRegime(candRes.analysis);
@@ -369,16 +387,22 @@ function renderAutoSelection(sel, isEnabled) {
 }
 
 function renderStrategySetup() {
-    // First look in specific engine candidates
+    // Look in specific engine candidates first, matching both strategy and engine
     const engineCands = (currentEngine === 'POSITIONAL') ? currentCandidates.positional : currentCandidates.intraday;
-    let cand = engineCands ? engineCands.find(c => c.strategy_id === currentStrategy) : null;
+    let cand = engineCands ? engineCands.find(c => c.strategy_id === currentStrategy && (c.engine_type === currentEngine || !c.engine_type)) : null;
     if (!cand && currentCandidates.previews) {
-        cand = currentCandidates.previews.find(c => c.strategy_id === currentStrategy);
+        cand = currentCandidates.previews.find(c => c.strategy_id === currentStrategy && c.engine_type === currentEngine);
+        if (!cand) {
+            cand = currentCandidates.previews.find(c => c.strategy_id === currentStrategy);
+        }
     }
     if (!cand) return;
 
     const titleEl = document.getElementById('setup-strat-title');
-    if (titleEl) titleEl.textContent = `${cand.strategy_name} (${currentEngine})`;
+    if (titleEl) {
+        const expLabel = cand.expiry ? ` • ${cand.expiry}` : '';
+        titleEl.textContent = `${cand.strategy_name} (Monthly${expLabel})`;
+    }
 
     const eligChip = document.getElementById('setup-eligibility-chip');
     const btnExecute = document.getElementById('btn-execute-paper');
